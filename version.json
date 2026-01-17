@@ -1,0 +1,14 @@
+{
+  "version": "0.3.0",
+  "updated": "2026-01-10",
+  "changelog": "Artifacts system - create guides, learnings, workspaces with vibe_create_artifact",
+  "features": [
+    "vibe_create_artifact - Create social artifacts from conversations",
+    "vibe_view_artifact - View and list artifacts",
+    "Dual-write to KV + Postgres",
+    "HTML rendering at /a/:slug",
+    "Structured blocks: places, schedules, checklists, callouts"
+  ],
+  "breaking": false,
+  "updateUrl": "https://www.slashvibe.dev/api/version"
+}
