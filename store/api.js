@@ -10,6 +10,7 @@ const https = require('https');
 const http = require('http');
 const config = require('../config');
 const crypto = require('../crypto');
+const sqlite = require('./sqlite'); // V2 messaging - local persistence
 
 const API_URL = process.env.VIBE_API_URL || 'https://www.slashvibe.dev';
 
@@ -232,6 +233,25 @@ async function setVisibility(handle, visible) {
 // ============ MESSAGES ============
 
 async function sendMessage(from, to, body, type = 'dm', payload = null) {
+  // V2 MESSAGING: Save to SQLite first (optimistic UI)
+  const local_id = require('crypto').randomUUID();
+  const created_at = new Date().toISOString();
+
+  try {
+    // 1. Save to local SQLite (optimistic - before API call)
+    sqlite.saveLocalMessage({
+      local_id,
+      from_handle: from,
+      to_handle: to,
+      content: body || '',
+      created_at,
+      status: 'pending'
+    });
+  } catch (sqliteError) {
+    // Don't fail message send if SQLite fails (just log)
+    console.warn('[SQLite] Failed to save message locally:', sqliteError.message);
+  }
+
   try {
     let data;
 
@@ -271,26 +291,47 @@ async function sendMessage(from, to, body, type = 'dm', payload = null) {
 
     // Handle auth errors
     if (!result.success && result.error?.includes('Authentication')) {
+      // Mark as failed in SQLite
+      try { sqlite.updateMessageStatus(local_id, 'failed'); } catch (e) {}
       console.error('[vibe] Auth failed for message. Try `vibe init` to re-register.');
       return { error: 'auth_failed', message: 'Authentication failed. Try `vibe init` to re-register.' };
     }
 
     // Handle expired token
     if (result.statusCode === 401) {
+      // Mark as failed in SQLite
+      try { sqlite.updateMessageStatus(local_id, 'failed'); } catch (e) {}
       console.error('[vibe] Auth expired. Run browser auth to refresh token.');
       return { error: 'auth_expired', message: 'Auth expired. Run `vibe init` to refresh token.' };
     }
 
     // Handle storage errors (KV write failed)
     if (!result.success && result.error === 'storage_error') {
+      // Mark as failed in SQLite
+      try { sqlite.updateMessageStatus(local_id, 'failed'); } catch (e) {}
       console.error('[vibe] Storage error:', result.details || result.message);
       return { error: 'storage_error', message: result.message || 'Failed to save message. Please try again.' };
     }
 
     // Handle other errors
     if (!result.success && result.error) {
+      // Mark as failed in SQLite
+      try { sqlite.updateMessageStatus(local_id, 'failed'); } catch (e) {}
       console.error('[vibe] Send error:', result.error, result.message);
       return { error: result.error, message: result.message || 'Failed to send message.' };
+    }
+
+    // V2 MESSAGING: Update SQLite with server_id, thread_id and mark as sent
+    if (result.success || result.message) {
+      try {
+        // V2 Postgres: result.message.id, result.message.thread_id
+        const message = result.message || {};
+        const server_id = message.id || result.messageId || result.id || null;
+        const thread_id = message.thread_id || null;
+        sqlite.updateMessageStatus(local_id, 'sent', server_id, thread_id);
+      } catch (sqliteError) {
+        console.warn('[SQLite] Failed to update message status:', sqliteError.message);
+      }
     }
 
     // Emit list_changed notification for successful message send
@@ -304,32 +345,86 @@ async function sendMessage(from, to, body, type = 'dm', payload = null) {
     return result.message;
   } catch (e) {
     console.error('Send failed:', e.message);
+    // Mark as failed in SQLite
+    try { sqlite.updateMessageStatus(local_id, 'failed'); } catch (sqliteErr) {}
     return null;
   }
 }
 
 async function getInbox(handle) {
   try {
-    // Use unified messages endpoint - returns { inbox, unread, bySender }
+    // V2 MESSAGING: Hybrid approach - SQLite (fast) + API (sync)
+
+    // 1. Get from local SQLite first
+    let localInbox = [];
+    try {
+      localInbox = sqlite.getInboxThreads(handle);
+    } catch (sqliteError) {
+      console.warn('[SQLite] Failed to read inbox:', sqliteError.message);
+    }
+
+    // 2. Fetch from API (sync with backend)
     const result = await request('GET', `/api/messages?user=${handle}`);
 
-    // Group messages by sender into thread format
-    const bySender = result.bySender || {};
-    return Object.entries(bySender).map(([sender, messages]) => ({
-      handle: sender,
-      messages: messages.map(m => ({
-        from: m.from,
-        body: m.text,
-        timestamp: new Date(m.createdAt).getTime(),
-        read: m.read
-      })),
-      unread: messages.filter(m => !m.read).length,
-      lastMessage: messages[0]?.text,
-      lastTimestamp: new Date(messages[0]?.createdAt).getTime()
+    // V2 Postgres: result.threads[] with thread_id
+    const threads = result.threads || [];
+
+    // Merge threads into SQLite for persistence
+    if (threads.length > 0) {
+      try {
+        threads.forEach(thread => {
+          const msg = thread.last_message;
+          if (msg) {
+            sqlite.mergeServerMessages([{
+              server_id: msg.id,
+              thread_id: thread.id,  // V2 thread_id
+              from_handle: msg.from,
+              to_handle: handle === msg.from ? thread.with : handle,
+              content: msg.body,
+              created_at: msg.created_at,
+              status: 'delivered'
+            }]);
+          }
+        });
+      } catch (sqliteError) {
+        console.warn('[SQLite] Failed to merge inbox threads:', sqliteError.message);
+      }
+    }
+
+    // Return V2 format
+    return threads.map(thread => ({
+      handle: thread.with,
+      messages: thread.last_message ? [{
+        from: thread.last_message.from,
+        body: thread.last_message.body,
+        timestamp: new Date(thread.last_message.created_at).getTime(),
+        read: thread.unread === 0
+      }] : [],
+      unread: thread.unread,
+      lastMessage: thread.last_message?.body,
+      lastTimestamp: thread.last_message ? new Date(thread.last_message.created_at).getTime() : 0
     }));
   } catch (e) {
     console.error('Inbox failed:', e.message);
-    return [];
+
+    // Fallback to SQLite if API fails
+    try {
+      const localInbox = sqlite.getInboxThreads(handle);
+      return localInbox.map(thread => ({
+        handle: thread.partner,
+        messages: [thread.latestMessage].map(m => ({
+          from: m.from_handle,
+          body: m.content,
+          timestamp: new Date(m.created_at).getTime(),
+          read: m.status === 'read'
+        })),
+        unread: thread.unreadCount,
+        lastMessage: thread.latestMessage.content,
+        lastTimestamp: new Date(thread.latestMessage.created_at).getTime()
+      }));
+    } catch (sqliteError) {
+      return [];
+    }
   }
 }
 
@@ -356,18 +451,75 @@ async function getRawInbox(handle) {
 
 async function getThread(myHandle, theirHandle) {
   try {
+    // V2 MESSAGING: Hybrid approach - SQLite (fast) + API (sync)
+
+    // 1. Get from local SQLite first (instant, works offline)
+    let localMessages = [];
+    try {
+      localMessages = sqlite.getThreadMessages(myHandle, theirHandle);
+    } catch (sqliteError) {
+      console.warn('[SQLite] Failed to read thread:', sqliteError.message);
+    }
+
+    // 2. Fetch from API (sync with backend)
     const result = await request('GET', `/api/messages?user=${myHandle}&with=${theirHandle}`);
-    return (result.thread || []).map(m => ({
+
+    // V2 Postgres: result.messages[] (not result.thread)
+    const apiMessages = result.messages || result.thread || [];
+
+    // 3. Merge API messages into SQLite (for future reads)
+    if (apiMessages.length > 0) {
+      try {
+        sqlite.mergeServerMessages(apiMessages.map(m => ({
+          server_id: m.id || m.messageId,
+          thread_id: m.thread_id || null,  // V2 thread_id (if present)
+          from_handle: m.from,
+          to_handle: m.to || (m.from === myHandle ? theirHandle : myHandle),
+          content: m.body || m.text || '',  // V2 uses 'body'
+          created_at: m.created_at || m.createdAt || new Date().toISOString(),
+          status: 'delivered',
+          sent_at: m.sent_at || m.sentAt || m.created_at || m.createdAt,
+          delivered_at: m.delivered_at || m.deliveredAt || m.created_at || m.createdAt
+        })));
+      } catch (sqliteError) {
+        console.warn('[SQLite] Failed to merge messages:', sqliteError.message);
+      }
+    }
+
+    // 4. Return merged result (prefer API for latest, fallback to local)
+    const messages = apiMessages.length > 0 ? apiMessages : localMessages.map(m => ({
+      id: m.server_id,
+      from: m.from_handle,
+      to: m.to_handle,
+      body: m.content,  // V2 uses 'body'
+      created_at: m.created_at
+    }));
+
+    return messages.map(m => ({
       from: m.from,
-      isAgent: m.isAgent || m.is_agent || false, // Support both naming conventions
-      body: m.text,
+      isAgent: m.isAgent || m.is_agent || false,
+      body: m.body || m.text || m.content || '',  // V2: m.body, fallback to legacy
       payload: m.payload || null,
-      timestamp: new Date(m.createdAt).getTime(),
+      timestamp: new Date(m.created_at || m.createdAt).getTime(),
       direction: m.direction
     }));
   } catch (e) {
     console.error('Thread failed:', e.message);
-    return [];
+
+    // Fallback to SQLite if API fails
+    try {
+      const localMessages = sqlite.getThreadMessages(myHandle, theirHandle);
+      return localMessages.map(m => ({
+        from: m.from_handle,
+        isAgent: false,
+        body: m.content,
+        payload: null,
+        timestamp: new Date(m.created_at).getTime(),
+        direction: m.from_handle === myHandle ? 'sent' : 'received'
+      }));
+    } catch (sqliteError) {
+      return [];
+    }
   }
 }
 

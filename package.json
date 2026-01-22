@@ -50,6 +50,7 @@
     "README.md"
   ],
   "dependencies": {
+    "better-sqlite3": "^11.0.0",
     "crossword-layout-generator": "^0.1.1"
   }
 }
