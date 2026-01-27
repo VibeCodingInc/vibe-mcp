@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Post-install script for @brightseth/vibe
+ * Post-install script for slashvibe-mcp
  * Sets up MCP server configuration and CLAUDE.md for Claude Code
  */
 
@@ -38,17 +38,10 @@ async function setup() {
       // File doesn't exist, use default
     }
 
-    // Find where @brightseth/vibe is installed
-    const npmPrefix = process.env.npm_config_prefix || '/usr/local';
-    const mcpServerPath = path.join(npmPrefix, 'lib', 'node_modules', '@brightseth', 'vibe', 'mcp-server', 'index.js');
-
-    // Add or update vibe configuration
+    // Use npx to run slashvibe-mcp — works regardless of install location
     config.mcpServers.vibe = {
-      command: 'node',
-      args: [mcpServerPath],
-      env: {
-        VIBE_NPM_INSTALL: 'true'
-      }
+      command: 'npx',
+      args: ['-y', 'slashvibe-mcp']
     };
 
     // Write config
@@ -70,8 +63,8 @@ async function setup() {
     console.error('  {');
     console.error('    "mcpServers": {');
     console.error('      "vibe": {');
-    console.error('        "command": "node",');
-    console.error('        "args": ["/path/to/node_modules/@brightseth/vibe/mcp-server/index.js"]');
+    console.error('        "command": "npx",');
+    console.error('        "args": ["-y", "slashvibe-mcp"]');
     console.error('      }');
     console.error('    }');
     console.error('  }\n');

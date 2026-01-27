@@ -525,6 +525,8 @@ class VibeMCPServer {
 
     process.stdin.on('end', () => {
       presence.stop();
+      // Close SQLite to flush WAL and prevent corruption
+      try { require('./store/sqlite').close(); } catch (e) {}
       process.exit(0);
     });
 
