@@ -12,6 +12,100 @@ const store = require('./store');
 const prompts = require('./prompts');
 const NotificationEmitter = require('./notification-emitter');
 
+/**
+ * MCP Tool Safety Annotations
+ *
+ * Required by Anthropic's MCP Directory for Plugin/Connectors review.
+ * Each tool must declare behavioral hints:
+ *   readOnlyHint    — tool only reads data, never modifies state
+ *   destructiveHint — tool may delete data or perform irreversible actions
+ *   idempotentHint  — repeated calls with same args have no additional effect
+ *   openWorldHint   — tool interacts with external services (API, network)
+ *
+ * Spec: https://modelcontextprotocol.io/docs/concepts/tools
+ */
+const TOOL_ANNOTATIONS = {
+  // ── Read-only tools ────────────────────────────────────────────
+  // These tools only fetch and display data
+  vibe_who:            { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_inbox:          { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_recall:         { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  vibe_help:           { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  vibe_agents:         { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_feed:           { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_insights:       { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_view_artifact:  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_suggest_tags:   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_admin_inbox:    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_test:           { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_doctor:         { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_patterns:       { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_x_mentions:     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_social_inbox:   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_onboarding:     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_l2_status:      { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_reservations:   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_discover:       { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+
+  // ── Write tools (non-destructive) ─────────────────────────────
+  // These tools create, send, or modify data but don't destroy it
+  vibe_start:           { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_init:            { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_token:           { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: false },
+  vibe_migrate:         { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_ping:            { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_react:           { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_dm:              { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_open:            { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_status:          { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_context:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_summarize:       { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: false },
+  vibe_game:            { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_solo_game:       { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  vibe_party_game:      { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_tictactoe:       { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_wordassociation: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_multiplayer_game:{ readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_drawing:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_crossword:       { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_away:            { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_back:            { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_handoff:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_reserve:         { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_remember:        { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: false },
+  vibe_consent:         { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_report:          { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_invite:          { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_submit:          { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_observe:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_idea:            { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_request:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_ship:            { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_create_artifact: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_skills_exchange: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_workshop_buddy:  { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_echo:            { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_x_reply:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_social_post:     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_settings:        { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: false },
+  vibe_notifications:   { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_presence_agent:  { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_l2:              { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_shipback:        { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_bridge:          { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+
+  // ── Destructive tools ─────────────────────────────────────────
+  // These tools delete data or perform irreversible actions
+  vibe_forget:          { readOnlyHint: false, destructiveHint: true, idempotentHint: true,  openWorldHint: false },
+  vibe_release:         { readOnlyHint: false, destructiveHint: true, idempotentHint: true,  openWorldHint: true },
+  vibe_bye:             { readOnlyHint: false, destructiveHint: true, idempotentHint: true,  openWorldHint: true },
+  vibe_mute:            { readOnlyHint: false, destructiveHint: true, idempotentHint: true,  openWorldHint: true },
+  vibe_update:          { readOnlyHint: false, destructiveHint: true, idempotentHint: true,  openWorldHint: true },
+};
+
+// Default annotations for any tool not explicitly mapped
+const DEFAULT_ANNOTATIONS = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
+
 // Tools that shouldn't show presence footer (would be redundant/noisy)
 const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_test', 'vibe_update', 'vibe_settings', 'vibe_notifications'];
 
@@ -313,7 +407,10 @@ class VibeMCPServer {
           jsonrpc: '2.0',
           id,
           result: {
-            tools: Object.values(tools).map(t => t.definition)
+            tools: Object.values(tools).map(t => ({
+              ...t.definition,
+              annotations: TOOL_ANNOTATIONS[t.definition.name] || DEFAULT_ANNOTATIONS
+            }))
           }
         };
 
