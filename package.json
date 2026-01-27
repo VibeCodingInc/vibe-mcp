@@ -2,7 +2,7 @@
   "name": "slashvibe-mcp",
   "version": "0.2.8",
   "mcpName": "io.github.vibecodinginc/vibe-mcp",
-  "description": "Social layer for Claude Code - DMs, presence, and connection between AI-assisted developers",
+  "description": "Social MCP server - DMs, presence, discovery, and games for AI-assisted developers. Works with Claude Code, Cursor, VS Code, Windsurf, and any MCP client.",
   "main": "index.js",
   "bin": {
     "slashvibe-mcp": "./index.js"
@@ -12,12 +12,20 @@
   },
   "keywords": [
     "mcp",
+    "mcp-server",
+    "model-context-protocol",
     "claude-code",
+    "cursor",
+    "windsurf",
+    "vscode",
     "vibe",
     "social",
     "developer-tools",
     "ai",
-    "anthropic"
+    "anthropic",
+    "messaging",
+    "presence",
+    "multiplayer"
   ],
   "author": "Seth Goldstein <seth@slashvibe.dev>",
   "license": "MIT",

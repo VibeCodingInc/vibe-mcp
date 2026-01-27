@@ -1,11 +1,17 @@
 # /vibe MCP Server
 
-The social layer for Claude Code. DMs, presence, discovery, and games between AI developers — without leaving the terminal.
+The social layer for AI coding. DMs, presence, discovery, and games between developers — without leaving your editor.
+
+Works with Claude Code, Cursor, VS Code, Windsurf, Cline, Continue.dev, JetBrains, and any MCP-compatible client.
 
 ## Install
 
-Add to your Claude Code MCP config (`~/.claude.json` or `~/.config/claude-code/mcp.json`):
+Add to your MCP config and restart your editor:
 
+<details open>
+<summary><strong>Claude Code</strong></summary>
+
+Add to `~/.claude.json`:
 ```json
 {
   "mcpServers": {
@@ -17,7 +23,111 @@ Add to your Claude Code MCP config (`~/.claude.json` or `~/.config/claude-code/m
 }
 ```
 
-Then restart Claude Code.
+Or via CLI:
+```bash
+claude mcp add vibe -- npx -y slashvibe-mcp
+```
+</details>
+
+<details>
+<summary><strong>Cursor</strong></summary>
+
+Add to `~/.cursor/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "vibe": {
+      "command": "npx",
+      "args": ["-y", "slashvibe-mcp"]
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><strong>VS Code (GitHub Copilot)</strong></summary>
+
+Add to `.vscode/mcp.json` in your workspace:
+```json
+{
+  "servers": {
+    "vibe": {
+      "command": "npx",
+      "args": ["-y", "slashvibe-mcp"]
+    }
+  }
+}
+```
+
+Or add to your `settings.json`:
+```json
+{
+  "mcp": {
+    "servers": {
+      "vibe": {
+        "command": "npx",
+        "args": ["-y", "slashvibe-mcp"]
+      }
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><strong>Windsurf</strong></summary>
+
+Add to `~/.codeium/windsurf/mcp_config.json`:
+```json
+{
+  "mcpServers": {
+    "vibe": {
+      "command": "npx",
+      "args": ["-y", "slashvibe-mcp"]
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><strong>Cline (VS Code)</strong></summary>
+
+Open Cline > MCP Servers icon > Configure > Edit JSON, then add:
+```json
+{
+  "mcpServers": {
+    "vibe": {
+      "command": "npx",
+      "args": ["-y", "slashvibe-mcp"]
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><strong>Continue.dev</strong></summary>
+
+Create `.continue/mcpServers/vibe.json`:
+```json
+{
+  "command": "npx",
+  "args": ["-y", "slashvibe-mcp"]
+}
+```
+</details>
+
+<details>
+<summary><strong>JetBrains (IntelliJ, WebStorm, etc.)</strong></summary>
+
+Go to **Settings > Tools > AI Assistant > Model Context Protocol (MCP)** and add a new server:
+- **Command:** `npx`
+- **Arguments:** `-y slashvibe-mcp`
+
+Or import from your Claude Code config if you already have one.
+</details>
 
 ## Getting Started
 
@@ -116,13 +226,13 @@ If you prefer step-by-step:
 
 ## How It Works
 
-/vibe is an MCP server that connects Claude Code to [slashvibe.dev](https://slashvibe.dev). Your messages sync via a Postgres backend with local SQLite persistence for offline-first speed.
+/vibe is an MCP server that connects your editor to [slashvibe.dev](https://slashvibe.dev). Messages sync via a Postgres backend with local SQLite persistence for offline-first speed. Everyone using /vibe is on the same network — regardless of which editor they use.
 
 ```
-Claude Code ←→ /vibe MCP (stdio) ←→ slashvibe.dev API ←→ Other users
-                    ↕
-              Local SQLite DB
-              (~/.vibecodings/sessions.db)
+Your Editor ←→ /vibe MCP (stdio) ←→ slashvibe.dev API ←→ Other users
+                     ↕
+               Local SQLite DB
+               (~/.vibecodings/sessions.db)
 ```
 
 - **Identity** persists via GitHub OAuth — your handle follows you across sessions
