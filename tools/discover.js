@@ -329,7 +329,7 @@ The more people share, the better our matches become!`;
 
       case 'search': {
         if (!args.query) {
-          return { error: 'Please provide a search query: discover search "ai"' };
+          return { display: 'Please provide a search query: discover search "ai"' };
         }
 
         const results = await searchPeople(args.query);

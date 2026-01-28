@@ -252,7 +252,7 @@ _Need more profiles to find great partnerships._
 
       case 'offer': {
         if (!args.skills) {
-          return { error: 'Specify skills you offer: workshop-buddy offer "frontend, react"' };
+          return { display: 'Specify skills you offer: workshop-buddy offer "frontend, react"' };
         }
 
         // Update user tags with offered skills
@@ -277,7 +277,7 @@ People looking for these skills can find you via:
 
       case 'seeking': {
         if (!args.skills) {
-          return { error: 'Specify skills you need: workshop-buddy seeking "backend, devops"' };
+          return { display: 'Specify skills you need: workshop-buddy seeking "backend, devops"' };
         }
 
         const seekingSkills = args.skills.split(',').map(s => s.trim().toLowerCase());

@@ -86,7 +86,7 @@ async function handler(args) {
 
   // Default: ship
   if (!args.what) {
-    return { error: 'Please tell us what you shipped: ship "Built a new feature"' };
+    return { display: 'Please tell us what you shipped: ship "Built a new feature"' };
   }
 
   const myHandle = config.getHandle();
