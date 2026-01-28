@@ -13,7 +13,8 @@
     "lint": "node test/lint.js && npx eslint .",
     "lint:fix": "npx eslint . --fix",
     "format": "npx prettier --write \"**/*.js\" \"**/*.json\" \"**/*.md\" \"**/*.yml\"",
-    "format:check": "npx prettier --check \"**/*.js\" \"**/*.json\" \"**/*.yml\""
+    "format:check": "npx prettier --check \"**/*.js\" \"**/*.json\" \"**/*.yml\"",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "mcp",
@@ -69,6 +70,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "eslint": "^9.39.2",
-    "prettier": "^3.8.1"
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3"
   }
 }
