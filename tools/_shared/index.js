@@ -9,6 +9,31 @@
  * - Error handling
  */
 
+/**
+ * @typedef {Object} ToolResult
+ * @property {string} [display] - Formatted text to show the user
+ * @property {string} [hint] - Hint for Claude about next action
+ * @property {Object} [suggestion] - Suggested next action
+ * @property {number} [unread_count] - Unread message count
+ * @property {string} [for_handle] - Handle this result is relevant to
+ */
+
+/**
+ * @typedef {Object} ToolDefinition
+ * @property {string} name - Tool name (vibe_*)
+ * @property {string} description - Human-readable description
+ * @property {Object} inputSchema - JSON Schema for tool arguments
+ * @property {string} inputSchema.type - Always "object"
+ * @property {Object} inputSchema.properties - Argument definitions
+ * @property {string[]} [inputSchema.required] - Required argument names
+ */
+
+/**
+ * @typedef {Object} ToolModule
+ * @property {ToolDefinition} definition - Tool schema definition
+ * @property {function(Object): Promise<ToolResult>} handler - Tool handler function
+ */
+
 const config = require('../../config');
 
 // ============ INIT CHECK ============

@@ -80,6 +80,7 @@ function save(config) {
   fs.writeFileSync(PRIMARY_CONFIG, JSON.stringify(data, null, 2));
 }
 
+/** @returns {string|null} Current user handle */
 function getHandle() {
   // Prefer session-specific handle over shared config
   const sessionHandle = getSessionHandle();
@@ -89,6 +90,7 @@ function getHandle() {
   return config.handle || null;
 }
 
+/** @returns {string|null} Current user one-liner */
 function getOneLiner() {
   // Prefer session-specific one_liner over shared config
   const sessionOneLiner = getSessionOneLiner();
@@ -98,6 +100,7 @@ function getOneLiner() {
   return config.one_liner || null;
 }
 
+/** @returns {boolean} Whether user identity is set */
 function isInitialized() {
   // Check session first, then shared config
   const sessionHandle = getSessionHandle();
@@ -110,6 +113,7 @@ function isInitialized() {
 // Now stores full identity (handle + one_liner), not just sessionId
 const SESSION_FILE = path.join(VIBECODINGS_DIR, `.session_${process.pid}`);
 
+/** @returns {string} New session ID (sess_*) */
 function generateSessionId() {
   return 'sess_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 10);
 }
@@ -360,7 +364,7 @@ function setGithubActivityPrivacy(level) {
   save(config);
 }
 
-// API URL — central endpoint for all API calls
+/** @returns {string} API base URL */
 function getApiUrl() {
   return process.env.VIBE_API_URL || 'https://www.slashvibe.dev';
 }
@@ -372,10 +376,22 @@ function getApiUrl() {
 // ─────────────────────────────────────────────────────────────
 const sessionState = {};
 
+/**
+ * Get ephemeral session state value
+ * @param {string} key - State key
+ * @param {*} [defaultValue=null] - Default if not set
+ * @returns {*} Stored value or default
+ */
 function get(key, defaultValue = null) {
   return sessionState[key] !== undefined ? sessionState[key] : defaultValue;
 }
 
+/**
+ * Set ephemeral session state value
+ * @param {string} key - State key
+ * @param {*} value - Value to store
+ * @returns {*} The stored value
+ */
 function set(key, value) {
   sessionState[key] = value;
   return value;
