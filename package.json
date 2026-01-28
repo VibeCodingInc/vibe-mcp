@@ -8,7 +8,9 @@
     "slashvibe-mcp": "./index.js"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node test/smoke.js",
+    "lint": "node test/lint.js"
   },
   "keywords": [
     "mcp",

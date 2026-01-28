@@ -1,5 +1,10 @@
 # /vibe MCP Server
 
+[![npm version](https://img.shields.io/npm/v/slashvibe-mcp.svg)](https://www.npmjs.com/package/slashvibe-mcp)
+[![license](https://img.shields.io/npm/l/slashvibe-mcp.svg)](./LICENSE)
+[![node](https://img.shields.io/node/v/slashvibe-mcp.svg)](https://nodejs.org)
+[![CI](https://github.com/VibeCodingInc/vibe-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/VibeCodingInc/vibe-mcp/actions/workflows/ci.yml)
+
 The social layer for AI coding. DMs, presence, discovery, and games between developers — without leaving your editor.
 
 Works with Claude Code, Cursor, VS Code, Windsurf, Cline, Continue.dev, JetBrains, and any MCP-compatible client.

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "maintainers": ["sethgoldstein"],
+  "name": "/vibe",
+  "description": "Social layer for AI coding — DMs, presence, discovery, and multiplayer games between developers"
+}
