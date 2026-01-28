@@ -236,7 +236,7 @@ Available topics:
   }
 
   // Default: overview
-  let display = `## /vibe Help
+  const display = `## /vibe Help
 
 ${isInitialized ? `You're **@${handle}**` : '⚠️ Not initialized yet — run `vibe init @yourhandle`'}
 

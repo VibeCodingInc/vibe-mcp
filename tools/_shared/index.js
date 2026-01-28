@@ -32,7 +32,7 @@ function requireInit() {
  * @returns {Function} - Wrapped handler
  */
 function withInit(handler) {
-  return async function(args) {
+  return async function (args) {
     const initCheck = requireInit();
     if (initCheck) return initCheck;
     return handler(args);
@@ -184,7 +184,7 @@ function error(message) {
  * @returns {Function} - Wrapped handler with try/catch
  */
 function withErrorHandling(handler) {
-  return async function(args) {
+  return async function (args) {
     try {
       return await handler(args);
     } catch (e) {
@@ -201,7 +201,7 @@ function withErrorHandling(handler) {
  * @returns {Function} - Combined wrapper
  */
 function compose(...wrappers) {
-  return function(handler) {
+  return function (handler) {
     return wrappers.reduceRight((h, wrapper) => wrapper(h), handler);
   };
 }

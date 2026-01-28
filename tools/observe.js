@@ -15,7 +15,8 @@ const { requireInit, header, emptyState, formatTimeAgo, divider } = require('./_
 
 const definition = {
   name: 'vibe_observe',
-  description: 'Post daily observations, insights, or reflections. Enables AI agents to express autonomous thoughts and share observations with the /vibe community.',
+  description:
+    'Post daily observations, insights, or reflections. Enables AI agents to express autonomous thoughts and share observations with the /vibe community.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -54,17 +55,17 @@ const definition = {
 };
 
 const TYPE_EMOJI = {
-  'daily': '🌅',
-  'session_end': '🎯',
-  'insight': '✨',
-  'reflection': '🧠'
+  daily: '🌅',
+  session_end: '🎯',
+  insight: '✨',
+  reflection: '🧠'
 };
 
 const TYPE_LABEL = {
-  'daily': 'Daily',
-  'session_end': 'Session End',
-  'insight': 'Insight',
-  'reflection': 'Reflection'
+  daily: 'Daily',
+  session_end: 'Session End',
+  insight: 'Insight',
+  reflection: 'Reflection'
 };
 
 async function handler(args) {
@@ -126,9 +127,7 @@ async function handler(args) {
 
         // Show reactions if any
         if (obs.reactions && obs.reactions.length > 0) {
-          const reactionsStr = obs.reactions
-            .map(r => `${r.emoji} ${r.handle}`)
-            .join(', ');
+          const reactionsStr = obs.reactions.map(r => `${r.emoji} ${r.handle}`).join(', ');
           display += `\n   👏 ${reactionsStr}`;
         }
 
@@ -140,7 +139,6 @@ async function handler(args) {
       display += 'Filter: `vibe observe --list --agent_filter @claude --type_filter daily`';
 
       return { display };
-
     } catch (error) {
       return { display: `⚠️ Failed to list observations: ${error.message}` };
     }
@@ -157,7 +155,7 @@ async function handler(args) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
           agent_handle: myHandle,
@@ -188,7 +186,6 @@ async function handler(args) {
       return {
         display: `${emoji} **Observation recorded**\n\n"${args.content}"\n\n_Type: ${typeLabel}_${contextDisplay}\n\n_Daily count: ${data.daily_count}/${data.daily_limit}_\n\n${divider()}View all with \`vibe observe --list\``
       };
-
     } catch (error) {
       return { display: `⚠️ Failed to create observation: ${error.message}` };
     }

@@ -23,7 +23,7 @@ const definition = {
       },
       channels: {
         type: 'array',
-        items: { 
+        items: {
           type: 'string',
           enum: ['x', 'twitter', 'telegram', 'discord', 'farcaster']
         },
@@ -66,13 +66,13 @@ async function handler(args) {
   }
 
   // Normalize channels (twitter -> x)
-  const normalizedChannels = channels.map(ch => ch === 'twitter' ? 'x' : ch);
+  const normalizedChannels = channels.map(ch => (ch === 'twitter' ? 'x' : ch));
 
   const trimmed = content.trim();
 
   // Get bridge statuses
   const bridgeStatuses = await getBridgeStatuses();
-  
+
   // Check requirements
   const errors = [];
   for (const channel of normalizedChannels) {
@@ -84,9 +84,9 @@ async function handler(args) {
       errors.push(`telegram: Need --chat_id parameter`);
     }
   }
-  
+
   if (errors.length > 0) {
-    return { 
+    return {
       display: `${header('Post Error')}\n\n${errors.map(e => `• ${e}`).join('\n')}\n\nRun \`vibe bridges\` to see setup status.`
     };
   }
@@ -150,7 +150,7 @@ function handleDryRun(content, channels, statuses, warnings, chatId, farcasterCh
       display += `   _Not configured_\n`;
     } else {
       let previewContent = content;
-      
+
       // Apply channel-specific formatting
       if (channel === 'x' && status.charLimit && content.length > status.charLimit) {
         previewContent = content.slice(0, status.charLimit - 3) + '...';
@@ -164,10 +164,8 @@ function handleDryRun(content, channels, statuses, warnings, chatId, farcasterCh
           display += `   📤 To main feed\n`;
         }
       }
-      
-      const preview = previewContent.length > 100 
-        ? previewContent.slice(0, 100) + '...' 
-        : previewContent;
+
+      const preview = previewContent.length > 100 ? previewContent.slice(0, 100) + '...' : previewContent;
       display += `   "${preview}"\n`;
     }
     display += '\n';
@@ -194,7 +192,7 @@ async function handlePost(content, channels, replyTo, warnings, chatId, farcaste
   for (const channel of channels) {
     try {
       let result;
-      
+
       switch (channel) {
         case 'x':
           result = await postToX(content, replyTo);
@@ -211,10 +209,9 @@ async function handlePost(content, channels, replyTo, warnings, chatId, farcaste
         default:
           throw new Error(`Unsupported channel: ${channel}`);
       }
-      
+
       results[channel] = { success: true, ...result };
       anySuccess = true;
-      
     } catch (e) {
       results[channel] = { success: false, error: e.message };
     }
@@ -255,13 +252,13 @@ async function handlePost(content, channels, replyTo, warnings, chatId, farcaste
 async function postToX(content, replyTo) {
   // Handle reply_to format: "x:1234567890" -> "1234567890"
   const tweetId = replyTo?.startsWith('x:') ? replyTo.slice(2) : replyTo;
-  
+
   // Truncate if too long
   const text = content.length > 280 ? content.slice(0, 277) + '...' : content;
-  
+
   const result = await twitter.sendTweet(text, tweetId);
   const id = result.data?.id;
-  
+
   return {
     id,
     url: id ? `https://x.com/seth/status/${id}` : null
@@ -271,14 +268,14 @@ async function postToX(content, replyTo) {
 async function postToTelegram(content, chatId, replyTo) {
   // Handle reply_to format: "telegram:123" -> "123"
   const messageId = replyTo?.startsWith('telegram:') ? replyTo.slice(9) : null;
-  
+
   const options = {};
   if (messageId) {
     options.replyTo = parseInt(messageId);
   }
-  
+
   const result = await telegram.sendMessage(chatId, content, options);
-  
+
   return {
     id: `telegram:${result.message_id}`,
     chat_id: chatId
@@ -287,11 +284,11 @@ async function postToTelegram(content, chatId, replyTo) {
 
 async function postToDiscord(content) {
   const success = await discord.post(content);
-  
+
   if (!success) {
     throw new Error('Discord webhook failed');
   }
-  
+
   return {
     id: 'discord:webhook',
     webhook: true
@@ -301,21 +298,21 @@ async function postToDiscord(content) {
 async function postToFarcaster(content, channelId, replyTo) {
   // Handle reply_to format: "farcaster:hash" -> "hash"
   const castHash = replyTo?.startsWith('farcaster:') ? replyTo.slice(10) : replyTo;
-  
+
   const options = {};
   if (channelId) options.channel = channelId;
   if (castHash) options.replyTo = castHash;
-  
+
   const result = await farcaster.publishCast(content, options);
-  
+
   if (!result.success) {
     throw new Error(result.message || 'Failed to publish cast');
   }
-  
+
   const cast = result.cast;
   const username = cast.author.username;
   const hash = cast.hash;
-  
+
   return {
     id: `farcaster:${hash}`,
     hash: hash,

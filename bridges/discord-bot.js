@@ -38,9 +38,9 @@ async function discordRequest(method, endpoint, body = null) {
   if (!token) throw new Error('Discord bot token not configured');
 
   const url = `https://discord.com/api/v10${endpoint}`;
-  
+
   const headers = {
-    'Authorization': `Bot ${token}`,
+    Authorization: `Bot ${token}`,
     'Content-Type': 'application/json'
   };
 
@@ -104,7 +104,7 @@ async function sendMessage(channelId, content, options = {}) {
 async function getMessages(channelId, limit = 50, before = null) {
   let endpoint = `/channels/${channelId}/messages?limit=${limit}`;
   if (before) endpoint += `&before=${before}`;
-  
+
   return discordRequest('GET', endpoint);
 }
 
@@ -132,10 +132,10 @@ async function sendDM(userId, content, options = {}) {
 function processMessage(message) {
   const author = message.author;
   const channel = message.channel_id;
-  
+
   // Skip bot messages
   if (author.bot) return null;
-  
+
   return {
     id: `discord:${message.id}`,
     channel: 'discord',
@@ -162,7 +162,7 @@ function processMessage(message) {
  */
 function parseVibeCommand(content) {
   const trimmed = content.trim();
-  
+
   // !status mood [note]
   const statusMatch = trimmed.match(/^!status\s+(\w+)(?:\s+(.+))?$/);
   if (statusMatch) {
@@ -174,12 +174,12 @@ function parseVibeCommand(content) {
       }
     };
   }
-  
+
   // !who
   if (trimmed === '!who') {
     return { command: 'who' };
   }
-  
+
   // !ship [message]
   const shipMatch = trimmed.match(/^!ship(?:\s+(.+))?$/);
   if (shipMatch) {
@@ -190,7 +190,7 @@ function parseVibeCommand(content) {
       }
     };
   }
-  
+
   // !dm @user message
   const dmMatch = trimmed.match(/^!dm\s+<@!?(\d+)>\s+(.+)$/);
   if (dmMatch) {
@@ -202,7 +202,7 @@ function parseVibeCommand(content) {
       }
     };
   }
-  
+
   // !vibe message (forward to /vibe)
   const vibeMatch = trimmed.match(/^!vibe\s+(.+)$/);
   if (vibeMatch) {
@@ -213,7 +213,7 @@ function parseVibeCommand(content) {
       }
     };
   }
-  
+
   return null;
 }
 
@@ -222,14 +222,14 @@ function parseVibeCommand(content) {
  */
 async function notifyActivity(channelId, activity) {
   const { handle, action, context } = activity;
-  
+
   const embed = {
-    color: 0x6B8FFF, // /vibe blue
+    color: 0x6b8fff, // /vibe blue
     description: `🔔 **@${handle}** ${action}`,
     footer: { text: context || 'slashvibe.dev' },
     timestamp: new Date().toISOString()
   };
-  
+
   return sendMessage(channelId, '', { embeds: [embed] });
 }
 
@@ -238,27 +238,27 @@ async function notifyActivity(channelId, activity) {
  */
 async function notifyStatus(channelId, handle, mood, note) {
   const moodEmoji = {
-    'shipping': '🔥',
-    'debugging': '🐛',
-    'deep': '🧠',
-    'afk': '☕',
-    'celebrating': '🎉',
-    'pairing': '👯'
+    shipping: '🔥',
+    debugging: '🐛',
+    deep: '🧠',
+    afk: '☕',
+    celebrating: '🎉',
+    pairing: '👯'
   };
-  
+
   const emoji = moodEmoji[mood] || '●';
   let description = `${emoji} **@${handle}** is ${mood}`;
-  
+
   if (note) {
     description += `\n_"${note}"_`;
   }
-  
+
   const embed = {
-    color: 0x9B59B6, // Purple for status
+    color: 0x9b59b6, // Purple for status
     description,
     timestamp: new Date().toISOString()
   };
-  
+
   return sendMessage(channelId, '', { embeds: [embed] });
 }
 
@@ -267,7 +267,7 @@ async function notifyStatus(channelId, handle, mood, note) {
  */
 async function forwardFromVibe(channelId, handle, message, context = null) {
   const embed = {
-    color: 0x2ECC71, // Green for /vibe messages
+    color: 0x2ecc71, // Green for /vibe messages
     author: {
       name: `@${handle}`,
       icon_url: 'https://slashvibe.dev/vibe-icon.png'
@@ -276,20 +276,20 @@ async function forwardFromVibe(channelId, handle, message, context = null) {
     footer: { text: context || '/vibe' },
     timestamp: new Date().toISOString()
   };
-  
+
   return sendMessage(channelId, '', { embeds: [embed] });
 }
 
 /**
  * Create embed for /vibe announcements
  */
-function createVibeEmbed(title, description, color = 0x6B8FFF, fields = []) {
+function createVibeEmbed(title, description, color = 0x6b8fff, fields = []) {
   return {
     color,
     title,
     description,
     fields,
-    footer: { 
+    footer: {
       text: 'slashvibe.dev',
       icon_url: 'https://slashvibe.dev/vibe-icon.png'
     },
@@ -302,10 +302,7 @@ function createVibeEmbed(title, description, color = 0x6B8FFF, fields = []) {
  */
 async function sendOnlineList(channelId, users) {
   if (users.length === 0) {
-    const embed = createVibeEmbed(
-      '🤫 Room is quiet...',
-      'No one is currently active in /vibe.'
-    );
+    const embed = createVibeEmbed('🤫 Room is quiet...', 'No one is currently active in /vibe.');
     return sendMessage(channelId, '', { embeds: [embed] });
   }
 
@@ -318,12 +315,7 @@ async function sendOnlineList(channelId, users) {
     };
   });
 
-  const embed = createVibeEmbed(
-    `👥 ${users.length} online in /vibe`,
-    'Current activity:',
-    0x2ECC71,
-    fields
-  );
+  const embed = createVibeEmbed(`👥 ${users.length} online in /vibe`, 'Current activity:', 0x2ecc71, fields);
 
   return sendMessage(channelId, '', { embeds: [embed] });
 }
@@ -365,7 +357,7 @@ async function registerSlashCommands(guildId = null) {
         },
         {
           name: 'note',
-          description: 'Optional note about what you\'re working on',
+          description: "Optional note about what you're working on",
           type: 3, // STRING
           required: false
         }
@@ -373,13 +365,11 @@ async function registerSlashCommands(guildId = null) {
     },
     {
       name: 'who',
-      description: 'See who\'s online in /vibe'
+      description: "See who's online in /vibe"
     }
   ];
 
-  const endpoint = guildId 
-    ? `/applications/@me/guilds/${guildId}/commands`
-    : '/applications/@me/commands';
+  const endpoint = guildId ? `/applications/@me/guilds/${guildId}/commands` : '/applications/@me/commands';
 
   // Register each command
   for (const command of commands) {
@@ -395,11 +385,11 @@ async function registerSlashCommands(guildId = null) {
 async function setupInteractionEndpoint(publicKey, endpointUrl) {
   // This would typically be done in Discord Developer Portal
   // But we can validate the setup here
-  
+
   if (!publicKey || !endpointUrl) {
     throw new Error('Need both public key and endpoint URL for interactions');
   }
-  
+
   // The actual webhook setup happens in Discord Developer Portal
   return {
     message: 'Interaction endpoint configured. Set this URL in Discord Developer Portal:',

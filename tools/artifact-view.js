@@ -145,9 +145,9 @@ async function handler(args) {
 
     if (artifacts.length === 0) {
       const messages = {
-        'mine': 'You haven\'t created any artifacts yet.',
+        mine: "You haven't created any artifacts yet.",
         'for-me': 'No artifacts have been created for you yet.',
-        'network': 'No artifacts visible in your network yet.'
+        network: 'No artifacts visible in your network yet.'
       };
       return {
         display: `📦 ${messages[list]}\n\nCreate one with \`vibe_create_artifact\``

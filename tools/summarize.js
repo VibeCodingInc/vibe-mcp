@@ -91,7 +91,8 @@ function checkBurst() {
 
 const definition = {
   name: 'vibe_summarize',
-  description: 'Generate a session summary. Shows participants, activity, mood, and open threads. Local-first: not sent to the room.',
+  description:
+    'Generate a session summary. Shows participants, activity, mood, and open threads. Local-first: not sent to the room.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -121,18 +122,24 @@ async function handler(args) {
   const now = Date.now();
   const startTime = activity.startTime || SESSION_START;
   const duration = now - startTime;
-  const startStr = new Date(startTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const startStr = new Date(startTime).toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
   const endStr = new Date(now).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 
   // Build participant list
   const participants = new Set(activity.participants);
   inbox.forEach(thread => participants.add(thread.handle));
-  const participantList = Array.from(participants).map(p => `@${p}`).join(', ') || '_none_';
+  const participantList =
+    Array.from(participants)
+      .map(p => `@${p}`)
+      .join(', ') || '_none_';
 
   // Current mood
-  const currentMood = activity.moodChanges.length > 0
-    ? activity.moodChanges[activity.moodChanges.length - 1].mood
-    : null;
+  const currentMood =
+    activity.moodChanges.length > 0 ? activity.moodChanges[activity.moodChanges.length - 1].mood : null;
 
   // Mood journey (if changed during session)
   let moodLine = '';
@@ -153,9 +160,7 @@ async function handler(args) {
   }
 
   // Open threads with unread
-  const openThreads = inbox
-    .filter(t => t.unread > 0)
-    .map(t => `@${t.handle} (${t.unread} unread)`);
+  const openThreads = inbox.filter(t => t.unread > 0).map(t => `@${t.handle} (${t.unread} unread)`);
 
   // Build summary
   let summary = `## Session Summary — ${startStr}–${endStr}\n\n`;
@@ -164,12 +169,12 @@ async function handler(args) {
 
   if (events.length > 0) {
     summary += `\n• Events:\n`;
-    events.forEach(e => summary += `  – ${e}\n`);
+    events.forEach(e => (summary += `  – ${e}\n`));
   }
 
   if (openThreads.length > 0) {
     summary += `• Open threads:\n`;
-    openThreads.forEach(t => summary += `  – ${t}\n`);
+    openThreads.forEach(t => (summary += `  – ${t}\n`));
   }
 
   // Add copy hint

@@ -35,14 +35,17 @@ class BridgeMonitor {
    */
   startMonitoring(intervalMinutes = 5) {
     console.log(`🔍 Starting bridge health monitoring (every ${intervalMinutes} minutes)`);
-    
+
     // Initial health check
     this.performHealthCheck();
-    
+
     // Schedule regular health checks
-    this.healthCheckInterval = setInterval(() => {
-      this.performHealthCheck();
-    }, intervalMinutes * 60 * 1000);
+    this.healthCheckInterval = setInterval(
+      () => {
+        this.performHealthCheck();
+      },
+      intervalMinutes * 60 * 1000
+    );
   }
 
   /**
@@ -65,24 +68,23 @@ class BridgeMonitor {
 
     // Test each configured bridge
     const bridges = ['x', 'telegram', 'farcaster', 'discord'];
-    
+
     for (const bridge of bridges) {
       try {
         const startTime = Date.now();
         const isHealthy = await this.checkBridgeHealth(bridge);
         const responseTime = Date.now() - startTime;
-        
+
         this.updateMetrics(bridge, true, responseTime);
-        results[bridge] = { 
-          healthy: isHealthy, 
+        results[bridge] = {
+          healthy: isHealthy,
           responseTime,
           error: null
         };
-        
       } catch (error) {
         this.updateMetrics(bridge, false, 0);
-        results[bridge] = { 
-          healthy: false, 
+        results[bridge] = {
+          healthy: false,
           responseTime: 0,
           error: error.message
         };
@@ -91,9 +93,11 @@ class BridgeMonitor {
 
     // Check for alerts
     this.checkForAlerts(results);
-    
-    console.log(`✅ Health check complete: ${Object.values(results).filter(r => r.healthy).length}/${bridges.length} bridges healthy`);
-    
+
+    console.log(
+      `✅ Health check complete: ${Object.values(results).filter(r => r.healthy).length}/${bridges.length} bridges healthy`
+    );
+
     return results;
   }
 
@@ -132,18 +136,17 @@ class BridgeMonitor {
    */
   updateMetrics(bridge, success, responseTime) {
     const metric = this.metrics[bridge];
-    
+
     metric.calls++;
     if (!success) metric.errors++;
     metric.lastCheck = new Date().toISOString();
-    
+
     // Update average response time (simple moving average)
     if (responseTime > 0) {
-      metric.avgResponseTime = metric.avgResponseTime === 0 
-        ? responseTime 
-        : (metric.avgResponseTime + responseTime) / 2;
+      metric.avgResponseTime =
+        metric.avgResponseTime === 0 ? responseTime : (metric.avgResponseTime + responseTime) / 2;
     }
-    
+
     // Update status
     const errorRate = metric.errors / metric.calls;
     const isHealthy = success && errorRate < this.alertThresholds.errorRate;
@@ -155,12 +158,13 @@ class BridgeMonitor {
    */
   checkForAlerts(results) {
     const alerts = [];
-    
+
     for (const [bridge, result] of Object.entries(results)) {
       const metric = this.metrics[bridge];
-      
+
       // High error rate alert
-      if (metric.calls > 10) { // Only alert after some calls
+      if (metric.calls > 10) {
+        // Only alert after some calls
         const errorRate = metric.errors / metric.calls;
         if (errorRate > this.alertThresholds.errorRate) {
           alerts.push({
@@ -171,7 +175,7 @@ class BridgeMonitor {
           });
         }
       }
-      
+
       // Slow response time alert
       if (result.responseTime > this.alertThresholds.responseTime) {
         alerts.push({
@@ -181,7 +185,7 @@ class BridgeMonitor {
           severity: 'warning'
         });
       }
-      
+
       // Bridge down alert
       if (!result.healthy) {
         alerts.push({
@@ -192,7 +196,7 @@ class BridgeMonitor {
         });
       }
     }
-    
+
     // Process alerts
     if (alerts.length > 0) {
       this.handleAlerts(alerts);
@@ -207,7 +211,7 @@ class BridgeMonitor {
       const icon = alert.severity === 'critical' ? '🚨' : '⚠️';
       console.log(`${icon} Bridge Alert [${alert.bridge.toUpperCase()}]: ${alert.message}`);
     }
-    
+
     // In a full implementation, this would:
     // 1. Send notifications to /vibe users
     // 2. Log to monitoring system
@@ -220,10 +224,10 @@ class BridgeMonitor {
    */
   getHealthStatus() {
     const status = {};
-    
+
     for (const [bridge, metric] of Object.entries(this.metrics)) {
       const errorRate = metric.calls > 0 ? metric.errors / metric.calls : 0;
-      
+
       status[bridge] = {
         configured: this.isBridgeConfigured(bridge),
         status: metric.status,
@@ -235,7 +239,7 @@ class BridgeMonitor {
         uptime: this.calculateUptime(bridge)
       };
     }
-    
+
     return status;
   }
 
@@ -244,11 +248,16 @@ class BridgeMonitor {
    */
   isBridgeConfigured(bridge) {
     switch (bridge) {
-      case 'x': return twitter.isConfigured();
-      case 'telegram': return telegram.isConfigured();
-      case 'farcaster': return farcaster.isConfigured();
-      case 'discord': return discord.isConfigured();
-      default: return false;
+      case 'x':
+        return twitter.isConfigured();
+      case 'telegram':
+        return telegram.isConfigured();
+      case 'farcaster':
+        return farcaster.isConfigured();
+      case 'discord':
+        return discord.isConfigured();
+      default:
+        return false;
     }
   }
 
@@ -258,7 +267,7 @@ class BridgeMonitor {
   calculateUptime(bridge) {
     const metric = this.metrics[bridge];
     if (metric.calls === 0) return '0%';
-    
+
     const successRate = (metric.calls - metric.errors) / metric.calls;
     return (successRate * 100).toFixed(1) + '%';
   }
@@ -268,7 +277,7 @@ class BridgeMonitor {
    */
   async getQuotaInfo() {
     const quotas = {};
-    
+
     // X API has rate limits we can track
     if (twitter.isConfigured()) {
       try {
@@ -282,7 +291,7 @@ class BridgeMonitor {
         quotas.x = { error: e.message };
       }
     }
-    
+
     // Telegram has generous limits
     if (telegram.isConfigured()) {
       quotas.telegram = {
@@ -290,7 +299,7 @@ class BridgeMonitor {
         note: 'Telegram bot API limits'
       };
     }
-    
+
     // Farcaster via Neynar has API limits
     if (farcaster.isConfigured()) {
       quotas.farcaster = {
@@ -298,7 +307,7 @@ class BridgeMonitor {
         note: 'Check Neynar dashboard for quotas'
       };
     }
-    
+
     return quotas;
   }
 
@@ -307,7 +316,7 @@ class BridgeMonitor {
    */
   async testRecovery(bridge) {
     console.log(`🔄 Testing recovery for ${bridge} bridge...`);
-    
+
     try {
       const isHealthy = await this.checkBridgeHealth(bridge);
       if (isHealthy) {
@@ -361,11 +370,11 @@ function stopMonitoring() {
  */
 async function getHealthDashboard() {
   const monitor = getMonitor();
-  
+
   const healthStatus = monitor.getHealthStatus();
   const quotaInfo = await monitor.getQuotaInfo();
   const recentCheck = await monitor.performHealthCheck();
-  
+
   return {
     timestamp: new Date().toISOString(),
     bridges: healthStatus,

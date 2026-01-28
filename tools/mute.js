@@ -77,9 +77,10 @@ Background monitor will stop sending alerts.
   config.set('mutedUntil', mutedUntil);
 
   const until = new Date(mutedUntil).toLocaleTimeString();
-  const durationText = ms >= 3600000
-    ? `${Math.floor(ms / 3600000)} hour${Math.floor(ms / 3600000) > 1 ? 's' : ''}`
-    : `${Math.floor(ms / 60000)} minutes`;
+  const durationText =
+    ms >= 3600000
+      ? `${Math.floor(ms / 3600000)} hour${Math.floor(ms / 3600000) > 1 ? 's' : ''}`
+      : `${Math.floor(ms / 60000)} minutes`;
 
   return {
     display: `## 🔇 Presence Alerts Muted

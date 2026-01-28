@@ -85,9 +85,7 @@ async function handler(args) {
   // Apply search filter if provided
   if (search) {
     const searchLower = search.toLowerCase();
-    memories = memories.filter(m =>
-      m.observation.toLowerCase().includes(searchLower)
-    );
+    memories = memories.filter(m => m.observation.toLowerCase().includes(searchLower));
 
     if (memories.length === 0) {
       return {

@@ -12,7 +12,8 @@ const config = require('../config');
 
 const definition = {
   name: 'vibe_settings',
-  description: 'Configure /vibe preferences. Set notification level, toggle guided mode, or enable GitHub activity signals.',
+  description:
+    'Configure /vibe preferences. Set notification level, toggle guided mode, or enable GitHub activity signals.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -85,13 +86,26 @@ async function handler(args) {
     };
 
     return {
-      display: '## /vibe Settings\n\n' +
-        '**Notifications:** ' + notifications + '\n' +
-        '_' + notifyDesc[notifications] + '_\n\n' +
-        '**Guided Mode:** ' + (guided ? 'on' : 'off') + '\n' +
-        '_' + (guided ? 'Shows dashboard menus' : 'Freeform mode') + '_\n\n' +
-        '**GitHub Activity:** ' + (githubActivity ? 'on' : 'off') + '\n' +
-        '_' + (githubActivity ? 'Shows shipping status from your GitHub commits' : 'Not sharing GitHub activity') + '_\n\n' +
+      display:
+        '## /vibe Settings\n\n' +
+        '**Notifications:** ' +
+        notifications +
+        '\n' +
+        '_' +
+        notifyDesc[notifications] +
+        '_\n\n' +
+        '**Guided Mode:** ' +
+        (guided ? 'on' : 'off') +
+        '\n' +
+        '_' +
+        (guided ? 'Shows dashboard menus' : 'Freeform mode') +
+        '_\n\n' +
+        '**GitHub Activity:** ' +
+        (githubActivity ? 'on' : 'off') +
+        '\n' +
+        '_' +
+        (githubActivity ? 'Shows shipping status from your GitHub commits' : 'Not sharing GitHub activity') +
+        '_\n\n' +
         (githubActivity ? '**GitHub Privacy:** ' + githubPrivacy + '\n_' + privacyDesc[githubPrivacy] + '_\n\n' : '') +
         '---\n\n' +
         '**Change settings:**\n' +
@@ -103,8 +117,13 @@ async function handler(args) {
   }
 
   return {
-    display: '## Settings Updated\n\n' +
-      changes.map(function(c) { return '✓ ' + c; }).join('\n') +
+    display:
+      '## Settings Updated\n\n' +
+      changes
+        .map(function (c) {
+          return '✓ ' + c;
+        })
+        .join('\n') +
       '\n\n_Changes take effect immediately._'
   };
 }

@@ -99,7 +99,6 @@ async function handler(args) {
     display += `Share: \`${sessionUrl}\``;
 
     return { display };
-
   } catch (error) {
     return {
       display: `## Session Save Error\n\n${error.message}\n\nMake sure you're connected to the internet. Run \`vibe doctor\` to diagnose.`

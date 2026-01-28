@@ -169,7 +169,8 @@ function generateWelcomeCard({ handle, onlineCount, unreadCount, versionInfo }) 
 
 const definition = {
   name: 'vibe_start',
-  description: 'Start socializing on /vibe. Use when user says "let\'s vibe", "start vibing", "who\'s around", or wants to connect with others.',
+  description:
+    'Start socializing on /vibe. Use when user says "let\'s vibe", "start vibing", "who\'s around", or wants to connect with others.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -179,7 +180,7 @@ const definition = {
       },
       building: {
         type: 'string',
-        description: 'What you\'re working on (one line). Only needed if not already initialized.'
+        description: "What you're working on (one line). Only needed if not already initialized."
       }
     }
   }
@@ -199,7 +200,7 @@ async function handler(args) {
   }
 
   // Step 2: User is authenticated - show dashboard
-  let myHandle = config.getHandle();
+  const myHandle = config.getHandle();
   let threads = [];
   let updateNotice = '';
 

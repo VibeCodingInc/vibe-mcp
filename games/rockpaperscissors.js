@@ -21,21 +21,9 @@ const BATTLE_ANIMATIONS = {
 };
 
 // Victory messages
-const VICTORY_MESSAGES = [
-  'Victory! 🎉',
-  'Nice one! 🔥',
-  'You got it! ⚡',
-  'Well played! 🌟',
-  'Boom! 💥'
-];
+const VICTORY_MESSAGES = ['Victory! 🎉', 'Nice one! 🔥', 'You got it! ⚡', 'Well played! 🌟', 'Boom! 💥'];
 
-const DEFEAT_MESSAGES = [
-  'Not this time! 😅',
-  'So close! 🤷',
-  'Next round! 💪',
-  'Almost! 🎯',
-  'Good try! 👍'
-];
+const DEFEAT_MESSAGES = ['Not this time! 😅', 'So close! 🤷', 'Next round! 💪', 'Almost! 🎯', 'Good try! 👍'];
 
 // Get random choice for AI opponent
 function getRandomChoice() {
@@ -63,64 +51,65 @@ function determineRoundWinner(playerChoice, opponentChoice) {
   if (playerChoice === opponentChoice) {
     return 'tie';
   }
-  
+
   return CHOICES[playerChoice].beats === opponentChoice ? 'player' : 'opponent';
 }
 
 // Make a move in the game
 function makeMove(gameState, playerMove, opponentMove = null) {
   const { bestOf, playerScore, opponentScore, rounds, currentRound } = gameState;
-  
+
   // Validate player move
   const normalizedPlayerMove = playerMove.toLowerCase().trim();
   if (!CHOICES[normalizedPlayerMove]) {
     return { error: 'Invalid choice! Use: rock, paper, or scissors' };
   }
-  
+
   // Check if game is already over
   if (gameState.gameOver) {
     return { error: 'Game is over! Start a new game to play again.' };
   }
-  
+
   // Generate opponent move if not provided (for AI games)
   const opponentChoice = opponentMove || getRandomChoice();
   const playerChoice = normalizedPlayerMove;
-  
+
   // Determine round winner
   const roundResult = determineRoundWinner(playerChoice, opponentChoice);
-  
+
   // Create round record
   const roundData = {
     round: currentRound,
     playerChoice,
     opponentChoice,
     result: roundResult,
-    animation: roundResult === 'tie' ? 
-      `${CHOICES[playerChoice].emoji} vs ${CHOICES[opponentChoice].emoji} - Tie!` :
-      roundResult === 'player' ?
-        BATTLE_ANIMATIONS[`${playerChoice}_${opponentChoice}`] :
-        BATTLE_ANIMATIONS[`${opponentChoice}_${playerChoice}`]
+    animation:
+      roundResult === 'tie'
+        ? `${CHOICES[playerChoice].emoji} vs ${CHOICES[opponentChoice].emoji} - Tie!`
+        : roundResult === 'player'
+          ? BATTLE_ANIMATIONS[`${playerChoice}_${opponentChoice}`]
+          : BATTLE_ANIMATIONS[`${opponentChoice}_${playerChoice}`]
   };
-  
+
   // Update scores
   let newPlayerScore = playerScore;
   let newOpponentScore = opponentScore;
-  
+
   if (roundResult === 'player') {
     newPlayerScore++;
   } else if (roundResult === 'opponent') {
     newOpponentScore++;
   }
-  
+
   // Check if game is over (first to win majority of bestOf rounds)
   const roundsToWin = Math.ceil(bestOf / 2);
   const gameOver = newPlayerScore >= roundsToWin || newOpponentScore >= roundsToWin;
-  
+
   let winner = null;
   if (gameOver) {
     winner = newPlayerScore > newOpponentScore ? 'player' : 'opponent';
   }
-  
+
   const newGameState = {
     ...gameState,
     playerScore: newPlayerScore,
@@ -132,29 +121,29 @@ function makeMove(gameState, playerMove, opponentMove = null) {
     waitingForMove: !gameOver,
     lastRound: roundData
   };
-  
+
   return { success: true, gameState: newGameState };
 }
 
 // Format game display
 function formatRPSDisplay(gameState, opponentName = 'Computer') {
   const { bestOf, playerScore, opponentScore, rounds, gameOver, winner, currentRound, lastRound } = gameState;
-  
+
   let display = `🎮 **Rock Paper Scissors**`;
-  
+
   if (bestOf > 1) {
     display += ` (Best of ${bestOf})\n`;
   } else {
     display += '\n';
   }
-  
+
   display += `**Score:** You ${playerScore} - ${opponentScore} ${opponentName}\n\n`;
-  
+
   // Show last round result if exists
   if (lastRound) {
     display += `**Round ${lastRound.round} Result:**\n`;
     display += `${lastRound.animation}\n\n`;
-    
+
     if (lastRound.result === 'player') {
       display += `${VICTORY_MESSAGES[Math.floor(Math.random() * VICTORY_MESSAGES.length)]}\n`;
     } else if (lastRound.result === 'opponent') {
@@ -164,7 +153,7 @@ function formatRPSDisplay(gameState, opponentName = 'Computer') {
     }
     display += '\n';
   }
-  
+
   // Show game status
   if (gameOver) {
     if (winner === 'player') {
@@ -180,7 +169,7 @@ function formatRPSDisplay(gameState, opponentName = 'Computer') {
     display += `🪨 Rock  📄 Paper  ✂️ Scissors\n`;
     display += `\nType your move: rock, paper, or scissors`;
   }
-  
+
   // Show round history for longer games
   if (rounds.length > 1 && bestOf > 1) {
     display += `\n\n**Round History:**\n`;
@@ -189,28 +178,28 @@ function formatRPSDisplay(gameState, opponentName = 'Computer') {
       display += `R${round.round}: ${CHOICES[round.playerChoice].emoji} vs ${CHOICES[round.opponentChoice].emoji} ${result}\n`;
     });
   }
-  
+
   return display;
 }
 
 // Get move from text input
 function parseMove(input) {
   const normalized = input.toLowerCase().trim();
-  
+
   // Support various aliases
   const aliases = {
     r: 'rock',
     rock: 'rock',
     stone: 'rock',
-    
+
     p: 'paper',
     paper: 'paper',
-    
+
     s: 'scissors',
     scissors: 'scissors',
     scissor: 'scissors'
   };
-  
+
   return aliases[normalized] || null;
 }
 
@@ -231,14 +220,14 @@ function makeMultiplayerMove(gameState, playerId, move) {
   if (gameState.gameOver) {
     return { error: 'Game is over! Start a new game to play again.' };
   }
-  
+
   const parsedMove = parseMove(move);
   if (!parsedMove) {
     return { error: 'Invalid choice! Use: rock, paper, or scissors' };
   }
-  
+
   const newGameState = { ...gameState };
-  
+
   if (playerId === 1) {
     if (newGameState.player1Move) {
       return { error: 'You already made your move this round!' };
@@ -250,15 +239,19 @@ function makeMultiplayerMove(gameState, playerId, move) {
     }
     newGameState.player2Move = parsedMove;
   }
-  
+
   // Check if both players have moved
   if (newGameState.player1Move && newGameState.player2Move) {
     // Process the round
-    const result = makeMove({
-      ...newGameState,
-      gameType: 'rps' // Temporarily treat as single player for processing
-    }, newGameState.player1Move, newGameState.player2Move);
-    
+    const result = makeMove(
+      {
+        ...newGameState,
+        gameType: 'rps' // Temporarily treat as single player for processing
+      },
+      newGameState.player1Move,
+      newGameState.player2Move
+    );
+
     if (result.success) {
       const processedState = result.gameState;
       newGameState.playerScore = processedState.playerScore;
@@ -268,14 +261,14 @@ function makeMultiplayerMove(gameState, playerId, move) {
       newGameState.gameOver = processedState.gameOver;
       newGameState.winner = processedState.winner;
       newGameState.lastRound = processedState.lastRound;
-      
+
       // Reset for next round
       newGameState.player1Move = null;
       newGameState.player2Move = null;
       newGameState.waitingForBoth = !processedState.gameOver;
     }
   }
-  
+
   return { success: true, gameState: newGameState };
 }
 

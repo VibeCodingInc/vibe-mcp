@@ -103,10 +103,14 @@ const allWords = [...codingWords, ...vibeWords, ...techWords, ...generalWords];
  */
 function getWordsByTheme(theme) {
   switch (theme) {
-    case 'coding': return codingWords;
-    case 'vibe': return vibeWords;
-    case 'tech': return techWords;
-    case 'general': return generalWords;
+    case 'coding':
+      return codingWords;
+    case 'vibe':
+      return vibeWords;
+    case 'tech':
+      return techWords;
+    case 'general':
+      return generalWords;
     case 'all':
     default:
       return allWords;
@@ -118,7 +122,7 @@ function getWordsByTheme(theme) {
  */
 function seededRandom(seed) {
   let state = seed;
-  return function() {
+  return function () {
     state = (state * 1103515245 + 12345) & 0x7fffffff;
     return state / 0x7fffffff;
   };

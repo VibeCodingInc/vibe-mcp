@@ -1,6 +1,6 @@
 /**
  * Proactive Discovery Engine — Smart background matching for offline users
- * 
+ *
  * This runs when users aren't online to:
  * - Analyze recent ships and suggest collaborations
  * - Pre-compute high-quality matches for when users return
@@ -16,19 +16,19 @@ const { formatTimeAgo } = require('./_shared');
 async function analyzeShippingPatterns() {
   const profiles = await userProfiles.getAllProfiles();
   const now = Date.now();
-  const twoWeeksAgo = now - (14 * 24 * 60 * 60 * 1000);
-  
+  const twoWeeksAgo = now - 14 * 24 * 60 * 60 * 1000;
+
   const patterns = {
     recentShippers: [],
     complementaryShips: [],
     similarProjects: [],
     emergingTrends: {}
   };
-  
+
   // Find users who shipped recently
   for (const profile of profiles) {
     if (!profile.ships || profile.ships.length === 0) continue;
-    
+
     const recentShips = profile.ships.filter(s => s.timestamp > twoWeeksAgo);
     if (recentShips.length > 0) {
       patterns.recentShippers.push({
@@ -40,7 +40,7 @@ async function analyzeShippingPatterns() {
       });
     }
   }
-  
+
   // Find complementary ships (e.g., one shipped frontend, another backend)
   const complementaryPairs = [
     { keywords: ['frontend', 'ui', 'react', 'vue'], complement: ['backend', 'api', 'server', 'database'] },
@@ -49,24 +49,16 @@ async function analyzeShippingPatterns() {
     { keywords: ['mobile', 'app', 'ios', 'android'], complement: ['backend', 'api'] },
     { keywords: ['smart contract', 'solidity', 'web3'], complement: ['frontend', 'dapp'] }
   ];
-  
+
   for (const pair of complementaryPairs) {
-    const primaryShippers = patterns.recentShippers.filter(s => 
-      s.ships.some(ship => 
-        pair.keywords.some(keyword => 
-          ship.what.toLowerCase().includes(keyword)
-        )
-      )
+    const primaryShippers = patterns.recentShippers.filter(s =>
+      s.ships.some(ship => pair.keywords.some(keyword => ship.what.toLowerCase().includes(keyword)))
     );
-    
-    const complementShippers = patterns.recentShippers.filter(s => 
-      s.ships.some(ship => 
-        pair.complement.some(keyword => 
-          ship.what.toLowerCase().includes(keyword)
-        )
-      )
+
+    const complementShippers = patterns.recentShippers.filter(s =>
+      s.ships.some(ship => pair.complement.some(keyword => ship.what.toLowerCase().includes(keyword)))
     );
-    
+
     if (primaryShippers.length > 0 && complementShippers.length > 0) {
       patterns.complementaryShips.push({
         type: `${pair.keywords[0]}/${pair.complement[0]}`,
@@ -75,15 +67,17 @@ async function analyzeShippingPatterns() {
       });
     }
   }
-  
+
   // Find similar project patterns
   const projectKeywords = {};
   for (const shipper of patterns.recentShippers) {
     for (const ship of shipper.ships) {
-      const words = ship.what.toLowerCase().split(/\s+/)
+      const words = ship.what
+        .toLowerCase()
+        .split(/\s+/)
         .filter(word => word.length > 3)
         .filter(word => !['the', 'and', 'for', 'with', 'that', 'this'].includes(word));
-      
+
       for (const word of words) {
         if (!projectKeywords[word]) projectKeywords[word] = [];
         projectKeywords[word].push({
@@ -94,7 +88,7 @@ async function analyzeShippingPatterns() {
       }
     }
   }
-  
+
   // Find keywords with multiple recent ships (emerging trends)
   for (const [keyword, ships] of Object.entries(projectKeywords)) {
     if (ships.length >= 2 && keyword !== 'app' && keyword !== 'website') {
@@ -104,7 +98,7 @@ async function analyzeShippingPatterns() {
       };
     }
   }
-  
+
   return patterns;
 }
 
@@ -112,36 +106,31 @@ async function analyzeShippingPatterns() {
 async function preComputeMatches() {
   const profiles = await userProfiles.getAllProfiles();
   const now = Date.now();
-  const oneWeekAgo = now - (7 * 24 * 60 * 60 * 1000);
-  
+  const oneWeekAgo = now - 7 * 24 * 60 * 60 * 1000;
+
   // Find users who haven't been active but have good profiles
-  const dormantUsers = profiles.filter(p => 
-    p.lastSeen && p.lastSeen < oneWeekAgo &&
-    p.building && p.interests?.length > 0
+  const dormantUsers = profiles.filter(
+    p => p.lastSeen && p.lastSeen < oneWeekAgo && p.building && p.interests?.length > 0
   );
-  
-  const activeUsers = profiles.filter(p => 
-    p.lastSeen && p.lastSeen > oneWeekAgo
-  );
-  
+
+  const activeUsers = profiles.filter(p => p.lastSeen && p.lastSeen > oneWeekAgo);
+
   const preComputedMatches = [];
-  
+
   for (const dormantUser of dormantUsers) {
     const potentialMatches = [];
-    
+
     for (const activeUser of activeUsers) {
       if (dormantUser.handle === activeUser.handle) continue;
-      
+
       // Check if already connected
-      const alreadyConnected = await userProfiles.hasBeenConnected(
-        dormantUser.handle, 
-        activeUser.handle
-      );
+      const alreadyConnected = await userProfiles.hasBeenConnected(dormantUser.handle, activeUser.handle);
       if (alreadyConnected) continue;
-      
+
       // Calculate match score using existing algorithm
       const match = calculateSimpleMatchScore(dormantUser, activeUser);
-      if (match.score > 15) { // Higher threshold for dormant users
+      if (match.score > 15) {
+        // Higher threshold for dormant users
         potentialMatches.push({
           handle: activeUser.handle,
           score: match.score,
@@ -150,7 +139,7 @@ async function preComputeMatches() {
         });
       }
     }
-    
+
     if (potentialMatches.length > 0) {
       preComputedMatches.push({
         dormantUser: dormantUser.handle,
@@ -159,7 +148,7 @@ async function preComputeMatches() {
       });
     }
   }
-  
+
   return preComputedMatches;
 }
 
@@ -167,7 +156,7 @@ async function preComputeMatches() {
 function calculateSimpleMatchScore(user1, user2) {
   let score = 0;
   const reasons = [];
-  
+
   // Interest overlap
   if (user1.interests && user2.interests) {
     const shared = user1.interests.filter(i => user2.interests.includes(i));
@@ -176,8 +165,8 @@ function calculateSimpleMatchScore(user1, user2) {
       reasons.push(`Shared interests: ${shared.slice(0, 2).join(', ')}`);
     }
   }
-  
-  // Tag overlap  
+
+  // Tag overlap
   if (user1.tags && user2.tags) {
     const sharedTags = user1.tags.filter(t => user2.tags.includes(t));
     if (sharedTags.length > 0) {
@@ -185,7 +174,7 @@ function calculateSimpleMatchScore(user1, user2) {
       reasons.push(`Similar skills: ${sharedTags.slice(0, 2).join(', ')}`);
     }
   }
-  
+
   // Building similarity
   if (user1.building && user2.building) {
     const building1 = user1.building.toLowerCase();
@@ -198,7 +187,7 @@ function calculateSimpleMatchScore(user1, user2) {
       reasons.push(`Both working on ${overlap[0]}`);
     }
   }
-  
+
   return { score, reasons: reasons.slice(0, 2) };
 }
 
@@ -206,21 +195,21 @@ function calculateSimpleMatchScore(user1, user2) {
 async function identifyEmergingClusters() {
   const profiles = await userProfiles.getAllProfiles();
   const now = Date.now();
-  const oneMonthAgo = now - (30 * 24 * 60 * 60 * 1000);
-  
+  const oneMonthAgo = now - 30 * 24 * 60 * 60 * 1000;
+
   // Only consider recent users for emerging trends
   const recentProfiles = profiles.filter(p => p.firstSeen && p.firstSeen > oneMonthAgo);
-  
+
   if (recentProfiles.length < 3) {
     return { message: 'Not enough recent users to identify emerging clusters' };
   }
-  
+
   const clusters = {};
-  
+
   // Group by interests
   for (const profile of recentProfiles) {
     if (!profile.interests || profile.interests.length === 0) continue;
-    
+
     for (const interest of profile.interests) {
       if (!clusters[interest]) {
         clusters[interest] = [];
@@ -228,7 +217,7 @@ async function identifyEmergingClusters() {
       clusters[interest].push(profile.handle);
     }
   }
-  
+
   // Find clusters with 2+ recent users (potential communities)
   const emergingClusters = Object.entries(clusters)
     .filter(([interest, handles]) => handles.length >= 2)
@@ -239,7 +228,7 @@ async function identifyEmergingClusters() {
       potential: handles.length >= 3 ? 'high' : 'medium'
     }))
     .sort((a, b) => b.size - a.size);
-  
+
   return emergingClusters;
 }
 
@@ -247,17 +236,17 @@ async function identifyEmergingClusters() {
 async function suggestOptimalTiming() {
   const profiles = await userProfiles.getAllProfiles();
   const now = Date.now();
-  
+
   // Analyze when users are typically active
   const activityPatterns = {};
-  
+
   for (const profile of profiles) {
     if (!profile.lastSeen) continue;
-    
+
     const lastSeenDate = new Date(profile.lastSeen);
     const hour = lastSeenDate.getHours();
     const dayOfWeek = lastSeenDate.getDay();
-    
+
     if (!activityPatterns[profile.handle]) {
       activityPatterns[profile.handle] = {
         preferredHours: [],
@@ -265,11 +254,11 @@ async function suggestOptimalTiming() {
         timezone: null // Could be inferred from activity patterns
       };
     }
-    
+
     activityPatterns[profile.handle].preferredHours.push(hour);
     activityPatterns[profile.handle].preferredDays.push(dayOfWeek);
   }
-  
+
   // Find common active hours across users
   const hourCounts = {};
   for (const pattern of Object.values(activityPatterns)) {
@@ -277,18 +266,16 @@ async function suggestOptimalTiming() {
       hourCounts[hour] = (hourCounts[hour] || 0) + 1;
     }
   }
-  
+
   const peakHours = Object.entries(hourCounts)
-    .sort(([,a], [,b]) => b - a)
+    .sort(([, a], [, b]) => b - a)
     .slice(0, 3)
     .map(([hour, count]) => ({ hour: parseInt(hour), userCount: count }));
-  
+
   return {
     peakActivityHours: peakHours,
     totalActiveUsers: Object.keys(activityPatterns).length,
-    recommendedConnectionTimes: peakHours.map(p => 
-      `${p.hour}:00 (${p.userCount} users typically active)`
-    )
+    recommendedConnectionTimes: peakHours.map(p => `${p.hour}:00 (${p.userCount} users typically active)`)
   };
 }
 

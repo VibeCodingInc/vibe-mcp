@@ -8,15 +8,15 @@ const discord = require('../discord');
 const { trackMood } = require('./summarize');
 
 const MOODS = {
-  'shipping': '🔥',
-  'thinking': '🧠',
-  'afk': '☕',
-  'debugging': '🐛',
-  'pairing': '👯',
-  'deep': '🎧',
-  'celebrating': '🎉',
-  'struggling': '😤',
-  'clear': null
+  shipping: '🔥',
+  thinking: '🧠',
+  afk: '☕',
+  debugging: '🐛',
+  pairing: '👯',
+  deep: '🎧',
+  celebrating: '🎉',
+  struggling: '😤',
+  clear: null
 };
 
 // Special modes that toggle settings
@@ -24,7 +24,8 @@ const SPECIAL_MODES = ['guided', 'freeform'];
 
 const definition = {
   name: 'vibe_status',
-  description: 'Set your mood/status. Options: shipping, thinking, afk, debugging, pairing, deep, celebrating, struggling, clear',
+  description:
+    'Set your mood/status. Options: shipping, thinking, afk, debugging, pairing, deep, celebrating, struggling, clear',
   inputSchema: {
     type: 'object',
     properties: {

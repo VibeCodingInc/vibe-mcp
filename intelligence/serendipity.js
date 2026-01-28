@@ -134,7 +134,20 @@ function getModule(filePath) {
   const parts = filePath.split('/');
 
   // Look for meaningful directories
-  const meaningfulDirs = ['src', 'lib', 'app', 'components', 'pages', 'api', 'services', 'utils', 'hooks', 'store', 'models', 'controllers'];
+  const meaningfulDirs = [
+    'src',
+    'lib',
+    'app',
+    'components',
+    'pages',
+    'api',
+    'services',
+    'utils',
+    'hooks',
+    'store',
+    'models',
+    'controllers'
+  ];
 
   for (let i = 0; i < parts.length - 1; i++) {
     if (meaningfulDirs.includes(parts[i])) {
@@ -165,7 +178,24 @@ function extractBranchTopic(branch) {
   const parts = cleaned.split('-').filter(p => p.length > 2);
 
   // Common topic keywords
-  const topics = ['auth', 'user', 'api', 'db', 'database', 'ui', 'test', 'config', 'payment', 'email', 'notification', 'search', 'cache', 'session', 'login', 'signup'];
+  const topics = [
+    'auth',
+    'user',
+    'api',
+    'db',
+    'database',
+    'ui',
+    'test',
+    'config',
+    'payment',
+    'email',
+    'notification',
+    'search',
+    'cache',
+    'session',
+    'login',
+    'signup'
+  ];
 
   // Look for topic keywords
   for (const part of parts) {
@@ -200,12 +230,13 @@ function errorSimilarity(error1, error2) {
   if (!error1 || !error2) return 0;
 
   // Normalize errors
-  const normalize = (err) => err
-    .toLowerCase()
-    .replace(/[0-9]+/g, 'N')        // Replace numbers
-    .replace(/['"`]/g, '')           // Remove quotes
-    .replace(/\s+/g, ' ')            // Normalize whitespace
-    .slice(0, 100);                  // Truncate
+  const normalize = err =>
+    err
+      .toLowerCase()
+      .replace(/[0-9]+/g, 'N') // Replace numbers
+      .replace(/['"`]/g, '') // Remove quotes
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .slice(0, 100); // Truncate
 
   const e1 = normalize(error1);
   const e2 = normalize(error2);
@@ -214,9 +245,17 @@ function errorSimilarity(error1, error2) {
 
   // Check for common error types
   const errorTypes = [
-    'TypeError', 'SyntaxError', 'ReferenceError', 'RangeError',
-    'undefined is not', 'cannot read property', 'is not a function',
-    'module not found', 'cannot find module', 'ENOENT', 'ECONNREFUSED'
+    'TypeError',
+    'SyntaxError',
+    'ReferenceError',
+    'RangeError',
+    'undefined is not',
+    'cannot read property',
+    'is not a function',
+    'module not found',
+    'cannot find module',
+    'ENOENT',
+    'ECONNREFUSED'
   ];
 
   for (const type of errorTypes) {
@@ -252,12 +291,12 @@ function isNewUser(user) {
  */
 function formatSerendipityMoment(moment) {
   const emoji = {
-    'same_file': '✨',
-    'same_module': '🔗',
-    'same_topic': '🎯',
-    'same_struggle': '🤝',
-    'complementary': '💡',
-    'both_new': '👋'
+    same_file: '✨',
+    same_module: '🔗',
+    same_topic: '🎯',
+    same_struggle: '🤝',
+    complementary: '💡',
+    both_new: '👋'
   };
 
   return {
@@ -289,9 +328,7 @@ function getTopSerendipity(currentUser, allUsers) {
  */
 function getAllSerendipity(currentUser, allUsers, minRelevance = 0.5) {
   const matches = findSerendipity(currentUser, allUsers);
-  return matches
-    .filter(m => m.relevance >= minRelevance)
-    .map(formatSerendipityMoment);
+  return matches.filter(m => m.relevance >= minRelevance).map(formatSerendipityMoment);
 }
 
 module.exports = {

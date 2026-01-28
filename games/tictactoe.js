@@ -22,9 +22,14 @@ function createInitialTicTacToeState(difficulty = 'medium') {
 // Check for winner in tic-tac-toe
 function checkWinner(board) {
   const lines = [
-    [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
-    [0, 3, 6], [1, 4, 7], [2, 5, 8], // cols
-    [0, 4, 8], [2, 4, 6]             // diagonals
+    [0, 1, 2],
+    [3, 4, 5],
+    [6, 7, 8], // rows
+    [0, 3, 6],
+    [1, 4, 7],
+    [2, 5, 8], // cols
+    [0, 4, 8],
+    [2, 4, 6] // diagonals
   ];
 
   for (const [a, b, c] of lines) {
@@ -39,18 +44,18 @@ function checkWinner(board) {
 // Make a move
 function makeMove(gameState, position, playerSymbol) {
   const { board, moves, winner, gameOver } = gameState;
-  
+
   // Validate move
   if (gameOver) {
     return { error: 'Game is already over' };
   }
-  
+
   if (position < 1 || position > 9) {
     return { error: 'Position must be 1-9' };
   }
-  
+
   const index = position - 1; // Convert to 0-based index
-  
+
   if (board[index]) {
     return { error: 'Position already taken' };
   }
@@ -58,13 +63,13 @@ function makeMove(gameState, position, playerSymbol) {
   // Make the move
   const newBoard = [...board];
   newBoard[index] = playerSymbol;
-  
+
   const newMoves = moves + 1;
   const newWinner = checkWinner(newBoard);
   const newIsDraw = !newWinner && newBoard.every(cell => cell !== '');
   const newGameOver = newWinner || newIsDraw;
   const nextTurn = playerSymbol === 'X' ? 'O' : 'X';
-  
+
   const newGameState = {
     ...gameState,
     board: newBoard,
@@ -75,19 +80,19 @@ function makeMove(gameState, position, playerSymbol) {
     isDraw: newIsDraw,
     lastMove: { position, symbol: playerSymbol }
   };
-  
+
   return { success: true, gameState: newGameState };
 }
 
 // Minimax algorithm for perfect AI play (hard difficulty)
 function minimax(board, depth, isMaximizing, aiSymbol, playerSymbol, alpha = -Infinity, beta = Infinity) {
   const winner = checkWinner(board);
-  
+
   // Base cases
   if (winner === aiSymbol) return 10 - depth;
   if (winner === playerSymbol) return depth - 10;
   if (board.every(cell => cell !== '')) return 0; // Draw
-  
+
   if (isMaximizing) {
     let maxEval = -Infinity;
     for (let i = 0; i < 9; i++) {
@@ -121,20 +126,20 @@ function minimax(board, depth, isMaximizing, aiSymbol, playerSymbol, alpha = -In
 function getBestMove(board, aiSymbol, playerSymbol) {
   let bestMove = -1;
   let bestValue = -Infinity;
-  
+
   for (let i = 0; i < 9; i++) {
     if (board[i] === '') {
       board[i] = aiSymbol;
       const moveValue = minimax(board, 0, false, aiSymbol, playerSymbol);
       board[i] = '';
-      
+
       if (moveValue > bestValue) {
         bestMove = i + 1; // Convert to 1-based index
         bestValue = moveValue;
       }
     }
   }
-  
+
   return bestMove;
 }
 
@@ -142,7 +147,7 @@ function getBestMove(board, aiSymbol, playerSymbol) {
 function getAIMove(gameState, difficulty = 'medium') {
   const { board, aiSymbol, playerSymbol } = gameState;
   const availablePositions = getAvailablePositions(board);
-  
+
   if (availablePositions.length === 0) {
     return null;
   }
@@ -171,7 +176,7 @@ function getEasyAIMove(board, availablePositions, aiSymbol, playerSymbol) {
     const randomIndex = Math.floor(Math.random() * availablePositions.length);
     return availablePositions[randomIndex];
   }
-  
+
   // 30% chance to make a smart move
   // 1. Try to win (15% chance)
   if (Math.random() < 0.5) {
@@ -183,7 +188,7 @@ function getEasyAIMove(board, availablePositions, aiSymbol, playerSymbol) {
       }
     }
   }
-  
+
   // 2. Sometimes block player (15% chance)
   if (Math.random() < 0.5) {
     for (const pos of availablePositions) {
@@ -194,7 +199,7 @@ function getEasyAIMove(board, availablePositions, aiSymbol, playerSymbol) {
       }
     }
   }
-  
+
   // Fallback to random
   const randomIndex = Math.floor(Math.random() * availablePositions.length);
   return availablePositions[randomIndex];
@@ -266,20 +271,22 @@ function makeAIMove(gameState, difficulty = null) {
 // Format tic-tac-toe board for display
 function formatTicTacToeDisplay(gameState) {
   const { board, moves, winner, isDraw, turn, lastMove, playerSymbol, aiSymbol, difficulty } = gameState;
-  
+
   const difficultyEmoji = {
-    'easy': '😊',
-    'medium': '🤔',
-    'hard': '🧠'
+    easy: '😊',
+    medium: '🤔',
+    hard: '🧠'
   };
-  
-  const difficultyText = difficulty ? `${difficultyEmoji[difficulty] || '🤔'} ${difficulty.toUpperCase()}` : 'MEDIUM 🤔';
-  
+
+  const difficultyText = difficulty
+    ? `${difficultyEmoji[difficulty] || '🤔'} ${difficulty.toUpperCase()}`
+    : 'MEDIUM 🤔';
+
   let display = `🎯 **Tic-Tac-Toe vs AI** (${difficultyText}) - ${moves} moves\n\n`;
-  
+
   // Create 3x3 grid display
   const symbols = board.map((cell, i) => cell || (i + 1).toString());
-  
+
   display += '```\n';
   for (let row = 0; row < 3; row++) {
     const line = [];
@@ -291,7 +298,7 @@ function formatTicTacToeDisplay(gameState) {
     if (row < 2) display += '──┼───┼──\n';
   }
   display += '```\n\n';
-  
+
   if (winner) {
     if (winner === playerSymbol) {
       display += `🎉 **You won!** Great job!`;
@@ -306,29 +313,27 @@ function formatTicTacToeDisplay(gameState) {
     } else {
       display += `AI is thinking... 🤔`;
     }
-    
+
     if (lastMove) {
       const mover = lastMove.symbol === playerSymbol ? 'You' : 'AI';
       display += `\nLast move: ${mover} played ${lastMove.symbol} at position ${lastMove.position}`;
     }
   }
-  
+
   return display;
 }
 
 // Get available positions
 function getAvailablePositions(board) {
-  return board
-    .map((cell, index) => cell === '' ? index + 1 : null)
-    .filter(pos => pos !== null);
+  return board.map((cell, index) => (cell === '' ? index + 1 : null)).filter(pos => pos !== null);
 }
 
 // Get difficulty description for users
 function getDifficultyDescription(difficulty) {
   const descriptions = {
-    'easy': '😊 **EASY**: AI plays mostly randomly, great for beginners!',
-    'medium': '🤔 **MEDIUM**: AI uses basic strategy but makes some mistakes.',
-    'hard': '🧠 **HARD**: AI plays perfectly, can you beat it?'
+    easy: '😊 **EASY**: AI plays mostly randomly, great for beginners!',
+    medium: '🤔 **MEDIUM**: AI uses basic strategy but makes some mistakes.',
+    hard: '🧠 **HARD**: AI plays perfectly, can you beat it?'
   };
   return descriptions[difficulty] || descriptions['medium'];
 }

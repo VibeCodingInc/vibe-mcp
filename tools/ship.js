@@ -20,7 +20,8 @@ const requestTool = require('./request');
 
 const definition = {
   name: 'vibe_ship',
-  description: 'Share with the community. type="ship" (default): announce what you shipped. type="idea": post an idea for others to riff on. type="request": post a build request.',
+  description:
+    'Share with the community. type="ship" (default): announce what you shipped. type="idea": post an idea for others to riff on. type="request": post a build request.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -64,7 +65,7 @@ const definition = {
       },
       bounty: {
         type: 'string',
-        description: 'What you\'re offering for a request (for type=request)'
+        description: "What you're offering for a request (for type=request)"
       }
     }
   }
@@ -157,15 +158,17 @@ async function handler(args) {
     }
 
     display += '\n';
-    
+
     // Quiet awareness of similar builders
     const suggestions = await findSimilarShippers(myHandle, args.what);
     if (suggestions.length > 0) {
-      display += `\n_similar: @${suggestions.slice(0, 2).map(s => s.handle).join(', @')}_`;
+      display += `\n_similar: @${suggestions
+        .slice(0, 2)
+        .map(s => s.handle)
+        .join(', @')}_`;
     }
 
     return { display };
-
   } catch (error) {
     return { display: `## Ship Error\n\n${error.message}` };
   }
@@ -175,7 +178,10 @@ async function handler(args) {
 async function findSimilarShippers(myHandle, whatIShipped) {
   try {
     const allProfiles = await userProfiles.getAllProfiles();
-    const myWords = whatIShipped.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const myWords = whatIShipped
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(w => w.length > 3);
     const suggestions = [];
 
     for (const profile of allProfiles) {
@@ -185,7 +191,7 @@ async function findSimilarShippers(myHandle, whatIShipped) {
       for (const ship of profile.ships) {
         const shipWords = ship.what.toLowerCase().split(/\s+/);
         const overlap = myWords.filter(w => shipWords.includes(w));
-        
+
         if (overlap.length > 0) {
           suggestions.push({
             handle: profile.handle,
@@ -199,13 +205,11 @@ async function findSimilarShippers(myHandle, whatIShipped) {
     }
 
     // Sort by overlap and recency
-    return suggestions
-      .sort((a, b) => {
-        const overlapDiff = b.overlap - a.overlap;
-        if (overlapDiff !== 0) return overlapDiff;
-        return b.timestamp - a.timestamp;
-      });
-
+    return suggestions.sort((a, b) => {
+      const overlapDiff = b.overlap - a.overlap;
+      if (overlapDiff !== 0) return overlapDiff;
+      return b.timestamp - a.timestamp;
+    });
   } catch (error) {
     console.warn('Error finding similar shippers:', error);
     return [];

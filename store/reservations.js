@@ -186,12 +186,7 @@ function checkConflicts(paths, exclusive = true, scope = null) {
 
 // Create a new reservation
 function create(owner, paths, options = {}) {
-  const {
-    ttl_seconds = 3600,
-    exclusive = true,
-    reason = null,
-    thread_id = null
-  } = options;
+  const { ttl_seconds = 3600, exclusive = true, reason = null, thread_id = null } = options;
 
   const scope = getScope();
   const now = new Date();
@@ -273,9 +268,7 @@ function list(options = {}) {
 
   // Filter by path
   if (path_filter) {
-    reservations = reservations.filter(r =>
-      r.paths.some(p => p.includes(path_filter) || path_filter.includes(p))
-    );
+    reservations = reservations.filter(r => r.paths.some(p => p.includes(path_filter) || path_filter.includes(p)));
   }
 
   return reservations;

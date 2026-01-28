@@ -1,6 +1,6 @@
 /**
  * Enhanced Discovery Features - Advanced matchmaking capabilities
- * 
+ *
  * Features for @discovery-agent:
  * - Smart profile completion suggestions
  * - Cross-domain interest matching
@@ -14,27 +14,27 @@ const store = require('../store');
 
 // Advanced interest mapping - find connections across domains
 const CROSS_DOMAIN_INTERESTS = {
-  'ai': {
+  ai: {
     related: ['machine learning', 'data science', 'automation', 'nlp'],
     complementary: ['ui/ux', 'product', 'ethics', 'data visualization'],
     applications: ['healthcare', 'fintech', 'education', 'gaming']
   },
-  'frontend': {
+  frontend: {
     related: ['ui/ux', 'design systems', 'react', 'vue', 'angular'],
     complementary: ['backend', 'api design', 'devops', 'mobile'],
     applications: ['web apps', 'dashboards', 'marketing sites', 'e-commerce']
   },
-  'blockchain': {
+  blockchain: {
     related: ['crypto', 'web3', 'defi', 'nfts', 'smart contracts'],
     complementary: ['security', 'economics', 'legal', 'community'],
     applications: ['fintech', 'gaming', 'supply chain', 'identity']
   },
-  'healthcare': {
+  healthcare: {
     related: ['medical devices', 'telemedicine', 'health data', 'wellness'],
     complementary: ['ai', 'security', 'compliance', 'ux'],
     applications: ['patient care', 'research', 'mental health', 'fitness']
   },
-  'gaming': {
+  gaming: {
     related: ['game design', 'unity', 'unreal', 'mobile games'],
     complementary: ['ai', 'networking', 'audio', 'community'],
     applications: ['education', 'simulation', 'social', 'vr/ar']
@@ -45,27 +45,27 @@ const CROSS_DOMAIN_INTERESTS = {
 async function suggestProfileEnhancements(handle) {
   const profile = await userProfiles.getProfile(handle);
   const suggestions = [];
-  
+
   // Missing building project
   if (!profile.building) {
     suggestions.push({
       type: 'building',
       priority: 'high',
-      suggestion: 'Add what you\'re currently building to find similar builders',
+      suggestion: "Add what you're currently building to find similar builders",
       example: 'vibe update building "AI-powered code review tool"'
     });
   }
-  
+
   // Few interests
   if (!profile.interests || profile.interests.length < 2) {
     suggestions.push({
       type: 'interests',
-      priority: 'high', 
+      priority: 'high',
       suggestion: 'Add 3-5 interests to find people with shared passions',
       example: 'vibe update interests "ai, startups, productivity, music"'
     });
   }
-  
+
   // No technical tags
   if (!profile.tags || profile.tags.length < 2) {
     suggestions.push({
@@ -75,7 +75,7 @@ async function suggestProfileEnhancements(handle) {
       example: 'vibe update tags "python, react, backend, api-design"'
     });
   }
-  
+
   // Suggest cross-domain connections
   if (profile.interests && profile.interests.length > 0) {
     for (const interest of profile.interests) {
@@ -92,7 +92,7 @@ async function suggestProfileEnhancements(handle) {
       }
     }
   }
-  
+
   return suggestions;
 }
 
@@ -100,21 +100,22 @@ async function suggestProfileEnhancements(handle) {
 async function findCrossDomainMatches(handle) {
   const myProfile = await userProfiles.getProfile(handle);
   const allProfiles = await userProfiles.getAllProfiles();
-  
+
   const crossMatches = [];
-  
-  for (const interest of (myProfile.interests || [])) {
+
+  for (const interest of myProfile.interests || []) {
     const crossDomain = CROSS_DOMAIN_INTERESTS[interest.toLowerCase()];
     if (!crossDomain) continue;
-    
+
     // Find people in complementary domains
     for (const complementary of crossDomain.complementary) {
-      const matches = allProfiles.filter(p => 
-        p.handle !== myProfile.handle &&
-        (p.interests?.some(i => i.toLowerCase().includes(complementary.toLowerCase())) ||
-         p.tags?.some(t => t.toLowerCase().includes(complementary.toLowerCase())))
+      const matches = allProfiles.filter(
+        p =>
+          p.handle !== myProfile.handle &&
+          (p.interests?.some(i => i.toLowerCase().includes(complementary.toLowerCase())) ||
+            p.tags?.some(t => t.toLowerCase().includes(complementary.toLowerCase())))
       );
-      
+
       for (const match of matches) {
         crossMatches.push({
           handle: match.handle,
@@ -127,7 +128,7 @@ async function findCrossDomainMatches(handle) {
       }
     }
   }
-  
+
   return crossMatches.slice(0, 5);
 }
 
@@ -140,16 +141,16 @@ async function analyzeActivityPatterns() {
     recentlyActive: [],
     dormant: []
   };
-  
+
   const now = Date.now();
   const hour = 1000 * 60 * 60;
   const day = hour * 24;
-  
+
   for (const profile of allProfiles) {
     if (!profile.lastSeen) continue;
-    
+
     const timeAgo = now - profile.lastSeen;
-    
+
     // Recently active (last 2 hours)
     if (timeAgo < 2 * hour) {
       patterns.recentlyActive.push({
@@ -158,7 +159,7 @@ async function analyzeActivityPatterns() {
         minutesAgo: Math.floor(timeAgo / (1000 * 60))
       });
     }
-    
+
     // Dormant users (more than 7 days)
     if (timeAgo > 7 * day) {
       patterns.dormant.push({
@@ -166,13 +167,13 @@ async function analyzeActivityPatterns() {
         daysAgo: Math.floor(timeAgo / day)
       });
     }
-    
+
     // Estimate timezone (very rough)
     const lastSeenHour = new Date(profile.lastSeen).getHours();
     const timezone = `UTC${lastSeenHour < 12 ? '-' : '+'}${Math.abs(lastSeenHour - 12)}`;
     patterns.timezones[timezone] = (patterns.timezones[timezone] || 0) + 1;
   }
-  
+
   return patterns;
 }
 
@@ -186,19 +187,17 @@ async function getConnectionInsights() {
     recentConnections: [],
     connectionReasons: {}
   };
-  
+
   let totalUsers = 0;
-  
+
   for (const profile of allProfiles) {
     if (profile.connections && profile.connections.length > 0) {
       totalUsers++;
       insights.totalConnections += profile.connections.length;
-      
+
       // Recent connections (last 24 hours)
-      const recent = profile.connections.filter(c => 
-        (Date.now() - c.timestamp) < (1000 * 60 * 60 * 24)
-      );
-      
+      const recent = profile.connections.filter(c => Date.now() - c.timestamp < 1000 * 60 * 60 * 24);
+
       for (const conn of recent) {
         insights.recentConnections.push({
           from: profile.handle,
@@ -207,15 +206,14 @@ async function getConnectionInsights() {
           hoursAgo: Math.floor((Date.now() - conn.timestamp) / (1000 * 60 * 60))
         });
       }
-      
+
       // Track connection reasons
       for (const conn of profile.connections) {
         if (conn.reason) {
-          insights.connectionReasons[conn.reason] = 
-            (insights.connectionReasons[conn.reason] || 0) + 1;
+          insights.connectionReasons[conn.reason] = (insights.connectionReasons[conn.reason] || 0) + 1;
         }
       }
-      
+
       // Top connectors
       insights.topConnectors.push({
         handle: profile.handle,
@@ -223,13 +221,12 @@ async function getConnectionInsights() {
       });
     }
   }
-  
-  insights.avgConnectionsPerUser = totalUsers > 0 ? 
-    Math.round(insights.totalConnections / totalUsers * 10) / 10 : 0;
-    
+
+  insights.avgConnectionsPerUser = totalUsers > 0 ? Math.round((insights.totalConnections / totalUsers) * 10) / 10 : 0;
+
   insights.topConnectors.sort((a, b) => b.connections - a.connections);
   insights.topConnectors = insights.topConnectors.slice(0, 5);
-  
+
   return insights;
 }
 
@@ -238,15 +235,13 @@ async function generateDiscoveryRecommendations() {
   const allProfiles = await userProfiles.getAllProfiles();
   const insights = await getConnectionInsights();
   const patterns = await analyzeActivityPatterns();
-  
+
   const recommendations = [];
-  
+
   // Recommend profile improvements
   if (allProfiles.length > 0) {
-    const incompleteProfiles = allProfiles.filter(p => 
-      !p.building || !p.interests || p.interests.length < 2
-    ).length;
-    
+    const incompleteProfiles = allProfiles.filter(p => !p.building || !p.interests || p.interests.length < 2).length;
+
     if (incompleteProfiles > 0) {
       recommendations.push({
         type: 'profile-completion',
@@ -256,7 +251,7 @@ async function generateDiscoveryRecommendations() {
       });
     }
   }
-  
+
   // Recommend connection opportunities
   if (patterns.recentlyActive.length > 1) {
     recommendations.push({
@@ -266,17 +261,17 @@ async function generateDiscoveryRecommendations() {
       action: 'Perfect time for real-time connection suggestions'
     });
   }
-  
+
   // Recommend re-engagement
   if (patterns.dormant.length > 0) {
     recommendations.push({
       type: 'reengagement',
-      priority: 'low', 
+      priority: 'low',
       message: `${patterns.dormant.length} dormant users could be re-engaged`,
       action: 'Send personalized connection suggestions to bring them back'
     });
   }
-  
+
   return recommendations;
 }
 

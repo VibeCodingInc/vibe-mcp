@@ -34,10 +34,7 @@ function generateOAuthSignature(method, url, params, consumerSecret, tokenSecret
 
   const signingKey = `${encodeURIComponent(consumerSecret)}&${encodeURIComponent(tokenSecret || '')}`;
 
-  return crypto
-    .createHmac('sha1', signingKey)
-    .update(signatureBaseString)
-    .digest('base64');
+  return crypto.createHmac('sha1', signingKey).update(signatureBaseString).digest('base64');
 }
 
 /**
@@ -58,13 +55,7 @@ function generateOAuthHeader(method, url, params = {}) {
 
   const allParams = { ...oauthParams, ...params };
 
-  oauthParams.oauth_signature = generateOAuthSignature(
-    method,
-    url,
-    allParams,
-    creds.api_secret,
-    creds.access_secret
-  );
+  oauthParams.oauth_signature = generateOAuthSignature(method, url, allParams, creds.api_secret, creds.access_secret);
 
   const headerString = Object.keys(oauthParams)
     .sort()
@@ -82,13 +73,11 @@ async function xRequest(method, endpoint, params = {}, body = null) {
   const url = `${baseUrl}${endpoint}`;
 
   const headers = {
-    'Authorization': generateOAuthHeader(method, url, method === 'GET' ? params : {}),
+    Authorization: generateOAuthHeader(method, url, method === 'GET' ? params : {}),
     'Content-Type': 'application/json'
   };
 
-  const fetchUrl = method === 'GET' && Object.keys(params).length > 0
-    ? `${url}?${new URLSearchParams(params)}`
-    : url;
+  const fetchUrl = method === 'GET' && Object.keys(params).length > 0 ? `${url}?${new URLSearchParams(params)}` : url;
 
   const response = await fetch(fetchUrl, {
     method,
@@ -126,7 +115,7 @@ async function getMentions(sinceId = null) {
 
   const params = {
     'tweet.fields': 'created_at,author_id,text,conversation_id',
-    'expansions': 'author_id',
+    expansions: 'author_id',
     'user.fields': 'username,name,profile_image_url',
     max_results: '10'
   };
@@ -144,7 +133,7 @@ async function getMentions(sinceId = null) {
 async function getDMConversations() {
   return xRequest('GET', '/2/dm_conversations', {
     'dm_event.fields': 'created_at,sender_id,text',
-    'expansions': 'sender_id',
+    expansions: 'sender_id',
     'user.fields': 'username,name'
   });
 }
@@ -162,9 +151,14 @@ async function getDMEvents(conversationId) {
  * Send a DM
  */
 async function sendDM(recipientId, text) {
-  return xRequest('POST', '/2/dm_conversations/with/' + recipientId + '/messages', {}, {
-    text
-  });
+  return xRequest(
+    'POST',
+    '/2/dm_conversations/with/' + recipientId + '/messages',
+    {},
+    {
+      text
+    }
+  );
 }
 
 /**

@@ -87,7 +87,7 @@ If the problem persists, DM @vibe for help.`
     };
   }
 
-  let display = `## Report Submitted
+  const display = `## Report Submitted
 
 **Report ID:** ${result.report_id}
 **Reported:** @${reportedHandle}

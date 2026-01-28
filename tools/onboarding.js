@@ -24,9 +24,7 @@ const definition = {
 function formatTask(task, index) {
   const checkbox = task.completed ? '[x]' : '[ ]';
   const status = task.completed ? '✓' : ' ';
-  const completedText = task.completed && task.completedAt
-    ? ` _(done ${formatTimeAgo(task.completedAt)})_`
-    : '';
+  const completedText = task.completed && task.completedAt ? ` _(done ${formatTimeAgo(task.completedAt)})_` : '';
 
   return `${checkbox} **${task.title}**${completedText}`;
 }
@@ -132,7 +130,6 @@ Error: ${response.error || 'Unknown error'}`
     }
 
     return { display };
-
   } catch (e) {
     return {
       display: `## Onboarding Checklist

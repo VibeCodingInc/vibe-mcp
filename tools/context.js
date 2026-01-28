@@ -14,7 +14,7 @@ const store = require('../store');
 
 const definition = {
   name: 'vibe_context',
-  description: 'Share what you\'re working on (file, branch, error). Ephemeral — gone when you go offline.',
+  description: "Share what you're working on (file, branch, error). Ephemeral — gone when you go offline.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -24,7 +24,7 @@ const definition = {
       },
       error: {
         type: 'string',
-        description: 'Recent error you\'re debugging (optional)'
+        description: "Recent error you're debugging (optional)"
       },
       note: {
         type: 'string',
@@ -72,7 +72,7 @@ async function handler(args) {
       error: null,
       note: null
     });
-    return { display: 'Context cleared. Others no longer see what you\'re working on.' };
+    return { display: "Context cleared. Others no longer see what you're working on." };
   }
 
   // Auto-detect git info

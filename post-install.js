@@ -55,7 +55,6 @@ async function setup() {
     console.log('  1. Restart Claude Code');
     console.log('  2. Run: vibe init @yourusername\n');
     console.log('📖 Docs: https://slashvibe.dev\n');
-
   } catch (error) {
     console.error('⚠️  Setup incomplete:', error.message);
     console.error('\nManual setup:');

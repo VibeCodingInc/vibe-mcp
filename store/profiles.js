@@ -3,7 +3,7 @@
  *
  * Stores rich user data for matchmaking:
  * - What they're building
- * - Interests (broad topics they care about) 
+ * - Interests (broad topics they care about)
  * - Tags (specific skills/technologies)
  * - Activity patterns
  * - Connection history
@@ -41,24 +41,26 @@ function saveProfiles(profiles) {
 async function getProfile(handle) {
   const profiles = loadProfiles();
   const key = handle.toLowerCase().replace('@', '');
-  
-  return profiles[key] || {
-    handle: key,
-    building: null,
-    interests: [],
-    tags: [],
-    lastSeen: null,
-    firstSeen: null,
-    connections: [],
-    ships: []
-  };
+
+  return (
+    profiles[key] || {
+      handle: key,
+      building: null,
+      interests: [],
+      tags: [],
+      lastSeen: null,
+      firstSeen: null,
+      connections: [],
+      ships: []
+    }
+  );
 }
 
 // Update user profile
 async function updateProfile(handle, updates) {
   const profiles = loadProfiles();
   const key = handle.toLowerCase().replace('@', '');
-  
+
   const existing = profiles[key] || {
     handle: key,
     building: null,
@@ -72,29 +74,35 @@ async function updateProfile(handle, updates) {
 
   // Merge updates
   const updated = { ...existing, ...updates };
-  
+
   // Ensure arrays are properly formatted
   if (updates.interests) {
-    updated.interests = Array.isArray(updates.interests) 
-      ? updates.interests 
-      : updates.interests.split(',').map(s => s.trim()).filter(s => s);
+    updated.interests = Array.isArray(updates.interests)
+      ? updates.interests
+      : updates.interests
+          .split(',')
+          .map(s => s.trim())
+          .filter(s => s);
   }
-  
+
   if (updates.tags) {
     updated.tags = Array.isArray(updates.tags)
       ? updates.tags
-      : updates.tags.split(',').map(s => s.trim()).filter(s => s);
+      : updates.tags
+          .split(',')
+          .map(s => s.trim())
+          .filter(s => s);
   }
-  
+
   // Update timestamps
   updated.lastSeen = Date.now();
   if (!existing.firstSeen) {
     updated.firstSeen = Date.now();
   }
-  
+
   profiles[key] = updated;
   saveProfiles(profiles);
-  
+
   return updated;
 }
 
@@ -109,23 +117,23 @@ async function recordConnection(from, to, reason) {
   const profiles = loadProfiles();
   const fromKey = from.toLowerCase().replace('@', '');
   const toKey = to.toLowerCase().replace('@', '');
-  
+
   const connection = {
     timestamp: Date.now(),
     reason,
     suggested_by: 'discovery-agent'
   };
-  
+
   // Add to both profiles
   if (!profiles[fromKey]) profiles[fromKey] = createEmptyProfile(fromKey);
   if (!profiles[toKey]) profiles[toKey] = createEmptyProfile(toKey);
-  
+
   if (!profiles[fromKey].connections) profiles[fromKey].connections = [];
   if (!profiles[toKey].connections) profiles[toKey].connections = [];
-  
+
   profiles[fromKey].connections.push({ handle: toKey, ...connection });
   profiles[toKey].connections.push({ handle: fromKey, ...connection });
-  
+
   saveProfiles(profiles);
 }
 
@@ -133,23 +141,23 @@ async function recordConnection(from, to, reason) {
 async function recordShip(handle, what) {
   const profiles = loadProfiles();
   const key = handle.toLowerCase().replace('@', '');
-  
+
   if (!profiles[key]) {
     profiles[key] = createEmptyProfile(key);
   }
-  
+
   if (!profiles[key].ships) {
     profiles[key].ships = [];
   }
-  
+
   profiles[key].ships.unshift({
     what,
     timestamp: Date.now()
   });
-  
+
   // Keep only last 10 ships
   profiles[key].ships = profiles[key].ships.slice(0, 10);
-  
+
   saveProfiles(profiles);
 }
 
@@ -157,7 +165,7 @@ async function recordShip(handle, what) {
 async function updateLastSeen(handle) {
   const profiles = loadProfiles();
   const key = handle.toLowerCase().replace('@', '');
-  
+
   if (profiles[key]) {
     profiles[key].lastSeen = Date.now();
     saveProfiles(profiles);
@@ -168,7 +176,7 @@ async function updateLastSeen(handle) {
 async function getConnectionHistory(handle1, handle2) {
   const profile = await getProfile(handle1);
   const key2 = handle2.toLowerCase().replace('@', '');
-  
+
   return profile.connections?.filter(c => c.handle === key2) || [];
 }
 
@@ -182,27 +190,23 @@ async function hasBeenConnected(handle1, handle2) {
 async function getUsersByInterest(interest) {
   const profiles = await getAllProfiles();
   const searchTerm = interest.toLowerCase();
-  
-  return profiles.filter(p => 
-    p.interests?.some(i => i.toLowerCase().includes(searchTerm))
-  );
+
+  return profiles.filter(p => p.interests?.some(i => i.toLowerCase().includes(searchTerm)));
 }
 
 // Get users by tag
 async function getUsersByTag(tag) {
   const profiles = await getAllProfiles();
   const searchTerm = tag.toLowerCase();
-  
-  return profiles.filter(p => 
-    p.tags?.some(t => t.toLowerCase().includes(searchTerm))
-  );
+
+  return profiles.filter(p => p.tags?.some(t => t.toLowerCase().includes(searchTerm)));
 }
 
 // Get trending interests
 async function getTrendingInterests() {
   const profiles = await getAllProfiles();
   const interestCount = {};
-  
+
   for (const profile of profiles) {
     if (profile.interests) {
       for (const interest of profile.interests) {
@@ -210,18 +214,18 @@ async function getTrendingInterests() {
       }
     }
   }
-  
+
   return Object.entries(interestCount)
-    .sort(([,a], [,b]) => b - a)
+    .sort(([, a], [, b]) => b - a)
     .slice(0, 10)
     .map(([interest, count]) => ({ interest, count }));
 }
 
-// Get trending tags  
+// Get trending tags
 async function getTrendingTags() {
   const profiles = await getAllProfiles();
   const tagCount = {};
-  
+
   for (const profile of profiles) {
     if (profile.tags) {
       for (const tag of profile.tags) {
@@ -229,9 +233,9 @@ async function getTrendingTags() {
       }
     }
   }
-  
+
   return Object.entries(tagCount)
-    .sort(([,a], [,b]) => b - a)
+    .sort(([, a], [, b]) => b - a)
     .slice(0, 15)
     .map(([tag, count]) => ({ tag, count }));
 }
@@ -253,8 +257,8 @@ function createEmptyProfile(handle) {
 // Clean up old profiles (for maintenance)
 async function cleanupOldProfiles(daysThreshold = 30) {
   const profiles = loadProfiles();
-  const cutoff = Date.now() - (daysThreshold * 24 * 60 * 60 * 1000);
-  
+  const cutoff = Date.now() - daysThreshold * 24 * 60 * 60 * 1000;
+
   let cleaned = 0;
   for (const [key, profile] of Object.entries(profiles)) {
     if (profile.lastSeen && profile.lastSeen < cutoff) {
@@ -262,11 +266,11 @@ async function cleanupOldProfiles(daysThreshold = 30) {
       cleaned++;
     }
   }
-  
+
   if (cleaned > 0) {
     saveProfiles(profiles);
   }
-  
+
   return cleaned;
 }
 

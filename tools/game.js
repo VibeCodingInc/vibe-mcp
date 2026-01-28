@@ -32,9 +32,7 @@ async function postGameResult(winner, loser, isDraw, game = 'tic-tac-toe') {
 
   // Post to board
   try {
-    const content = isDraw
-      ? `@${winner} and @${loser} tied at ${game}`
-      : `@${winner} beat @${loser} at ${game}`;
+    const content = isDraw ? `@${winner} and @${loser} tied at ${game}` : `@${winner} beat @${loser} at ${game}`;
 
     await fetch(`${API_URL}/api/board`, {
       method: 'POST',
@@ -74,22 +72,28 @@ async function postGameResult(winner, loser, isDraw, game = 'tic-tac-toe') {
 // Games that delegate to absorbed tool handlers
 const DELEGATED_GAMES = {
   // Solo games (from solo-game.js)
-  'hangman': 'solo', 'rps': 'solo', 'memory': 'solo',
+  hangman: 'solo',
+  rps: 'solo',
+  memory: 'solo',
   // Party games (from party-game.js)
-  'twotruths': 'party', 'werewolf': 'party',
+  twotruths: 'party',
+  werewolf: 'party',
   // AI tictactoe (from tictactoe.js)
   'tictactoe-ai': 'tictactoe-ai',
   // Collaborative (from multiplayer-game.js)
-  'multiplayer-tictactoe': 'multiplayer', 'wordchain': 'multiplayer', 'storybuilder': 'multiplayer',
+  'multiplayer-tictactoe': 'multiplayer',
+  wordchain: 'multiplayer',
+  storybuilder: 'multiplayer',
   // Standalone tools
-  'wordassociation': 'wordassociation',
-  'drawing': 'drawing',
-  'crossword': 'crossword',
+  wordassociation: 'wordassociation',
+  drawing: 'drawing',
+  crossword: 'crossword'
 };
 
 const definition = {
   name: 'vibe_game',
-  description: 'Start or play any game. Multiplayer: tictactoe, chess. Solo: hangman, rps, memory. Party: twotruths, werewolf. AI: tictactoe-ai. Collaborative: drawing, crossword, wordassociation, wordchain, storybuilder, multiplayer-tictactoe.',
+  description:
+    'Start or play any game. Multiplayer: tictactoe, chess. Solo: hangman, rps, memory. Party: twotruths, werewolf. AI: tictactoe-ai. Collaborative: drawing, crossword, wordassociation, wordchain, storybuilder, multiplayer-tictactoe.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -101,12 +105,20 @@ const definition = {
         type: 'string',
         description: 'Game to play (default: tictactoe)',
         enum: [
-          'tictactoe', 'chess',
-          'hangman', 'rps', 'memory',
-          'twotruths', 'werewolf',
+          'tictactoe',
+          'chess',
+          'hangman',
+          'rps',
+          'memory',
+          'twotruths',
+          'werewolf',
           'tictactoe-ai',
-          'drawing', 'crossword', 'wordassociation',
-          'multiplayer-tictactoe', 'wordchain', 'storybuilder'
+          'drawing',
+          'crossword',
+          'wordassociation',
+          'multiplayer-tictactoe',
+          'wordchain',
+          'storybuilder'
         ]
       },
       move: {
@@ -145,9 +157,14 @@ function getGameState(thread, game) {
  */
 function checkTicTacToeWinner(board) {
   const lines = [
-    [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
-    [0, 3, 6], [1, 4, 7], [2, 5, 8], // cols
-    [0, 4, 8], [2, 4, 6]             // diagonals
+    [0, 1, 2],
+    [3, 4, 5],
+    [6, 7, 8], // rows
+    [0, 3, 6],
+    [1, 4, 7],
+    [2, 5, 8], // cols
+    [0, 4, 8],
+    [2, 4, 6] // diagonals
   ];
 
   for (const [a, b, c] of lines) {
@@ -165,30 +182,40 @@ function checkTicTacToeWinner(board) {
 function formatChessPayload(payload) {
   const state = payload.state || {};
   const board = state.board || [];
-  
+
   if (!board.length) return '♟️ **Chess** (setting up...)';
 
   const files = '  a b c d e f g h';
   let display = '♟️ **Chess** ' + (state.moves ? `(move ${state.moves})` : '(new game)') + '\n```\n' + files + '\n';
-  
+
   for (let rank = 0; rank < 8; rank++) {
-    let row = (8 - rank) + ' ';
+    let row = 8 - rank + ' ';
     for (let file = 0; file < 8; file++) {
       const piece = board[rank] && board[rank][file];
       // Use chess piece Unicode symbols
       const pieceSymbols = {
-        'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
-        'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟'
+        K: '♔',
+        Q: '♕',
+        R: '♖',
+        B: '♗',
+        N: '♘',
+        P: '♙',
+        k: '♚',
+        q: '♛',
+        r: '♜',
+        b: '♝',
+        n: '♞',
+        p: '♟'
       };
-      const symbol = piece ? (pieceSymbols[piece] || piece) : ((rank + file) % 2 === 0 ? '·' : ' ');
+      const symbol = piece ? pieceSymbols[piece] || piece : (rank + file) % 2 === 0 ? '·' : ' ';
       row += symbol + ' ';
     }
-    row += (8 - rank);
+    row += 8 - rank;
     display += row + '\n';
   }
-  
+
   display += files + '\n```\n';
-  
+
   if (state.winner) {
     display += `**Winner: ${state.winner}**`;
   } else if (state.checkmate) {
@@ -198,11 +225,11 @@ function formatChessPayload(payload) {
   } else if (state.check) {
     display += '**Check!** ';
   }
-  
+
   if (!state.winner && !state.checkmate && !state.stalemate) {
     display += `Turn: **${state.turn || 'white'}**`;
   }
-  
+
   if (state.lastMove) {
     display += `\nLast move: ${state.lastMove.notation}`;
   }
@@ -249,7 +276,7 @@ async function handler(args) {
   const them = normalizeHandle(handle);
 
   if (them === myHandle) {
-    return { display: 'You can\'t play a game with yourself.' };
+    return { display: "You can't play a game with yourself." };
   }
 
   // Get existing thread
@@ -263,8 +290,14 @@ async function handler(args) {
       if (game === 'chess') {
         const newState = chess.createInitialChessState();
         const payload = createGamePayload('chess', newState);
-        
-        await store.sendMessage(myHandle, them, 'Starting a new chess game! You can play white and go first.', 'dm', payload);
+
+        await store.sendMessage(
+          myHandle,
+          them,
+          'Starting a new chess game! You can play white and go first.',
+          'dm',
+          payload
+        );
 
         return {
           display: `## New Chess Game with @${them}\n\n${formatChessPayload(payload)}\n\nUse \`vibe game @${them} --move e4\` to make moves in algebraic notation`
@@ -285,23 +318,18 @@ async function handler(args) {
     // Show existing game
     let payload;
     let displayText;
-    
+
     if (game === 'chess') {
       payload = createGamePayload('chess', gameState);
       displayText = `## Chess Game with @${them}\n\n${formatChessPayload(payload)}\n`;
-      
+
       if (gameState.winner || gameState.checkmate) {
         displayText += `\nGame over! Use \`vibe game @${them}\` with no move to start a new game.`;
       } else {
         displayText += `\nUse \`vibe game @${them} --move e4\` to make moves in algebraic notation`;
       }
     } else {
-      payload = createTicTacToePayload(
-        gameState.board,
-        gameState.turn,
-        gameState.moves,
-        gameState.winner
-      );
+      payload = createTicTacToePayload(gameState.board, gameState.turn, gameState.moves, gameState.winner);
       displayText = `## Game with @${them}\n\n${formatPayload(payload)}\n`;
 
       if (gameState.winner) {
@@ -355,7 +383,6 @@ async function handler(args) {
     return {
       display: `## Chess Game with @${them}\n\n${formatChessPayload(payload)}\n\n${newGameState.checkmate ? '🎉 You win!' : newGameState.stalemate ? '🤝 Stalemate!' : `Waiting for @${them}...`}`
     };
-
   } else {
     // Tic-tac-toe logic
     const position = move - 1; // Convert 1-9 to 0-8
@@ -401,12 +428,7 @@ async function handler(args) {
     const nextTurn = mySymbol === 'X' ? 'O' : 'X';
 
     // Create payload
-    const payload = createTicTacToePayload(
-      newBoard,
-      winner ? mySymbol : nextTurn,
-      newMoves,
-      winner
-    );
+    const payload = createTicTacToePayload(newBoard, winner ? mySymbol : nextTurn, newMoves, winner);
 
     // Send message with game state
     let message = '';

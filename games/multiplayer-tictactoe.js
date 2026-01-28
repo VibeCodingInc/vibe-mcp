@@ -31,17 +31,17 @@ function createInitialMultiplayerTicTacToeState(host, roomName = null) {
 // Join a game room (as player or spectator)
 function joinRoom(gameState, playerHandle, asSpectator = false) {
   const { players, spectators, gameStarted, host } = gameState;
-  
+
   // Check if already in the game
   if (players.includes(playerHandle) || spectators.includes(playerHandle)) {
     return { error: 'Already in this game room' };
   }
-  
+
   if (!asSpectator && players.length < 2 && !gameStarted) {
     // Join as player
     const newPlayers = [...players, playerHandle];
     const playerSymbols = { ...gameState.playerSymbols };
-    
+
     // Assign symbols - host gets X (goes first), second player gets O
     if (playerHandle === host) {
       playerSymbols[playerHandle] = 'X';
@@ -51,10 +51,10 @@ function joinRoom(gameState, playerHandle, asSpectator = false) {
       // Second player gets O
       playerSymbols[playerHandle] = 'O';
     }
-    
+
     // Start game if we now have 2 players
     const shouldStart = newPlayers.length === 2;
-    
+
     return {
       success: true,
       gameState: {
@@ -81,14 +81,14 @@ function joinRoom(gameState, playerHandle, asSpectator = false) {
 // Leave the room
 function leaveRoom(gameState, playerHandle) {
   const { players, spectators, gameStarted, gameOver } = gameState;
-  
+
   const wasPlayer = players.includes(playerHandle);
   const wasSpectator = spectators.includes(playerHandle);
-  
+
   if (!wasPlayer && !wasSpectator) {
     return { error: 'Not in this game room' };
   }
-  
+
   // If game is in progress and a player leaves, end the game
   if (wasPlayer && gameStarted && !gameOver) {
     const remainingPlayer = players.find(p => p !== playerHandle);
@@ -101,15 +101,18 @@ function leaveRoom(gameState, playerHandle) {
         winner: remainingPlayer,
         gameOver: true,
         lastActivity: new Date().toISOString(),
-        history: [...gameState.history, { 
-          type: 'forfeit', 
-          player: playerHandle, 
-          timestamp: new Date().toISOString() 
-        }]
+        history: [
+          ...gameState.history,
+          {
+            type: 'forfeit',
+            player: playerHandle,
+            timestamp: new Date().toISOString()
+          }
+        ]
       }
     };
   }
-  
+
   // Normal leave
   return {
     success: true,
@@ -125,9 +128,14 @@ function leaveRoom(gameState, playerHandle) {
 // Check for winner in tic-tac-toe
 function checkWinner(board) {
   const lines = [
-    [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
-    [0, 3, 6], [1, 4, 7], [2, 5, 8], // cols
-    [0, 4, 8], [2, 4, 6]             // diagonals
+    [0, 1, 2],
+    [3, 4, 5],
+    [6, 7, 8], // rows
+    [0, 3, 6],
+    [1, 4, 7],
+    [2, 5, 8], // cols
+    [0, 4, 8],
+    [2, 4, 6] // diagonals
   ];
 
   for (const [a, b, c] of lines) {
@@ -141,32 +149,32 @@ function checkWinner(board) {
 // Make a move
 function makeMove(gameState, position, playerHandle) {
   const { board, players, turn, moves, winner, gameOver, gameStarted, playerSymbols } = gameState;
-  
+
   // Validate game state
   if (!gameStarted) {
-    return { error: 'Game hasn\'t started yet. Need 2 players.' };
+    return { error: "Game hasn't started yet. Need 2 players." };
   }
-  
+
   if (gameOver) {
     return { error: 'Game is already over' };
   }
-  
+
   // Validate player
   if (!players.includes(playerHandle)) {
     return { error: 'You are not a player in this game' };
   }
-  
+
   // Check if it's player's turn
   const playerSymbol = playerSymbols[playerHandle];
   if (playerSymbol !== turn) {
     return { error: `Not your turn! Waiting for ${turn}` };
   }
-  
+
   // Validate position
   if (position < 1 || position > 9) {
     return { error: 'Position must be 1-9' };
   }
-  
+
   const index = position - 1; // Convert to 0-based index
   if (board[index]) {
     return { error: `Position ${position} is already taken` };
@@ -175,13 +183,13 @@ function makeMove(gameState, position, playerHandle) {
   // Make the move
   const newBoard = [...board];
   newBoard[index] = playerSymbol;
-  
+
   const newMoves = moves + 1;
   const newWinner = checkWinner(newBoard);
   const newIsDraw = !newWinner && newBoard.every(cell => cell !== '');
   const newGameOver = newWinner || newIsDraw;
   const nextTurn = playerSymbol === 'X' ? 'O' : 'X';
-  
+
   // Record move in history
   const moveRecord = {
     type: 'move',
@@ -191,7 +199,7 @@ function makeMove(gameState, position, playerHandle) {
     timestamp: new Date().toISOString(),
     moveNumber: newMoves
   };
-  
+
   const newGameState = {
     ...gameState,
     board: newBoard,
@@ -203,24 +211,24 @@ function makeMove(gameState, position, playerHandle) {
     lastActivity: new Date().toISOString(),
     history: [...gameState.history, moveRecord]
   };
-  
+
   return { success: true, gameState: newGameState };
 }
 
 // Restart the game (keep same players)
 function restartGame(gameState, playerHandle) {
   const { players, host, spectators, playerSymbols } = gameState;
-  
+
   // Only players can restart
   if (!players.includes(playerHandle)) {
     return { error: 'Only players can restart the game' };
   }
-  
+
   // Need 2 players to restart
   if (players.length !== 2) {
     return { error: 'Need 2 players to restart the game' };
   }
-  
+
   return {
     success: true,
     gameState: {
@@ -241,13 +249,24 @@ function restartGame(gameState, playerHandle) {
 
 // Format multiplayer tic-tac-toe for display
 function formatMultiplayerTicTacToeDisplay(gameState, viewerHandle = null) {
-  const { 
-    roomName, host, players, spectators, board, turn, moves, winner, isDraw, 
-    gameStarted, playerSymbols, gameOver, history 
+  const {
+    roomName,
+    host,
+    players,
+    spectators,
+    board,
+    turn,
+    moves,
+    winner,
+    isDraw,
+    gameStarted,
+    playerSymbols,
+    gameOver,
+    history
   } = gameState;
-  
+
   let display = `🎯 **Multiplayer Tic-Tac-Toe** - ${roomName}\n\n`;
-  
+
   // Game status
   if (!gameStarted) {
     display += `**Waiting for players...** (${players.length}/2)\n`;
@@ -258,18 +277,18 @@ function formatMultiplayerTicTacToeDisplay(gameState, viewerHandle = null) {
       display += `Spectators: ${spectators.map(s => `@${s}`).join(', ')}\n`;
     }
     display += '\n';
-    
+
     if (players.length < 2) {
       display += 'Join with `/game multiplayer-tictactoe --join`\n';
       display += 'Or spectate with `/game multiplayer-tictactoe --spectate`\n';
     }
-    
+
     return display;
   }
-  
+
   // Show board
   const symbols = board.map((cell, i) => cell || (i + 1).toString());
-  
+
   display += `**Move ${moves}**\n`;
   display += '```\n';
   for (let row = 0; row < 3; row++) {
@@ -282,7 +301,7 @@ function formatMultiplayerTicTacToeDisplay(gameState, viewerHandle = null) {
     if (row < 2) display += '──┼───┼──\n';
   }
   display += '```\n\n';
-  
+
   // Game status
   if (winner) {
     const winnerHandle = Object.keys(playerSymbols).find(h => playerSymbols[h] === winner);
@@ -293,7 +312,7 @@ function formatMultiplayerTicTacToeDisplay(gameState, viewerHandle = null) {
     const currentPlayerHandle = Object.keys(playerSymbols).find(h => playerSymbols[h] === turn);
     display += `**@${currentPlayerHandle}'s turn** (${turn})\n\n`;
   }
-  
+
   // Show players
   display += `**Players:**\n`;
   for (const player of players) {
@@ -301,12 +320,12 @@ function formatMultiplayerTicTacToeDisplay(gameState, viewerHandle = null) {
     const status = symbol === turn && !gameOver ? ' ← current turn' : '';
     display += `• @${player} (${symbol})${status}\n`;
   }
-  
+
   // Show spectators if any
   if (spectators.length > 0) {
     display += `\n**Spectators (${spectators.length}):** ${spectators.map(s => `@${s}`).join(', ')}\n`;
   }
-  
+
   // Show controls based on viewer's role
   display += '\n';
   if (players.includes(viewerHandle)) {
@@ -326,7 +345,7 @@ function formatMultiplayerTicTacToeDisplay(gameState, viewerHandle = null) {
       display += `**Spectate:** \`/game multiplayer-tictactoe --spectate\`\n`;
     }
   }
-  
+
   // Show recent moves
   if (history.length > 0) {
     const recentMoves = history.filter(h => h.type === 'move').slice(-3);
@@ -337,21 +356,21 @@ function formatMultiplayerTicTacToeDisplay(gameState, viewerHandle = null) {
       }
     }
   }
-  
+
   return display;
 }
 
 // Get game statistics
 function getGameStats(gameState) {
   const { moves, history, players, spectators } = gameState;
-  
+
   const moveHistory = history.filter(h => h.type === 'move');
   const playerMoves = {};
-  
+
   for (const move of moveHistory) {
     playerMoves[move.player] = (playerMoves[move.player] || 0) + 1;
   }
-  
+
   return {
     totalMoves: moves,
     totalPlayers: players.length,
@@ -370,9 +389,7 @@ function canStartGame(gameState) {
 
 // Get available positions
 function getAvailablePositions(gameState) {
-  return gameState.board
-    .map((cell, index) => cell === '' ? index + 1 : null)
-    .filter(pos => pos !== null);
+  return gameState.board.map((cell, index) => (cell === '' ? index + 1 : null)).filter(pos => pos !== null);
 }
 
 module.exports = {

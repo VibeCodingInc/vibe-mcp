@@ -17,7 +17,7 @@ const wordassociation = require('./wordassociation');
 // Game routing table - maps game IDs to their implementations
 const GAME_ROUTES = {
   // Discovery & navigation
-  'arcade': {
+  arcade: {
     type: 'navigation',
     module: arcade,
     createState: arcade.createInitialArcadeState,
@@ -25,8 +25,8 @@ const GAME_ROUTES = {
     handleCommand: arcade.handleArcadeCommand,
     description: 'Browse all available games'
   },
-  
-  'gamestatus': {
+
+  gamestatus: {
     type: 'status',
     module: gamestatus,
     createState: gamestatus.createInitialGameStatusState,
@@ -34,9 +34,9 @@ const GAME_ROUTES = {
     handleCommand: gamestatus.handleGameStatusCommand,
     description: 'See game overview and get recommendations'
   },
-  
+
   // Creative & collaborative games
-  'drawing': {
+  drawing: {
     type: 'collaborative',
     module: drawing,
     createState: drawing.createInitialDrawingState,
@@ -44,18 +44,18 @@ const GAME_ROUTES = {
     handleCommand: null, // Uses direct methods
     description: 'Collaborative drawing canvas'
   },
-  
-  'pixelart': {
-    type: 'collaborative', 
+
+  pixelart: {
+    type: 'collaborative',
     module: pixelart,
     createState: pixelart.createInitialPixelArtState,
     display: pixelart.formatPixelArtDisplay,
     handleCommand: null,
     description: 'Collaborative pixel art creation'
   },
-  
+
   // Single-player games
-  'hangman': {
+  hangman: {
     type: 'singleplayer',
     module: hangman,
     createState: hangman.createInitialHangmanState,
@@ -63,18 +63,18 @@ const GAME_ROUTES = {
     handleCommand: null,
     description: 'Classic word guessing game'
   },
-  
-  'twentyquestions': {
+
+  twentyquestions: {
     type: 'interactive',
     module: twentyquestions,
     createState: twentyquestions.createInitialTwentyQuestionsState,
     display: twentyquestions.formatTwentyQuestionsDisplay,
     handleCommand: null,
-    description: 'Guess what I\'m thinking!'
+    description: "Guess what I'm thinking!"
   },
-  
-  // Multiplayer word games  
-  'wordchain': {
+
+  // Multiplayer word games
+  wordchain: {
     type: 'multiplayer',
     module: wordchain,
     createState: wordchain.createInitialWordChainState,
@@ -82,8 +82,8 @@ const GAME_ROUTES = {
     handleCommand: null,
     description: 'Build chains of connected words'
   },
-  
-  'wordassociation': {
+
+  wordassociation: {
     type: 'multiplayer',
     module: wordassociation,
     createState: wordassociation.createInitialWordAssociationState,
@@ -114,11 +114,11 @@ function createGameState(gameId) {
   if (!route) {
     return { error: `Game '${gameId}' not found!` };
   }
-  
+
   try {
     const state = route.createState();
-    return { 
-      success: true, 
+    return {
+      success: true,
       gameState: state,
       gameType: route.type,
       gameId: gameId
@@ -134,7 +134,7 @@ function displayGame(gameId, gameState) {
   if (!route) {
     return `Error: Game '${gameId}' not found!`;
   }
-  
+
   try {
     return route.display(gameState);
   } catch (error) {
@@ -148,11 +148,11 @@ function handleGameCommand(gameId, gameState, command) {
   if (!route) {
     return { error: `Game '${gameId}' not found!` };
   }
-  
+
   if (!route.handleCommand) {
     return { error: `Game '${gameId}' doesn't support text commands. Use specific game actions.` };
   }
-  
+
   try {
     return route.handleCommand(gameState, command);
   } catch (error) {
@@ -164,7 +164,7 @@ function handleGameCommand(gameId, gameState, command) {
 function getGameSuggestions(playerCount = 'any', difficulty = 'any', category = 'any') {
   const allGames = arcade.GAMES;
   let suggestions = Object.entries(allGames);
-  
+
   // Filter by player count
   if (playerCount !== 'any') {
     suggestions = suggestions.filter(([id, game]) => {
@@ -173,19 +173,17 @@ function getGameSuggestions(playerCount = 'any', difficulty = 'any', category = 
       return true;
     });
   }
-  
+
   // Filter by difficulty
   if (difficulty !== 'any') {
-    suggestions = suggestions.filter(([id, game]) => 
-      game.difficulty.toLowerCase() === difficulty.toLowerCase()
-    );
+    suggestions = suggestions.filter(([id, game]) => game.difficulty.toLowerCase() === difficulty.toLowerCase());
   }
-  
+
   // Filter by category
   if (category !== 'any') {
     suggestions = suggestions.filter(([id, game]) => game.category === category);
   }
-  
+
   return suggestions.map(([id, game]) => ({
     id,
     name: game.name,
@@ -201,65 +199,65 @@ function getGameSuggestions(playerCount = 'any', difficulty = 'any', category = 
 // Get quick start instructions for a game
 function getQuickStart(gameId) {
   const instructions = {
-    'arcade': 'Browse all games! Try typing category names like `classic` or game names like `chess`.',
-    'gamestatus': 'See game overview! Try `easy`, `solo`, `multiplayer` to filter games.',
-    'drawing': 'Join collaborative drawing! Use coordinates and character names to draw.',
-    'pixelart': 'Create pixel art! Place colored pixels to make collaborative art.',
-    'hangman': 'Guess letters to reveal the hidden word! Try common letters first.',
-    'twentyquestions': 'Ask yes/no questions to guess what I\'m thinking! You have 20 tries.',
-    'wordchain': 'Build word chains! Each word must connect to the previous word.',
-    'wordassociation': 'Say the first word that comes to mind! Build associations.'
+    arcade: 'Browse all games! Try typing category names like `classic` or game names like `chess`.',
+    gamestatus: 'See game overview! Try `easy`, `solo`, `multiplayer` to filter games.',
+    drawing: 'Join collaborative drawing! Use coordinates and character names to draw.',
+    pixelart: 'Create pixel art! Place colored pixels to make collaborative art.',
+    hangman: 'Guess letters to reveal the hidden word! Try common letters first.',
+    twentyquestions: "Ask yes/no questions to guess what I'm thinking! You have 20 tries.",
+    wordchain: 'Build word chains! Each word must connect to the previous word.',
+    wordassociation: 'Say the first word that comes to mind! Build associations.'
   };
-  
+
   return instructions[gameId] || 'Game instructions not available. Check the game description for details.';
 }
 
 // Format router help/overview
 function formatRouterHelp() {
   let help = '🎮 **GAME ROUTER - Quick Access to All Games**\n\n';
-  
+
   // Group by type
   const byType = {};
   Object.entries(GAME_ROUTES).forEach(([id, route]) => {
     if (!byType[route.type]) byType[route.type] = [];
     byType[route.type].push({ id, ...route });
   });
-  
+
   Object.entries(byType).forEach(([type, games]) => {
     const typeLabels = {
       navigation: '🧭 Navigation & Discovery',
-      status: '📊 Game Information', 
+      status: '📊 Game Information',
       collaborative: '🎨 Collaborative Games',
       singleplayer: '🎯 Solo Games',
       multiplayer: '👥 Multiplayer Games',
       interactive: '🤖 Interactive Games'
     };
-    
+
     help += `**${typeLabels[type] || type.toUpperCase()}**\n`;
     games.forEach(game => {
       help += `• \`${game.id}\` - ${game.description}\n`;
     });
     help += '\n';
   });
-  
+
   help += '**Quick Commands:**\n';
-  help += '• Type any game ID to launch it\n';  
+  help += '• Type any game ID to launch it\n';
   help += '• `available` - List all games\n';
   help += '• `suggest solo/multiplayer easy/medium` - Get recommendations\n';
   help += '• `arcade` - Browse full game collection\n';
-  help += '• `gamestatus` - See what\'s available\n\n';
-  
+  help += "• `gamestatus` - See what's available\n\n";
+
   help += '**Integration:**\n';
   help += 'Use `vibe game @user` for tic-tac-toe/chess\n';
   help += 'Use individual game names for other games\n';
-  
+
   return help;
 }
 
 // Handle general router commands
 function handleRouterCommand(command) {
   const cmd = command.toLowerCase().trim();
-  
+
   if (cmd === 'available' || cmd === 'list') {
     const games = getAvailableGames();
     return {
@@ -267,48 +265,48 @@ function handleRouterCommand(command) {
       display: `**Available Games (${games.length}):**\n${games.join(', ')}\n\nType any game name to launch it!`
     };
   }
-  
+
   if (cmd.startsWith('suggest')) {
     // Parse suggestion parameters
     const parts = cmd.split(' ').slice(1); // Remove 'suggest'
     let playerCount = 'any';
     let difficulty = 'any';
-    
+
     parts.forEach(part => {
       if (['solo', 'multiplayer'].includes(part)) playerCount = part;
       if (['easy', 'medium', 'hard'].includes(part)) difficulty = part;
     });
-    
+
     const suggestions = getGameSuggestions(playerCount, difficulty);
-    
+
     let response = `🎯 **Game Suggestions** (${suggestions.length} games)\n`;
     if (playerCount !== 'any') response += `*${playerCount} games*\n`;
     if (difficulty !== 'any') response += `*${difficulty} difficulty*\n`;
     response += '\n';
-    
+
     suggestions.slice(0, 8).forEach(game => {
       const status = game.available ? '✅' : '🚧';
       response += `${status} ${game.icon} **${game.name}** (${game.players})\n`;
       response += `   *${game.description}*\n\n`;
     });
-    
+
     return { success: true, display: response };
   }
-  
+
   if (cmd === 'help' || cmd === '?') {
     return { success: true, display: formatRouterHelp() };
   }
-  
+
   // Check if it's a game launch command
   if (gameAvailable(cmd)) {
     const result = createGameState(cmd);
     if (result.error) {
       return { error: result.error };
     }
-    
+
     const display = displayGame(cmd, result.gameState);
     const instructions = getQuickStart(cmd);
-    
+
     return {
       success: true,
       display: display + '\n\n💡 **Quick Start:** ' + instructions,
@@ -317,7 +315,7 @@ function handleRouterCommand(command) {
       gameType: result.gameType
     };
   }
-  
+
   return { error: `Unknown command '${cmd}'. Type 'help' for available commands or 'available' for game list.` };
 }
 

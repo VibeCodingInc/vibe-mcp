@@ -25,7 +25,7 @@ const definition = {
       },
       riff_on: {
         type: 'string',
-        description: 'Handle of person whose idea you\'re riffing on (e.g., @alice)'
+        description: "Handle of person whose idea you're riffing on (e.g., @alice)"
       },
       tags: {
         type: 'array',
@@ -50,7 +50,7 @@ const IDEA_STARTERS = [
   'What would happen if we combined...',
   'The intersection of X and Y could...',
   'A tool that lets you...',
-  'What\'s missing is...'
+  "What's missing is..."
 ];
 
 async function handler(args) {
@@ -103,9 +103,7 @@ async function handler(args) {
         patterns.logIdea(content, args.tags || []);
       }
 
-      let display = args.riff_on
-        ? `↳ riff posted\n\n`
-        : `💡 posted\n\n`;
+      let display = args.riff_on ? `↳ riff posted\n\n` : `💡 posted\n\n`;
 
       display += `"${content}"`;
 
@@ -114,7 +112,6 @@ async function handler(args) {
       }
 
       return { display };
-
     } catch (error) {
       return { display: `⚠️ Failed to post: ${error.message}` };
     }
@@ -123,15 +120,12 @@ async function handler(args) {
   // Browse ideas
   try {
     const limit = Math.min(args.limit || 10, 30);
-    let url = `${apiUrl}/api/board?limit=${limit}&category=idea`;
+    const url = `${apiUrl}/api/board?limit=${limit}&category=idea`;
 
     // Also fetch riffs
     const riffUrl = `${apiUrl}/api/board?limit=${limit}&category=riff`;
 
-    const [ideasRes, riffsRes] = await Promise.all([
-      fetch(url),
-      fetch(riffUrl)
-    ]);
+    const [ideasRes, riffsRes] = await Promise.all([fetch(url), fetch(riffUrl)]);
 
     const ideas = (await ideasRes.json()).entries || [];
     const riffs = (await riffsRes.json()).entries || [];
@@ -143,9 +137,7 @@ async function handler(args) {
     let filtered = allEntries;
     if (args.filter_tag) {
       const tag = args.filter_tag.toLowerCase();
-      filtered = allEntries.filter(e =>
-        e.tags && e.tags.some(t => t.toLowerCase().includes(tag))
-      );
+      filtered = allEntries.filter(e => e.tags && e.tags.some(t => t.toLowerCase().includes(tag)));
     }
 
     if (filtered.length === 0) {
@@ -183,9 +175,13 @@ async function handler(args) {
     topLevel.slice(0, 10).forEach(entry => {
       const emoji = entry.category === 'riff' ? '↳' : '💡';
       const timeAgo = formatTimeAgo(entry.timestamp);
-      const tags = entry.tags && entry.tags.length > 0
-        ? ` ${entry.tags.filter(t => !t.startsWith('riff:')).map(t => `#${t}`).join(' ')}`
-        : '';
+      const tags =
+        entry.tags && entry.tags.length > 0
+          ? ` ${entry.tags
+              .filter(t => !t.startsWith('riff:'))
+              .map(t => `#${t}`)
+              .join(' ')}`
+          : '';
 
       display += `${emoji} **@${entry.author}**${tags}\n`;
       display += `   "${entry.content}"\n`;
@@ -201,7 +197,6 @@ async function handler(args) {
     });
 
     return { display };
-
   } catch (error) {
     return { display: `⚠️ Failed to load ideas: ${error.message}` };
   }

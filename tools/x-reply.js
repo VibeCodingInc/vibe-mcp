@@ -71,7 +71,6 @@ async function handler(args) {
     }
 
     return { display };
-
   } catch (e) {
     return {
       display: `${header('X Reply')}\n\n_Error:_ ${e.message}`

@@ -10,8 +10,8 @@ const path = require('path');
 
 const VIBE_DIR = path.join(process.env.HOME, '.vibe');
 const VIBECODINGS_DIR = path.join(process.env.HOME, '.vibecodings');
-const PRIMARY_CONFIG = path.join(VIBECODINGS_DIR, 'config.json');  // Primary
-const FALLBACK_CONFIG = path.join(VIBE_DIR, 'config.json');        // Fallback
+const PRIMARY_CONFIG = path.join(VIBECODINGS_DIR, 'config.json'); // Primary
+const FALLBACK_CONFIG = path.join(VIBE_DIR, 'config.json'); // Fallback
 const CONFIG_FILE = PRIMARY_CONFIG;
 
 function ensureDir() {
@@ -70,7 +70,8 @@ function save(config) {
     // Notification level
     notifications: config.notifications || existing.notifications || null,
     // GitHub Activity settings
-    github_activity_enabled: config.github_activity_enabled !== undefined ? config.github_activity_enabled : existing.github_activity_enabled,
+    github_activity_enabled:
+      config.github_activity_enabled !== undefined ? config.github_activity_enabled : existing.github_activity_enabled,
     github_activity_privacy: config.github_activity_privacy || existing.github_activity_privacy || null,
     // Privy OAuth token (persisted across MCP process restarts)
     privyToken: config.privyToken || existing.privyToken || null,
@@ -231,7 +232,7 @@ function savePrivyToken(token) {
     ...data,
     sessionId: data.sessionId || generateSessionId(),
     token,
-    authMethod: 'privy'  // Track that this is a Privy token
+    authMethod: 'privy' // Track that this is a Privy token
   });
 
   // Also save to shared config for persistence across MCP restarts

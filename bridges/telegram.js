@@ -33,11 +33,11 @@ async function getBotInfo() {
 
   const response = await fetch(`https://api.telegram.org/bot${token}/getMe`);
   const data = await response.json();
-  
+
   if (!data.ok) {
     throw new Error(`Telegram API error: ${data.description}`);
   }
-  
+
   return data.result;
 }
 
@@ -63,11 +63,11 @@ async function sendMessage(chatId, text, options = {}) {
   });
 
   const data = await response.json();
-  
+
   if (!data.ok) {
     throw new Error(`Telegram send error: ${data.description}`);
   }
-  
+
   return data.result;
 }
 
@@ -84,11 +84,11 @@ async function getUpdates(offset = null, limit = 100) {
 
   const response = await fetch(`https://api.telegram.org/bot${token}/getUpdates?${params}`);
   const data = await response.json();
-  
+
   if (!data.ok) {
     throw new Error(`Telegram getUpdates error: ${data.description}`);
   }
-  
+
   return data.result;
 }
 
@@ -109,11 +109,11 @@ async function setWebhook(url, secretToken = null) {
   });
 
   const data = await response.json();
-  
+
   if (!data.ok) {
     throw new Error(`Telegram setWebhook error: ${data.description}`);
   }
-  
+
   return data.result;
 }
 
@@ -126,7 +126,7 @@ function processUpdate(update) {
 
   const from = message.from;
   const chat = message.chat;
-  
+
   return {
     id: `telegram:${message.message_id}`,
     channel: 'telegram',
@@ -152,12 +152,12 @@ function processUpdate(update) {
  */
 async function notifyActivity(chatId, activity) {
   const { handle, action, context } = activity;
-  
+
   let text = `🔔 *@${handle}* ${action}`;
   if (context) {
     text += `\n_${context}_`;
   }
-  
+
   return sendMessage(chatId, text, { markdown: true, silent: true });
 }
 
@@ -166,21 +166,21 @@ async function notifyActivity(chatId, activity) {
  */
 async function notifyStatus(chatId, handle, mood, note) {
   const moodEmoji = {
-    'shipping': '🔥',
-    'debugging': '🐛', 
-    'deep': '🧠',
-    'afk': '☕',
-    'celebrating': '🎉',
-    'pairing': '👯'
+    shipping: '🔥',
+    debugging: '🐛',
+    deep: '🧠',
+    afk: '☕',
+    celebrating: '🎉',
+    pairing: '👯'
   };
-  
+
   const emoji = moodEmoji[mood] || '●';
   let text = `${emoji} *@${handle}* is ${mood}`;
-  
+
   if (note) {
     text += `\n"${note}"`;
   }
-  
+
   return sendMessage(chatId, text, { markdown: true });
 }
 
@@ -189,11 +189,11 @@ async function notifyStatus(chatId, handle, mood, note) {
  */
 async function forwardFromVibe(chatId, handle, message, context = null) {
   let text = `💭 *@${handle}*: ${message}`;
-  
+
   if (context) {
     text += `\n_via ${context}_`;
   }
-  
+
   return sendMessage(chatId, text, { markdown: true });
 }
 
@@ -202,7 +202,7 @@ async function forwardFromVibe(chatId, handle, message, context = null) {
  */
 function parseVibeCommand(text) {
   const trimmed = text.trim();
-  
+
   // /status mood [note]
   const statusMatch = trimmed.match(/^\/status\s+(\w+)(?:\s+(.+))?$/);
   if (statusMatch) {
@@ -214,12 +214,12 @@ function parseVibeCommand(text) {
       }
     };
   }
-  
+
   // /who
   if (trimmed === '/who') {
     return { command: 'who' };
   }
-  
+
   // /ship [message]
   const shipMatch = trimmed.match(/^\/ship(?:\s+(.+))?$/);
   if (shipMatch) {
@@ -230,7 +230,7 @@ function parseVibeCommand(text) {
       }
     };
   }
-  
+
   // /dm @handle message
   const dmMatch = trimmed.match(/^\/dm\s+@?(\w+)\s+(.+)$/);
   if (dmMatch) {
@@ -242,7 +242,7 @@ function parseVibeCommand(text) {
       }
     };
   }
-  
+
   return null;
 }
 

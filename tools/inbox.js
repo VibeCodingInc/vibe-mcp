@@ -33,11 +33,23 @@ async function getNextOnboardingTask(handle) {
       if (nextTask) {
         // Map task IDs to user-friendly actions
         const taskActions = {
-          'read_welcome': { shortLabel: 'Read welcome', command: 'check my messages', description: 'See your welcome message' },
-          'reply_seth': { shortLabel: 'Reply to @vibe', command: 'message @vibe', description: 'Say hi back!' },
-          'message_builder': { shortLabel: 'Message a builder', command: 'discover suggest', description: 'Find someone to connect with' },
-          'post_ship': { shortLabel: 'Ship something', command: 'ship what I built', description: 'Share what you\'re building' },
-          'leave_feedback': { shortLabel: 'Give feedback', command: 'talk to @echo', description: 'Help improve /vibe' }
+          read_welcome: {
+            shortLabel: 'Read welcome',
+            command: 'check my messages',
+            description: 'See your welcome message'
+          },
+          reply_seth: { shortLabel: 'Reply to @vibe', command: 'message @vibe', description: 'Say hi back!' },
+          message_builder: {
+            shortLabel: 'Message a builder',
+            command: 'discover suggest',
+            description: 'Find someone to connect with'
+          },
+          post_ship: {
+            shortLabel: 'Ship something',
+            command: 'ship what I built',
+            description: "Share what you're building"
+          },
+          leave_feedback: { shortLabel: 'Give feedback', command: 'talk to @echo', description: 'Help improve /vibe' }
         };
         return taskActions[nextTask.id] || null;
       }
@@ -69,10 +81,7 @@ async function handler(args) {
 
   if (!threads || threads.length === 0) {
     // Fetch context for retention-optimized actions (parallel for speed)
-    const [recentShips, onboardingTask] = await Promise.all([
-      getRecentShips(2),
-      getNextOnboardingTask(myHandle)
-    ]);
+    const [recentShips, onboardingTask] = await Promise.all([getRecentShips(2), getNextOnboardingTask(myHandle)]);
 
     // Build social proof line
     let socialProof = '';
@@ -81,7 +90,7 @@ async function handler(args) {
     }
 
     // Build CTA based on onboarding state
-    let cta = onboardingTask
+    const cta = onboardingTask
       ? `→ ${onboardingTask.shortLabel}: "${onboardingTask.command}"`
       : 'Say "dm @someone" to start';
 
@@ -99,11 +108,13 @@ async function handler(args) {
    ${cta}
 ──────────────────────────────────────`,
       hint: 'suggest_compose',
-      actions: formatActions(actions.emptyInbox({
-        recentThreads: [],
-        recentShips,
-        onboardingTask
-      }))
+      actions: formatActions(
+        actions.emptyInbox({
+          recentThreads: [],
+          recentShips,
+          onboardingTask
+        })
+      )
     };
   }
 
@@ -123,10 +134,7 @@ async function handler(args) {
     const recentDisplay = recentHandles.map(h => `@${h}`).join(', ');
 
     // Fetch context for retention-optimized actions (parallel for speed)
-    const [recentShips, onboardingTask] = await Promise.all([
-      getRecentShips(2),
-      getNextOnboardingTask(myHandle)
-    ]);
+    const [recentShips, onboardingTask] = await Promise.all([getRecentShips(2), getNextOnboardingTask(myHandle)]);
 
     // Build social proof line
     let socialProof = '';
@@ -147,11 +155,13 @@ async function handler(args) {
    All caught up! Recent: ${recentDisplay}${socialProof}
 ──────────────────────────────────────`,
       hint: 'suggest_compose',
-      actions: formatActions(actions.emptyInbox({
-        recentThreads: recentHandles,
-        recentShips,
-        onboardingTask
-      }))
+      actions: formatActions(
+        actions.emptyInbox({
+          recentThreads: recentHandles,
+          recentShips,
+          onboardingTask
+        })
+      )
     };
   }
 
@@ -179,10 +189,12 @@ async function handler(args) {
   display += '───────────────────────────────────\n';
 
   // Line 4+: Expanded list with counts and badges
-  const expanded = unreadSenders.map(t => {
-    const agent = t.isAgent ? ' 🤖' : '';
-    return `@${t.handle} (${t.unread})${agent}`;
-  }).join(' • ');
+  const expanded = unreadSenders
+    .map(t => {
+      const agent = t.isAgent ? ' 🤖' : '';
+      return `@${t.handle} (${t.unread})${agent}`;
+    })
+    .join(' • ');
   display += expanded;
 
   // Build response with optional hints for structured flows

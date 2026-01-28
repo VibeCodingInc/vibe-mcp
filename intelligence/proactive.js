@@ -14,11 +14,11 @@ const config = require('../config');
 
 // Thresholds — conservative, non-intrusive
 const CONFIG = {
-  BREAK_SUGGESTION_HOURS: 6,        // Only after 6h (gentle)
-  AWAY_THRESHOLD_MINUTES: 60,       // Consider "away" after 1h
-  RECENT_SHIP_MINUTES: 30,          // "Recent" ship within 30min
-  WELCOME_WINDOW_HOURS: 4,          // Welcome only very new users
-  MIN_SESSIONS_FOR_NUDGE: 5         // High bar for nudges
+  BREAK_SUGGESTION_HOURS: 6, // Only after 6h (gentle)
+  AWAY_THRESHOLD_MINUTES: 60, // Consider "away" after 1h
+  RECENT_SHIP_MINUTES: 30, // "Recent" ship within 30min
+  WELCOME_WINDOW_HOURS: 4, // Welcome only very new users
+  MIN_SESSIONS_FOR_NUDGE: 5 // High bar for nudges
 };
 
 // Track state for proactive suggestions
@@ -83,9 +83,10 @@ async function generateProactiveSuggestions(context = {}) {
  */
 async function getShipsInTheNight(myHandle, activeUsers) {
   // Check if user was recently away
-  const wasRecentlyAway = proactiveState.wasAway &&
+  const wasRecentlyAway =
+    proactiveState.wasAway &&
     proactiveState.awayStartTime &&
-    (Date.now() - proactiveState.awayStartTime) > CONFIG.AWAY_THRESHOLD_MINUTES * 60 * 1000;
+    Date.now() - proactiveState.awayStartTime > CONFIG.AWAY_THRESHOLD_MINUTES * 60 * 1000;
 
   if (!wasRecentlyAway) return null;
 
@@ -212,12 +213,10 @@ function getMilestoneCelebrations(myHandle, activeUsers) {
     if (user.handle === myHandle) continue;
 
     // Check for shipping indicators
-    const isShipping = user.inferred_state === 'shipping' ||
-                       user.mood === '🚀' ||
-                       user.builderMode === 'shipping';
+    const isShipping = user.inferred_state === 'shipping' || user.mood === '🚀' || user.builderMode === 'shipping';
 
     if (isShipping) {
-      const shipKey = `${user.handle}:${Date.now() / (1000 * 60 * 60) | 0}`; // Hourly key
+      const shipKey = `${user.handle}:${(Date.now() / (1000 * 60 * 60)) | 0}`; // Hourly key
       if (proactiveState.celebratedShips.has(shipKey)) continue;
 
       proactiveState.celebratedShips.add(shipKey);
@@ -255,10 +254,12 @@ function getConnectionNudges(myHandle, activeUsers) {
     if (user.handle === myHandle) continue;
 
     // Both in same inferred state
-    if (myUser.inferred_state && user.inferred_state &&
-        myUser.inferred_state === user.inferred_state &&
-        ['debugging', 'deep-focus', 'shipping'].includes(myUser.inferred_state)) {
-
+    if (
+      myUser.inferred_state &&
+      user.inferred_state &&
+      myUser.inferred_state === user.inferred_state &&
+      ['debugging', 'deep-focus', 'shipping'].includes(myUser.inferred_state)
+    ) {
       nudges.push({
         type: 'connection_nudge',
         priority: 4,

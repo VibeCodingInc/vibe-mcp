@@ -15,7 +15,7 @@ const ACTIONS = {
   },
   defend: {
     emoji: '🛡️',
-    name: 'Defend', 
+    name: 'Defend',
     damage: 1,
     accuracy: 0.9,
     counterBonus: 2, // Extra damage if opponent attacks
@@ -41,20 +41,32 @@ const ACTIONS = {
 // Fun combat messages
 const COMBAT_MESSAGES = {
   hit: [
-    'lands a solid hit!', 'connects beautifully!', 'strikes true!', 
-    'finds their mark!', 'delivers a crushing blow!'
+    'lands a solid hit!',
+    'connects beautifully!',
+    'strikes true!',
+    'finds their mark!',
+    'delivers a crushing blow!'
   ],
   miss: [
-    'swings and misses!', 'attacks thin air!', 'fumbles the attempt!', 
-    'stumbles and misses!', 'fails to connect!'
+    'swings and misses!',
+    'attacks thin air!',
+    'fumbles the attempt!',
+    'stumbles and misses!',
+    'fails to connect!'
   ],
   counter: [
-    'perfectly counters!', 'turns defense into offense!', 'strikes back!',
-    'reverses the attack!', 'capitalizes on the opening!'
+    'perfectly counters!',
+    'turns defense into offense!',
+    'strikes back!',
+    'reverses the attack!',
+    'capitalizes on the opening!'
   ],
   dodge: [
-    'narrowly avoids the blow!', 'slips away at the last second!', 
-    'dances out of danger!', 'evades with style!', 'dodges gracefully!'
+    'narrowly avoids the blow!',
+    'slips away at the last second!',
+    'dances out of danger!',
+    'evades with style!',
+    'dodges gracefully!'
   ]
 };
 
@@ -79,7 +91,7 @@ function createInitialDuelState() {
 // Join the duel as a player
 function joinDuel(gameState, playerHandle) {
   if (gameState.player1 === playerHandle || gameState.player2 === playerHandle) {
-    return { error: 'You\'re already in this duel!' };
+    return { error: "You're already in this duel!" };
   }
 
   if (!gameState.player1) {
@@ -111,7 +123,7 @@ function chooseAction(gameState, playerHandle, actionName) {
   }
 
   if (gameState.player1 !== playerHandle && gameState.player2 !== playerHandle) {
-    return { error: 'You\'re not in this duel!' };
+    return { error: "You're not in this duel!" };
   }
 
   const normalizedAction = actionName.toLowerCase().trim();
@@ -151,48 +163,56 @@ function resolveRound(gameState) {
 
   let newPlayer1Health = player1Health;
   let newPlayer2Health = player2Health;
-  let newCombatLog = [...combatLog];
+  const newCombatLog = [...combatLog];
 
   // Calculate damage for each player
   let player1Damage = 0;
   let player2Damage = 0;
 
   // Player 1's attack on Player 2
-  let p1Hit = Math.random() < action1.accuracy;
-  let p1Dodged = action2.evasion && Math.random() < action2.evasion;
+  const p1Hit = Math.random() < action1.accuracy;
+  const p1Dodged = action2.evasion && Math.random() < action2.evasion;
 
   if (p1Hit && !p1Dodged) {
     player2Damage = action1.damage;
-    
+
     // Check for defend counter
     if (player2Action === 'defend' && player1Action === 'attack') {
       player1Damage += action2.counterBonus;
-      newCombatLog.push(`${player1} ${ACTIONS[player1Action].emoji} attacks, but ${player2} ${ACTIONS[player2Action].emoji} ${getRandomMessage(COMBAT_MESSAGES.counter)}`);
+      newCombatLog.push(
+        `${player1} ${ACTIONS[player1Action].emoji} attacks, but ${player2} ${ACTIONS[player2Action].emoji} ${getRandomMessage(COMBAT_MESSAGES.counter)}`
+      );
     } else {
       newCombatLog.push(`${player1} ${ACTIONS[player1Action].emoji} ${getRandomMessage(COMBAT_MESSAGES.hit)}`);
     }
   } else if (p1Dodged) {
-    newCombatLog.push(`${player1} ${ACTIONS[player1Action].emoji} attacks, but ${player2} ${ACTIONS[player2Action].emoji} ${getRandomMessage(COMBAT_MESSAGES.dodge)}`);
+    newCombatLog.push(
+      `${player1} ${ACTIONS[player1Action].emoji} attacks, but ${player2} ${ACTIONS[player2Action].emoji} ${getRandomMessage(COMBAT_MESSAGES.dodge)}`
+    );
   } else {
     newCombatLog.push(`${player1} ${ACTIONS[player1Action].emoji} ${getRandomMessage(COMBAT_MESSAGES.miss)}`);
   }
 
   // Player 2's attack on Player 1
-  let p2Hit = Math.random() < action2.accuracy;
-  let p2Dodged = action1.evasion && Math.random() < action1.evasion;
+  const p2Hit = Math.random() < action2.accuracy;
+  const p2Dodged = action1.evasion && Math.random() < action1.evasion;
 
   if (p2Hit && !p2Dodged) {
     player1Damage += action2.damage;
-    
+
     // Check for defend counter
     if (player1Action === 'defend' && player2Action === 'attack') {
       player2Damage += action1.counterBonus;
-      newCombatLog.push(`${player2} ${ACTIONS[player2Action].emoji} attacks, but ${player1} ${ACTIONS[player1Action].emoji} ${getRandomMessage(COMBAT_MESSAGES.counter)}`);
+      newCombatLog.push(
+        `${player2} ${ACTIONS[player2Action].emoji} attacks, but ${player1} ${ACTIONS[player1Action].emoji} ${getRandomMessage(COMBAT_MESSAGES.counter)}`
+      );
     } else {
       newCombatLog.push(`${player2} ${ACTIONS[player2Action].emoji} ${getRandomMessage(COMBAT_MESSAGES.hit)}`);
     }
   } else if (p2Dodged) {
-    newCombatLog.push(`${player2} ${ACTIONS[player2Action].emoji} attacks, but ${player1} ${ACTIONS[player1Action].emoji} ${getRandomMessage(COMBAT_MESSAGES.dodge)}`);
+    newCombatLog.push(
+      `${player2} ${ACTIONS[player2Action].emoji} attacks, but ${player1} ${ACTIONS[player1Action].emoji} ${getRandomMessage(COMBAT_MESSAGES.dodge)}`
+    );
   } else {
     newCombatLog.push(`${player2} ${ACTIONS[player2Action].emoji} ${getRandomMessage(COMBAT_MESSAGES.miss)}`);
   }
@@ -221,7 +241,7 @@ function resolveRound(gameState) {
   if (newPlayer1Health <= 0 && newPlayer2Health <= 0) {
     winner = 'draw';
     gameOver = true;
-    newCombatLog.push('🤝 Both fighters collapse! It\'s a draw!');
+    newCombatLog.push("🤝 Both fighters collapse! It's a draw!");
   } else if (newPlayer1Health <= 0) {
     winner = player2;
     gameOver = true;
@@ -256,9 +276,18 @@ function getRandomMessage(messageArray) {
 
 // Format duel for display
 function formatDuelDisplay(gameState, viewerHandle = null) {
-  const { 
-    player1, player2, player1Health, player2Health, round, gameOver, 
-    winner, combatLog, waitingForActions, player1Action, player2Action 
+  const {
+    player1,
+    player2,
+    player1Health,
+    player2Health,
+    round,
+    gameOver,
+    winner,
+    combatLog,
+    waitingForActions,
+    player1Action,
+    player2Action
   } = gameState;
 
   let display = `⚔️ **Quick Duel** - Round ${round}\n\n`;
@@ -292,7 +321,7 @@ function formatDuelDisplay(gameState, viewerHandle = null) {
     // Show action status
     const p1Ready = player1Action ? '✅' : '⏳';
     const p2Ready = player2Action ? '✅' : '⏳';
-    
+
     display += `**Action Status:**\n`;
     display += `${player1}: ${p1Ready} ${player1Action ? `(${ACTIONS[player1Action].emoji} ${ACTIONS[player1Action].name})` : 'choosing...'}\n`;
     display += `${player2}: ${p2Ready} ${player2Action ? `(${ACTIONS[player2Action].emoji} ${ACTIONS[player2Action].name})` : 'choosing...'}\n\n`;
@@ -310,9 +339,8 @@ function formatDuelDisplay(gameState, viewerHandle = null) {
 
   // Show available actions if viewer is a player and game isn't over
   if (!gameOver && (viewerHandle === player1 || viewerHandle === player2)) {
-    const hasChosen = (viewerHandle === player1 && player1Action) || 
-                     (viewerHandle === player2 && player2Action);
-    
+    const hasChosen = (viewerHandle === player1 && player1Action) || (viewerHandle === player2 && player2Action);
+
     if (!hasChosen) {
       display += '**Choose your action:**\n';
       for (const [actionKey, action] of Object.entries(ACTIONS)) {
@@ -334,13 +362,13 @@ function formatDuelDisplay(gameState, viewerHandle = null) {
 // Get game statistics
 function getDuelStats(gameState) {
   const { round, combatLog, player1Health, player2Health } = gameState;
-  
+
   return {
     round: round,
     totalActions: combatLog.length,
     player1Health,
     player2Health,
-    totalDamageDealt: (10 - player1Health) + (10 - player2Health)
+    totalDamageDealt: 10 - player1Health + (10 - player2Health)
   };
 }
 

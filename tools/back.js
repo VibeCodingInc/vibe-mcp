@@ -12,7 +12,7 @@ const { getProactiveSummary, markBack } = require('../intelligence/proactive');
 
 const definition = {
   name: 'vibe_back',
-  description: 'Clear your away status. You\'re back!',
+  description: "Clear your away status. You're back!",
   inputSchema: {
     type: 'object',
     properties: {}

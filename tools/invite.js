@@ -23,7 +23,7 @@ const definition = {
       },
       name: {
         type: 'string',
-        description: 'Optional: Friend\'s name for personalized message'
+        description: "Optional: Friend's name for personalized message"
       },
       format: {
         type: 'string',
@@ -35,8 +35,8 @@ const definition = {
 
 const INVITE_MESSAGES = [
   "Join the /vibe — it's like Slack but in your Claude Code terminal",
-  "Try /vibe in Claude Code — message people without leaving your flow",
-  "Come hang out on /vibe — the social layer for Claude Code users",
+  'Try /vibe in Claude Code — message people without leaving your flow',
+  'Come hang out on /vibe — the social layer for Claude Code users',
   "There's a thing called /vibe for Claude Code — we can message while coding"
 ];
 
@@ -148,9 +148,7 @@ You can have up to ${result.max_codes} unused codes at a time.`
     }
   }
 
-  const shareUrl = shareCode
-    ? `slashvibe.dev/invite/${shareCode}`
-    : 'slashvibe.dev';
+  const shareUrl = shareCode ? `slashvibe.dev/invite/${shareCode}` : 'slashvibe.dev';
 
   // Just the link
   if (format === 'link') {

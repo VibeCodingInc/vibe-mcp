@@ -87,7 +87,6 @@ async function handler(args) {
 
     display += `---\n`;
     display += `⚠️ **Restart Claude Code to apply changes**`;
-
   } catch (e) {
     display += `❌ **Update failed**\n\n`;
     display += `Error: ${e.message}\n\n`;

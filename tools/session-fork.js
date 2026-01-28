@@ -87,7 +87,6 @@ async function handler(args) {
     display += `\n\nThe original author gets credit — fork lineage is tracked.`;
 
     return { display };
-
   } catch (error) {
     return {
       display: `## Fork Error\n\n${error.message}\n\nRun \`vibe doctor\` to diagnose connectivity issues.`

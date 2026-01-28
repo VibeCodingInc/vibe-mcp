@@ -8,7 +8,8 @@ const prompts = require('../prompts');
 
 const definition = {
   name: 'vibe_patterns',
-  description: 'View emerging language patterns from how people use /vibe. Shows frequent prompts and suggests new commands.',
+  description:
+    'View emerging language patterns from how people use /vibe. Shows frequent prompts and suggests new commands.',
   inputSchema: {
     type: 'object',
     properties: {

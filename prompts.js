@@ -25,7 +25,7 @@ function log(prompt, resolution) {
     tool: resolution.tool || null,
     action: resolution.action || null,
     target: resolution.target || null, // @handle, channel, etc.
-    transform: resolution.transform || null, // emoji, recap, etc.
+    transform: resolution.transform || null // emoji, recap, etc.
   };
 
   try {
@@ -44,10 +44,7 @@ function getRecent(limit = 50) {
   try {
     if (!fs.existsSync(PROMPTS_FILE)) return [];
 
-    const lines = fs.readFileSync(PROMPTS_FILE, 'utf8')
-      .trim()
-      .split('\n')
-      .filter(Boolean);
+    const lines = fs.readFileSync(PROMPTS_FILE, 'utf8').trim().split('\n').filter(Boolean);
 
     return lines
       .slice(-limit)
@@ -68,7 +65,8 @@ function extractPatterns() {
 
   for (const p of prompts) {
     // Normalize: lowercase, replace @handles with @*, replace quoted strings with "*"
-    let normalized = p.prompt.toLowerCase()
+    const normalized = p.prompt
+      .toLowerCase()
       .replace(/@\w+/g, '@*')
       .replace(/"[^"]+"/g, '"*"')
       .replace(/'[^']+'/g, "'*'")
@@ -125,9 +123,7 @@ function getAnonymizedPatterns() {
     pattern,
     frequency: count,
     // Remove any potentially identifying info
-    normalized: pattern
-      .replace(/\d+/g, 'N')
-      .replace(/[a-f0-9]{8,}/gi, 'HASH')
+    normalized: pattern.replace(/\d+/g, 'N').replace(/[a-f0-9]{8,}/gi, 'HASH')
   }));
 }
 

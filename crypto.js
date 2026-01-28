@@ -106,12 +106,7 @@ function verify(obj, publicKeyBase64) {
     });
 
     // Verify
-    return crypto.verify(
-      null,
-      Buffer.from(canonical, 'utf8'),
-      publicKey,
-      Buffer.from(signature, 'base64')
-    );
+    return crypto.verify(null, Buffer.from(canonical, 'utf8'), publicKey, Buffer.from(signature, 'base64'));
   } catch (e) {
     console.error('[crypto] Verification failed:', e.message);
     return false;

@@ -36,7 +36,7 @@ async function handler(args) {
   const them = handle.toLowerCase().replace('@', '');
 
   if (them === myHandle) {
-    return { display: 'You can\'t ping yourself.' };
+    return { display: "You can't ping yourself." };
   }
 
   // Send as a ping-type message

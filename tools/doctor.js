@@ -50,10 +50,7 @@ async function diagnoseAPI() {
     return {
       status: 'error',
       message: `API returned HTTP ${res.status}`,
-      remediation: [
-        'Check if slashvibe.dev is up',
-        'Try: curl -s https://slashvibe.dev/api/stats'
-      ]
+      remediation: ['Check if slashvibe.dev is up', 'Try: curl -s https://slashvibe.dev/api/stats']
     };
   } catch (e) {
     if (e.name === 'TimeoutError') {
@@ -70,10 +67,7 @@ async function diagnoseAPI() {
     return {
       status: 'error',
       message: `Network error: ${e.message}`,
-      remediation: [
-        'Check your internet connection',
-        'Check if VPN is blocking requests'
-      ]
+      remediation: ['Check your internet connection', 'Check if VPN is blocking requests']
     };
   }
 }
@@ -85,9 +79,7 @@ async function diagnoseIdentity(autoFix = false) {
       return {
         status: 'error',
         message: 'Not initialized',
-        remediation: [
-          'Run: vibe init @yourhandle "what you\'re building"'
-        ],
+        remediation: ['Run: vibe init @yourhandle "what you\'re building"'],
         canAutoFix: false
       };
     }
@@ -155,9 +147,7 @@ async function diagnoseIdentity(autoFix = false) {
     return {
       status: 'error',
       message: `Identity check failed: ${e.message}`,
-      remediation: [
-        'Run: vibe init @yourhandle "what you\'re building"'
-      ]
+      remediation: ['Run: vibe init @yourhandle "what you\'re building"']
     };
   }
 }
@@ -180,10 +170,7 @@ async function diagnosePresence() {
       return {
         status: 'warning',
         message: 'Not visible to others',
-        remediation: [
-          'Heartbeat may have stopped',
-          'Run: vibe status to trigger heartbeat'
-        ]
+        remediation: ['Heartbeat may have stopped', 'Run: vibe status to trigger heartbeat']
       };
     }
 
@@ -193,10 +180,7 @@ async function diagnosePresence() {
       return {
         status: 'warning',
         message: `Last heartbeat ${minutesAgo}m ago`,
-        remediation: [
-          'Heartbeat may be stale',
-          'Run any vibe command to refresh'
-        ]
+        remediation: ['Heartbeat may be stale', 'Run any vibe command to refresh']
       };
     }
 
@@ -272,10 +256,7 @@ async function diagnoseStorage() {
       return {
         status: 'error',
         message: '~/.vibe directory missing',
-        remediation: [
-          'Run: mkdir -p ~/.vibe',
-          'Or: vibe init to auto-create'
-        ],
+        remediation: ['Run: mkdir -p ~/.vibe', 'Or: vibe init to auto-create'],
         canAutoFix: true
       };
     }
@@ -302,10 +283,7 @@ async function diagnoseStorage() {
       return {
         status: 'warning',
         message: issues.join(', '),
-        remediation: [
-          'Run: vibe init to recreate session',
-          'Memory directory will be created on first use'
-        ]
+        remediation: ['Run: vibe init to recreate session', 'Memory directory will be created on first use']
       };
     }
 
@@ -316,9 +294,7 @@ async function diagnoseStorage() {
       return {
         status: 'error',
         message: 'session.json not readable/writable',
-        remediation: [
-          'Fix permissions: chmod 600 ~/.vibe/session.json'
-        ]
+        remediation: ['Fix permissions: chmod 600 ~/.vibe/session.json']
       };
     }
 
@@ -351,9 +327,7 @@ async function diagnoseMessages() {
       return {
         status: 'info',
         message: `${count} unread message${count > 1 ? 's' : ''}`,
-        remediation: [
-          'Run: vibe inbox to see messages'
-        ]
+        remediation: ['Run: vibe inbox to see messages']
       };
     }
 
@@ -395,10 +369,7 @@ async function diagnoseInstall() {
     return {
       status: 'info',
       message: `v${version} · ${MCP_DIR}`,
-      remediation: [
-        `Update: ${updateMethod}`,
-        'After update: restart Claude Code'
-      ]
+      remediation: [`Update: ${updateMethod}`, 'After update: restart Claude Code']
     };
   } catch (e) {
     return {

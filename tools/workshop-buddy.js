@@ -38,26 +38,26 @@ const definition = {
 
 // Skill complementarity matrix
 const complementarySkills = {
-  'frontend': ['backend', 'design', 'ux'],
-  'backend': ['frontend', 'devops', 'database'],
-  'design': ['frontend', 'user-research', 'engineering'],
-  'ux': ['design', 'frontend', 'user-research'],
-  'ai': ['data', 'backend', 'research'],
-  'data': ['ai', 'backend', 'analytics'],
-  'mobile': ['backend', 'design', 'ux'],
-  'devops': ['backend', 'security', 'infrastructure'],
-  'product': ['engineering', 'design', 'marketing'],
-  'engineering': ['product', 'design', 'backend'],
-  'research': ['ai', 'data', 'implementation'],
-  'marketing': ['product', 'design', 'content'],
-  'content': ['marketing', 'design', 'writing'],
-  'security': ['devops', 'backend', 'infrastructure'],
-  'infrastructure': ['devops', 'backend', 'security'],
-  'analytics': ['data', 'product', 'research'],
+  frontend: ['backend', 'design', 'ux'],
+  backend: ['frontend', 'devops', 'database'],
+  design: ['frontend', 'user-research', 'engineering'],
+  ux: ['design', 'frontend', 'user-research'],
+  ai: ['data', 'backend', 'research'],
+  data: ['ai', 'backend', 'analytics'],
+  mobile: ['backend', 'design', 'ux'],
+  devops: ['backend', 'security', 'infrastructure'],
+  product: ['engineering', 'design', 'marketing'],
+  engineering: ['product', 'design', 'backend'],
+  research: ['ai', 'data', 'implementation'],
+  marketing: ['product', 'design', 'content'],
+  content: ['marketing', 'design', 'writing'],
+  security: ['devops', 'backend', 'infrastructure'],
+  infrastructure: ['devops', 'backend', 'security'],
+  analytics: ['data', 'product', 'research'],
   'user-research': ['ux', 'product', 'design'],
-  'writing': ['content', 'marketing', 'editing'],
-  'business': ['product', 'marketing', 'strategy'],
-  'strategy': ['business', 'product', 'leadership']
+  writing: ['content', 'marketing', 'editing'],
+  business: ['product', 'marketing', 'strategy'],
+  strategy: ['business', 'product', 'leadership']
 };
 
 // Calculate workshop collaboration potential
@@ -84,12 +84,12 @@ function calculateBuddyScore(user1, user2) {
   if (user1.building && user2.building) {
     const building1 = user1.building.toLowerCase();
     const building2 = user2.building.toLowerCase();
-    
+
     // Different but related domains
     const domains = ['ai', 'web', 'mobile', 'fintech', 'healthcare', 'gaming', 'productivity'];
     const user1Domains = domains.filter(d => building1.includes(d));
     const user2Domains = domains.filter(d => building2.includes(d));
-    
+
     if (user1Domains.length > 0 && user2Domains.length > 0) {
       const sharedDomains = user1Domains.filter(d => user2Domains.includes(d));
       if (sharedDomains.length > 0) {
@@ -102,7 +102,7 @@ function calculateBuddyScore(user1, user2) {
   // Experience level balance
   const user1Level = getExperienceLevel(user1);
   const user2Level = getExperienceLevel(user2);
-  
+
   if (Math.abs(user1Level - user2Level) <= 1) {
     score += 15;
     reasons.push('Compatible experience levels');
@@ -131,7 +131,7 @@ function getExperienceLevel(user) {
   const skills = (user.tags || []).length;
   const interests = (user.interests || []).length;
   const hasBuilding = user.building ? 1 : 0;
-  
+
   return Math.min(5, skills + interests + hasBuilding);
 }
 
@@ -139,13 +139,14 @@ function getExperienceLevel(user) {
 async function findWorkshopBuddies(myHandle) {
   const myProfile = await userProfiles.getProfile(myHandle);
   const allProfiles = await userProfiles.getAllProfiles();
-  
+
   const candidates = allProfiles.filter(p => p.handle !== myHandle);
   const matches = [];
 
   for (const candidate of candidates) {
     const match = calculateBuddyScore(myProfile, candidate);
-    if (match.score > 20) { // Higher threshold for workshop partnerships
+    if (match.score > 20) {
+      // Higher threshold for workshop partnerships
       matches.push({
         handle: candidate.handle,
         score: match.score,
@@ -202,7 +203,7 @@ async function handler(args) {
     switch (command) {
       case 'find': {
         const buddies = await findWorkshopBuddies(myHandle);
-        
+
         if (buddies.length === 0) {
           display = `## No Workshop Buddies Found
 
@@ -220,27 +221,27 @@ _Need more profiles to find great partnerships._
 - Shared domain interest`;
         } else {
           display = `## Your Workshop Buddy Matches 🤝\n\n`;
-          
+
           for (const buddy of buddies) {
             display += `### **@${buddy.handle}** _(${buddy.score}% match)_\n`;
             display += `${buddy.building || 'Available for collaboration'}\n\n`;
-            
+
             display += `**Why you'd work great together:**\n`;
             for (const reason of buddy.reasons) {
               display += `• ${reason}\n`;
             }
-            
+
             if (buddy.collaborationPotential.length > 0) {
               display += `\n**Skill synergy:** ${buddy.collaborationPotential.slice(0, 2).join(', ')}\n`;
             }
-            
+
             display += `**Their skills:** ${buddy.tags.join(', ')}\n`;
             display += `**Experience level:** ${'⭐'.repeat(buddy.experienceLevel)}\n`;
             display += `_Last seen: ${formatTimeAgo(buddy.lastSeen)}_\n\n`;
             display += `**Reach out:** \`message @${buddy.handle} "Hey! We seem like a great workshop match..."\`\n\n`;
             display += '---\n\n';
           }
-          
+
           display += `**Next steps:**\n`;
           display += `• Message your top match to start collaborating\n`;
           display += `• Use \`workshop-buddy matches\` to see community skill exchanges\n`;
@@ -253,14 +254,14 @@ _Need more profiles to find great partnerships._
         if (!args.skills) {
           return { error: 'Specify skills you offer: workshop-buddy offer "frontend, react"' };
         }
-        
+
         // Update user tags with offered skills
         const skills = args.skills.split(',').map(s => s.trim().toLowerCase());
         const currentProfile = await userProfiles.getProfile(myHandle);
         const updatedTags = [...new Set([...(currentProfile.tags || []), ...skills])];
-        
+
         await userProfiles.updateProfile(myHandle, { tags: updatedTags });
-        
+
         display = `## Skills Offered! 🎯
 
 **You're now offering:** ${skills.join(', ')}
@@ -278,15 +279,15 @@ People looking for these skills can find you via:
         if (!args.skills) {
           return { error: 'Specify skills you need: workshop-buddy seeking "backend, devops"' };
         }
-        
+
         const seekingSkills = args.skills.split(',').map(s => s.trim().toLowerCase());
         const allProfiles = await userProfiles.getAllProfiles();
-        
+
         const matches = allProfiles.filter(profile => {
           const theirSkills = (profile.tags || []).map(t => t.toLowerCase());
           return seekingSkills.some(skill => theirSkills.includes(skill)) && profile.handle !== myHandle;
         });
-        
+
         if (matches.length === 0) {
           display = `## No One Found with: ${args.skills}
 
@@ -296,19 +297,17 @@ People looking for these skills can find you via:
 - Post what you're seeking: \`ship "Looking for ${args.skills} expertise"\``;
         } else {
           display = `## People with: ${args.skills}\n\n`;
-          
+
           for (const match of matches) {
-            const theirMatchingSkills = (match.tags || []).filter(t => 
-              seekingSkills.includes(t.toLowerCase())
-            );
-            
+            const theirMatchingSkills = (match.tags || []).filter(t => seekingSkills.includes(t.toLowerCase()));
+
             display += `**@${match.handle}**\n`;
             display += `${match.building || 'Available to help'}\n`;
             display += `**Has:** ${theirMatchingSkills.join(', ')}\n`;
             display += `**All skills:** ${(match.tags || []).join(', ')}\n`;
             display += `_Last seen: ${formatTimeAgo(match.lastSeen)}_\n\n`;
           }
-          
+
           display += `**Ready to collaborate?**\n`;
           display += `\`workshop-buddy find\` — See your best overall matches`;
         }
@@ -317,7 +316,7 @@ People looking for these skills can find you via:
 
       case 'matches': {
         const exchanges = await getSkillExchange();
-        
+
         if (exchanges.length === 0) {
           display = `## No Skill Exchanges Yet
 
@@ -333,7 +332,7 @@ _The skill marketplace is empty._
 - Business: product, marketing, strategy, writing`;
         } else {
           display = `## Community Skill Exchange 🔄\n\n`;
-          
+
           const groupedByOffering = {};
           for (const exchange of exchanges) {
             if (!groupedByOffering[exchange.offering]) {
@@ -341,20 +340,20 @@ _The skill marketplace is empty._
             }
             groupedByOffering[exchange.offering].push(exchange);
           }
-          
+
           for (const [skill, providers] of Object.entries(groupedByOffering)) {
             display += `### ${skill.toUpperCase()}\n`;
-            
+
             for (const provider of providers.slice(0, 3)) {
               display += `**@${provider.handle}** offers ${skill}, seeks: ${provider.seeking.join(', ')}\n`;
               if (provider.building) {
                 display += `_Building: ${provider.building}_\n`;
               }
             }
-            
+
             display += '\n';
           }
-          
+
           display += `**Find your perfect exchange:**\n`;
           display += `- \`workshop-buddy seeking "skill"\` to find specific expertise\n`;
           display += `- \`workshop-buddy find\` for AI-matched partners`;

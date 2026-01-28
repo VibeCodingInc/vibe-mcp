@@ -13,7 +13,8 @@ const { actions, formatActions } = require('./_actions');
 
 const definition = {
   name: 'vibe_dm',
-  description: 'Send a direct message to someone. Can include structured payload for games, handoffs, or artifact cards.',
+  description:
+    'Send a direct message to someone. Can include structured payload for games, handoffs, or artifact cards.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -27,7 +28,8 @@ const definition = {
       },
       artifact_slug: {
         type: 'string',
-        description: 'Optional artifact slug to share (e.g., "pizza-guide-abc123"). The artifact will be shown as a rich card.'
+        description:
+          'Optional artifact slug to share (e.g., "pizza-guide-abc123"). The artifact will be shown as a rich card.'
       },
       payload: {
         type: 'object',
@@ -53,7 +55,7 @@ async function handler(args) {
   }
 
   if (them === myHandle) {
-    return { display: 'You can\'t DM yourself.' };
+    return { display: "You can't DM yourself." };
   }
 
   // Handle artifact sharing
@@ -128,7 +130,14 @@ async function handler(args) {
   if (finalPayload) {
     const payloadType = finalPayload.type || 'data';
     if (payloadType === 'artifact') {
-      const icon = finalPayload.template === 'guide' ? '📘' : finalPayload.template === 'learning' ? '💡' : finalPayload.template === 'workspace' ? '🗂️' : '📦';
+      const icon =
+        finalPayload.template === 'guide'
+          ? '📘'
+          : finalPayload.template === 'learning'
+            ? '💡'
+            : finalPayload.template === 'workspace'
+              ? '🗂️'
+              : '📦';
       display += `\n\n${icon} _Shared artifact: ${finalPayload.title}_`;
     } else {
       display += `\n\n📦 _Includes ${payloadType} payload_`;

@@ -48,7 +48,7 @@ async function getGameState(myHandle) {
   // This allows for multiplayer games that persist across sessions
   const gameRoomHandle = 'wordassociation-room';
   const thread = await store.getThread(myHandle, gameRoomHandle);
-  
+
   // Find the most recent game payload
   for (let i = thread.length - 1; i >= 0; i--) {
     const msg = thread[i];
@@ -56,7 +56,7 @@ async function getGameState(myHandle) {
       return { gameState: msg.payload.state, thread };
     }
   }
-  
+
   return { gameState: null, thread };
 }
 
@@ -66,7 +66,7 @@ async function getGameState(myHandle) {
 async function saveGameState(myHandle, gameState, action) {
   const gameRoomHandle = 'wordassociation-room';
   const payload = createGamePayload('wordassociation', gameState);
-  
+
   let message;
   if (action.type === 'new') {
     message = 'Started a new word association game!';
@@ -80,7 +80,7 @@ async function saveGameState(myHandle, gameState, action) {
   } else {
     message = 'Game updated';
   }
-  
+
   await store.sendMessage(myHandle, gameRoomHandle, message, 'dm', payload);
 }
 
@@ -115,7 +115,7 @@ async function handler(args) {
   if (newGame) {
     const newState = wordassociation.createInitialWordAssociationState();
     const addResult = wordassociation.addPlayer(newState, myHandle);
-    
+
     if (addResult.error) {
       return { display: addResult.error };
     }
@@ -133,7 +133,7 @@ async function handler(args) {
       // Start a new game if none exists
       const newState = wordassociation.createInitialWordAssociationState();
       const addResult = wordassociation.addPlayer(newState, myHandle);
-      
+
       if (addResult.error) {
         return { display: addResult.error };
       }
@@ -150,7 +150,7 @@ async function handler(args) {
     }
 
     const addResult = wordassociation.addPlayer(gameState, myHandle);
-    
+
     if (addResult.error) {
       return { display: addResult.error };
     }
@@ -165,7 +165,10 @@ async function handler(args) {
   // Handle making a word move
   if (word) {
     if (!gameState) {
-      return { display: 'No active game! Use `vibe wordassociation --new` to start one, or `vibe wordassociation --join` to join.' };
+      return {
+        display:
+          'No active game! Use `vibe wordassociation --new` to start one, or `vibe wordassociation --join` to join.'
+      };
     }
 
     if (gameState.gameOver) {
@@ -174,24 +177,24 @@ async function handler(args) {
 
     // Try to make the move
     const moveResult = wordassociation.makeMove(gameState, word, myHandle);
-    
+
     if (moveResult.error) {
       return { display: `❌ ${moveResult.error}` };
     }
 
-    await saveGameState(myHandle, moveResult.gameState, { 
-      type: 'word', 
-      player: myHandle, 
-      word: word 
+    await saveGameState(myHandle, moveResult.gameState, {
+      type: 'word',
+      player: myHandle,
+      word: word
     });
 
     const display = wordassociation.formatWordAssociationDisplay(moveResult.gameState);
-    
+
     // Add fun themes if game is complete
     if (moveResult.gameState.gameOver) {
       const themes = wordassociation.findThemes(moveResult.gameState);
       const stats = wordassociation.getGameStats(moveResult.gameState);
-      
+
       let extra = '\n\n**Final Stats:**\n';
       if (stats) {
         extra += `Total words: ${stats.totalWords}\n`;
@@ -200,7 +203,7 @@ async function handler(args) {
           extra += `\n**Themes found:** ${themes.join(', ')}`;
         }
       }
-      
+
       return {
         display: `🧠 **Word Association**\n\n${display}${extra}\n\nStart a new game with \`vibe wordassociation --new\`!`
       };
@@ -214,11 +217,11 @@ async function handler(args) {
   // Show current game state
   if (gameState) {
     const display = wordassociation.formatWordAssociationDisplay(gameState);
-    
+
     if (gameState.gameOver) {
       const themes = wordassociation.findThemes(gameState);
       const stats = wordassociation.getGameStats(gameState);
-      
+
       let extra = '\n\n**Final Stats:**\n';
       if (stats) {
         extra += `Total words: ${stats.totalWords}\n`;
@@ -227,7 +230,7 @@ async function handler(args) {
           extra += `\n**Themes found:** ${themes.join(', ')}`;
         }
       }
-      
+
       return {
         display: `🧠 **Word Association**\n\n${display}${extra}\n\nStart a new game with \`vibe wordassociation --new\`!`
       };

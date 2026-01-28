@@ -11,10 +11,10 @@ function createInitialGuessNumberState(difficulty = 'medium') {
     hard: { min: 1, max: 100 },
     extreme: { min: 1, max: 1000 }
   };
-  
+
   const range = ranges[difficulty] || ranges.medium;
   const targetNumber = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
-  
+
   return {
     targetNumber: targetNumber,
     guesses: [],
@@ -30,35 +30,35 @@ function createInitialGuessNumberState(difficulty = 'medium') {
 // Make a guess
 function makeGuess(gameState, guess) {
   const { targetNumber, guesses, moves, gameOver, range } = gameState;
-  
+
   // Parse guess as number
   const guessNumber = parseInt(guess);
-  
+
   // Validate guess
   if (isNaN(guessNumber)) {
     return { error: 'Please enter a valid number!' };
   }
-  
+
   if (guessNumber < range.min || guessNumber > range.max) {
     return { error: `Please guess a number between ${range.min} and ${range.max}!` };
   }
-  
+
   // Check if already guessed
   if (guesses.includes(guessNumber)) {
     return { error: `You already guessed ${guessNumber}! Try a different number.` };
   }
-  
+
   // Check if game is already over
   if (gameOver) {
     return { error: 'Game is over! Start a new game to play again.' };
   }
-  
+
   // Process the guess
   const newGuesses = [...guesses, guessNumber];
   const newMoves = moves + 1;
   let hint = '';
   let won = false;
-  
+
   if (guessNumber === targetNumber) {
     // Correct guess!
     won = true;
@@ -88,10 +88,10 @@ function makeGuess(gameState, guess) {
       hint = '📉 Way too high! Much lower!';
     }
   }
-  
+
   const newHints = [...gameState.hints, hint];
   const newGameOver = won;
-  
+
   const newGameState = {
     ...gameState,
     guesses: newGuesses,
@@ -102,19 +102,19 @@ function makeGuess(gameState, guess) {
     lastGuess: guessNumber,
     lastHint: hint
   };
-  
+
   return { success: true, gameState: newGameState };
 }
 
 // Format display for guess the number game
 function formatGuessNumberDisplay(gameState) {
   const { guesses, moves, gameOver, won, difficulty, range, lastGuess, lastHint, targetNumber } = gameState;
-  
+
   let display = `🔢 **Guess the Number** (${difficulty}) - Move ${moves}\n\n`;
-  
+
   // Show range
   display += `**Range:** ${range.min} - ${range.max}\n\n`;
-  
+
   // Show latest guess and hint
   if (lastGuess) {
     display += `**Last guess:** ${lastGuess}\n`;
@@ -122,17 +122,17 @@ function formatGuessNumberDisplay(gameState) {
       display += `**Hint:** ${lastHint}\n\n`;
     }
   }
-  
+
   // Show all guesses in order
   if (guesses.length > 0) {
     display += `**Your guesses:** ${guesses.join(', ')}\n\n`;
   }
-  
+
   // Show game status
   if (gameOver) {
     if (won) {
       display += `🎉 **Congratulations!** You guessed ${targetNumber} in ${moves} tries!\n\n`;
-      
+
       // Add performance feedback
       const maxOptimal = Math.ceil(Math.log2(range.max - range.min + 1));
       if (moves <= maxOptimal) {
@@ -147,29 +147,29 @@ function formatGuessNumberDisplay(gameState) {
     }
   } else {
     display += '**Keep guessing! You can do it! 🎯**';
-    
+
     // Give strategic hint after several guesses
     if (moves >= 3 && moves % 3 === 0) {
       display += '\n\n💡 **Tip:** Try guessing numbers in the middle of your remaining range!';
     }
   }
-  
+
   return display;
 }
 
 // Get optimal strategy hint
 function getStrategyHint(gameState) {
   const { guesses, range } = gameState;
-  
+
   if (guesses.length === 0) {
     const middle = Math.floor((range.min + range.max) / 2);
     return `Try starting with ${middle} (middle of the range) for optimal strategy!`;
   }
-  
+
   // Find remaining range based on guesses
   let min = range.min;
   let max = range.max;
-  
+
   guesses.forEach(guess => {
     const hints = gameState.hints;
     const hintIndex = guesses.indexOf(guess);
@@ -181,11 +181,11 @@ function getStrategyHint(gameState) {
       }
     }
   });
-  
+
   if (min >= max) {
-    return 'Keep going! You\'re very close!';
+    return "Keep going! You're very close!";
   }
-  
+
   const middle = Math.floor((min + max) / 2);
   return `Try ${middle} (middle of ${min}-${max} range)`;
 }

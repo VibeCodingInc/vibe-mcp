@@ -71,14 +71,19 @@ function recall(handle, limit = 10) {
 
   try {
     const content = fs.readFileSync(threadFile, 'utf8');
-    const lines = content.trim().split('\n').filter(l => l.trim());
-    const memories = lines.map(line => {
-      try {
-        return JSON.parse(line);
-      } catch (e) {
-        return null;
-      }
-    }).filter(m => m !== null);
+    const lines = content
+      .trim()
+      .split('\n')
+      .filter(l => l.trim());
+    const memories = lines
+      .map(line => {
+        try {
+          return JSON.parse(line);
+        } catch (e) {
+          return null;
+        }
+      })
+      .filter(m => m !== null);
 
     // Return newest first, limited
     return memories.reverse().slice(0, limit);

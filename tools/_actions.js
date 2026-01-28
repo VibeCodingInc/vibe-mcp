@@ -17,7 +17,7 @@ async function suggest_connection(from, to, reason) {
   try {
     const userProfiles = require('../store/profiles');
     await userProfiles.recordConnection(from, to, reason);
-    
+
     // You could also send a notification here
     return { success: true, from, to, reason };
   } catch (error) {
@@ -30,10 +30,10 @@ async function dm_user(handle, message) {
   try {
     const store = require('../store');
     const timestamp = Date.now();
-    
+
     // Store the message
     await store.storeDM('discovery-agent', handle, message, timestamp);
-    
+
     return { success: true, to: handle, message };
   } catch (error) {
     console.warn(`Failed to DM ${handle}:`, error.message);
@@ -59,12 +59,13 @@ const actions = {
 
     // Priority 2: Suggested connection
     if (suggestion) {
-      const reason = {
-        just_joined: 'just joined',
-        shipping: 'is shipping',
-        needs_help: 'might need help',
-        active_now: 'is active'
-      }[suggestion.reason] || 'is around';
+      const reason =
+        {
+          just_joined: 'just joined',
+          shipping: 'is shipping',
+          needs_help: 'might need help',
+          active_now: 'is active'
+        }[suggestion.reason] || 'is around';
 
       result.push({
         label: `Message @${suggestion.handle}`,
@@ -92,7 +93,7 @@ const actions = {
 
     result.push({
       label: 'Share context',
-      description: 'Show what you\'re working on',
+      description: "Show what you're working on",
       command: 'share my context'
     });
 
@@ -161,11 +162,11 @@ const actions = {
   // Profile setup actions
   profileSetup: (currentProfile = {}) => {
     const result = [];
-    
+
     if (!currentProfile.building) {
       result.push({
         label: 'Add project',
-        description: 'Share what you\'re building',
+        description: "Share what you're building",
         command: 'update building'
       });
     }
@@ -197,7 +198,7 @@ const actions = {
   },
 
   // When welcoming new users
-  welcome: (handle) => [
+  welcome: handle => [
     {
       label: 'Set up profile',
       description: 'Add interests and skills for better matches',
@@ -215,13 +216,13 @@ const actions = {
     },
     {
       label: 'Join conversation',
-      description: 'See who\'s online now',
+      description: "See who's online now",
       command: 'who'
     }
   ],
 
   // After sending a DM
-  afterDm: (handle) => [
+  afterDm: handle => [
     {
       label: 'Send another',
       description: `Continue conversation with @${handle}`,
@@ -275,9 +276,9 @@ const actions = {
     });
 
     result.push({
-      label: 'Who\'s online',
-      description: 'See who\'s building right now',
-      command: 'who\'s around'
+      label: "Who's online",
+      description: "See who's building right now",
+      command: "who's around"
     });
 
     return result.slice(0, 4);
@@ -334,7 +335,7 @@ const actions = {
     },
     {
       label: 'Post to board',
-      description: 'Share what you\'re building',
+      description: "Share what you're building",
       command: 'post to the vibe board'
     }
   ],
@@ -362,7 +363,7 @@ const actions = {
       });
     } else {
       result.push({
-        label: 'See what\'s happening',
+        label: "See what's happening",
         description: 'Check the ship board',
         command: 'show the feed'
       });
@@ -407,7 +408,7 @@ const actions = {
       command: 'discover suggest'
     },
     {
-      label: 'Share what you\'re shipping',
+      label: "Share what you're shipping",
       description: 'Post to the ship board',
       command: 'post to the vibe board'
     }
@@ -438,10 +439,10 @@ const actions = {
   ],
 
   // Reaction selection
-  reactionOptions: (handle) => [
+  reactionOptions: handle => [
     {
       label: 'Fire',
-      description: 'That\'s awesome',
+      description: "That's awesome",
       command: `react fire to @${handle}`
     },
     {

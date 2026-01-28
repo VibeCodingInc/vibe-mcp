@@ -9,45 +9,45 @@ const store = require('../store');
 const patterns = require('../intelligence/patterns');
 
 const REACTIONS = {
-  'fire': '🔥',
+  fire: '🔥',
   '🔥': '🔥',
-  'heart': '❤️',
-  'love': '❤️',
+  heart: '❤️',
+  love: '❤️',
   '❤️': '❤️',
-  'eyes': '👀',
+  eyes: '👀',
   '👀': '👀',
-  'clap': '👏',
+  clap: '👏',
   '👏': '👏',
-  'rocket': '🚀',
+  rocket: '🚀',
   '🚀': '🚀',
-  'ship': '🚢',
+  ship: '🚢',
   '🚢': '🚢',
-  '100': '💯',
-  'hundred': '💯',
+  100: '💯',
+  hundred: '💯',
   '💯': '💯',
-  'thinking': '🤔',
+  thinking: '🤔',
   '🤔': '🤔',
-  'laugh': '😂',
-  'lol': '😂',
+  laugh: '😂',
+  lol: '😂',
   '😂': '😂',
-  'cool': '😎',
+  cool: '😎',
   '😎': '😎',
-  'wave': '👋',
+  wave: '👋',
   '👋': '👋',
-  'thumbsup': '👍',
-  'yes': '👍',
+  thumbsup: '👍',
+  yes: '👍',
   '+1': '👍',
   '👍': '👍',
-  'party': '🎉',
+  party: '🎉',
   '🎉': '🎉',
-  'fist': '🤜',
-  'bump': '🤜',
+  fist: '🤜',
+  bump: '🤜',
   '🤜': '🤜',
-  'brain': '🧠',
+  brain: '🧠',
   '🧠': '🧠',
-  'chef': '👨‍🍳',
-  'chefkiss': '🤌',
-  '🤌': '🤌',
+  chef: '👨‍🍳',
+  chefkiss: '🤌',
+  '🤌': '🤌'
 };
 
 const definition = {
@@ -89,7 +89,7 @@ async function handler(args) {
   }
 
   if (them === myHandle) {
-    return { display: 'You can\'t react to yourself.' };
+    return { display: "You can't react to yourself." };
   }
 
   // Normalize reaction

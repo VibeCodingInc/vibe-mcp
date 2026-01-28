@@ -52,13 +52,13 @@ class V2IntegrationTest {
   testSchema() {
     this.log('🔍', 'Test 1: Validating SQLite schema...');
 
-    const columns = this.db.prepare("PRAGMA table_info(messages)").all();
+    const columns = this.db.prepare('PRAGMA table_info(messages)').all();
     const columnNames = columns.map(c => c.name);
 
     const requiredColumns = [
       'local_id',
       'server_id',
-      'thread_id',  // V2 requirement
+      'thread_id', // V2 requirement
       'from_handle',
       'to_handle',
       'content',
@@ -127,7 +127,6 @@ class V2IntegrationTest {
 
       this.pass('Message saving', `Saved with local_id: ${local_id.slice(0, 12)}...`);
       return local_id;
-
     } catch (error) {
       this.fail('Message saving', error.message);
       return null;
@@ -173,7 +172,6 @@ class V2IntegrationTest {
       }
 
       this.pass('Status update', `Status: ${updated.status}, thread_id: ${thread_id.slice(0, 20)}...`);
-
     } catch (error) {
       this.fail('Status update', error.message);
     }
@@ -205,7 +203,6 @@ class V2IntegrationTest {
       }
 
       this.pass('Thread retrieval', `Retrieved ${messages.length} message(s) with thread_id`);
-
     } catch (error) {
       this.fail('Thread retrieval', error.message);
     }
@@ -243,11 +240,15 @@ class V2IntegrationTest {
       }
 
       // Verify messages were saved with thread_id
-      const saved = this.db.prepare(`
+      const saved = this.db
+        .prepare(
+          `
         SELECT * FROM messages
         WHERE server_id IN ('msg_server_001', 'msg_server_002')
         ORDER BY created_at
-      `).all();
+      `
+        )
+        .all();
 
       if (saved.length !== 2) {
         this.fail('Server message merge', `Expected 2 messages, found ${saved.length}`);
@@ -262,7 +263,6 @@ class V2IntegrationTest {
       }
 
       this.pass('Server message merge', `Merged ${merged} V2 messages with thread_id`);
-
     } catch (error) {
       this.fail('Server message merge', error.message);
     }

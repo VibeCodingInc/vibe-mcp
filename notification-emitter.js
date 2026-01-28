@@ -30,7 +30,7 @@ class NotificationEmitter {
     this.debounceTimers[reason] = setTimeout(() => {
       try {
         this.server.notification({
-          method: "notifications/list_changed"
+          method: 'notifications/list_changed'
         });
         delete this.debounceTimers[reason];
       } catch (e) {
@@ -47,7 +47,7 @@ class NotificationEmitter {
   emitImmediate() {
     try {
       this.server.notification({
-        method: "notifications/list_changed"
+        method: 'notifications/list_changed'
       });
     } catch (e) {
       // Silent fail

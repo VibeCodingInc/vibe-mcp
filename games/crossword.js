@@ -11,7 +11,9 @@ try {
   clg = require('crossword-layout-generator');
 } catch (err) {
   clgLoadError = err.message;
-  console.warn('[crossword] crossword-layout-generator not installed. Run: cd ~/.vibe/vibe-repo/mcp-server && npm install');
+  console.warn(
+    '[crossword] crossword-layout-generator not installed. Run: cd ~/.vibe/vibe-repo/mcp-server && npm install'
+  );
 }
 
 const { getWordsForDate, getTodayDateStr } = require('./crossword-words');
@@ -41,7 +43,7 @@ function generatePuzzle(wordList) {
   const answers = {};
 
   let clueNum = 1;
-  layout.result.forEach((item) => {
+  layout.result.forEach(item => {
     // Skip words that couldn't be placed (orientation: "none")
     if (item.orientation !== 'across' && item.orientation !== 'down') {
       return;
@@ -96,9 +98,7 @@ function createInitialCrosswordState(mode = 'collaborative', dateStr = null) {
   const puzzle = createDailyPuzzle(dateStr);
 
   // Create player grid (what they've filled in)
-  const playerGrid = puzzle.grid.map(row =>
-    row.map(cell => (cell === '-' ? '-' : ''))
-  );
+  const playerGrid = puzzle.grid.map(row => row.map(cell => (cell === '-' ? '-' : '')));
 
   return {
     puzzle,
@@ -384,10 +384,12 @@ function formatCrosswordDisplay(gameState) {
       contributions[p.by] = (contributions[p.by] || 0) + 1;
     });
 
-    const playerList = players.map(p => {
-      const count = contributions[p] || 0;
-      return `@${p} (${count})`;
-    }).join(', ');
+    const playerList = players
+      .map(p => {
+        const count = contributions[p] || 0;
+        return `@${p} (${count})`;
+      })
+      .join(', ');
 
     display += `**Players:** ${playerList}\n`;
   }

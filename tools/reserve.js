@@ -11,7 +11,7 @@ const { requireInit, formatDuration, warning, success } = require('./_shared');
 
 const definition = {
   name: 'vibe_reserve',
-  description: 'Reserve files you\'re working on. Advisory lock — warns on conflicts, doesn\'t block.',
+  description: "Reserve files you're working on. Advisory lock — warns on conflicts, doesn't block.",
   inputSchema: {
     type: 'object',
     properties: {

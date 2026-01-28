@@ -27,7 +27,8 @@ const workshopBuddyTool = require('./workshop-buddy');
 
 const definition = {
   name: 'vibe_discover',
-  description: 'Find people, skills, and partners. Commands: suggest, search, interests, active, skills (marketplace), partner (workshop buddy).',
+  description:
+    'Find people, skills, and partners. Commands: suggest, search, interests, active, skills (marketplace), partner (workshop buddy).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -80,7 +81,7 @@ function calculateMatchScore(user1, user2) {
   if (user1.building && user2.building) {
     const building1 = user1.building.toLowerCase();
     const building2 = user2.building.toLowerCase();
-    
+
     // Exact match
     if (building1 === building2) {
       score += 50;
@@ -169,13 +170,14 @@ function findComplementaryTags(tags1, tags2) {
 async function getSuggestions(myHandle) {
   const myProfile = await userProfiles.getProfile(myHandle);
   const allProfiles = await userProfiles.getAllProfiles();
-  
+
   const candidates = allProfiles.filter(p => p.handle !== myHandle);
   const matches = [];
 
   for (const candidate of candidates) {
     const match = calculateMatchScore(myProfile, candidate);
-    if (match.score > 10) { // Minimum threshold
+    if (match.score > 10) {
+      // Minimum threshold
       matches.push({
         handle: candidate.handle,
         score: match.score,
@@ -195,7 +197,7 @@ async function getSuggestions(myHandle) {
 async function searchPeople(query) {
   const allProfiles = await userProfiles.getAllProfiles();
   const searchTerm = query.toLowerCase();
-  
+
   const results = allProfiles.filter(profile => {
     return (
       profile.building?.toLowerCase().includes(searchTerm) ||
@@ -226,7 +228,7 @@ async function browseByInterests() {
 
   // Sort interests by popularity
   const sorted = Object.entries(interestMap)
-    .sort(([,a], [,b]) => b.length - a.length)
+    .sort(([, a], [, b]) => b.length - a.length)
     .slice(0, 10);
 
   return sorted;
@@ -236,15 +238,15 @@ async function browseByInterests() {
 async function getActiveSimilar(myHandle) {
   const myProfile = await userProfiles.getProfile(myHandle);
   const activeUsers = await store.getActiveUsers();
-  
+
   const similar = [];
-  
+
   for (const user of activeUsers) {
     if (user.handle === myHandle) continue;
-    
+
     const theirProfile = await userProfiles.getProfile(user.handle);
     const match = calculateMatchScore(myProfile, theirProfile);
-    
+
     if (match.score > 5) {
       similar.push({
         ...user,
@@ -287,7 +289,7 @@ async function handler(args) {
     switch (command) {
       case 'suggest': {
         const suggestions = await getSuggestions(myHandle);
-        
+
         if (suggestions.length === 0) {
           display = `## No Matches Found
 
@@ -301,22 +303,22 @@ _Not enough people with profiles yet._
 The more people share, the better our matches become!`;
         } else {
           display = `## People You Should Meet\n\n`;
-          
+
           for (const match of suggestions) {
             display += `**@${match.handle}** _(${match.score} match)_\n`;
             display += `${match.building || 'Building something interesting'}\n`;
-            
+
             if (match.reasons.length > 0) {
               display += `🔗 ${match.reasons.join(' • ')}\n`;
             }
-            
+
             if (match.interests.length > 0) {
               display += `💡 ${match.interests.slice(0, 3).join(', ')}\n`;
             }
-            
+
             display += `_Last seen: ${formatTimeAgo(match.lastSeen)}_\n\n`;
           }
-          
+
           display += `**Next steps:**\n`;
           display += `- \`message @handle\` to reach out\n`;
           display += `- \`discover active\` to see who's online now\n`;
@@ -329,9 +331,9 @@ The more people share, the better our matches become!`;
         if (!args.query) {
           return { error: 'Please provide a search query: discover search "ai"' };
         }
-        
+
         const results = await searchPeople(args.query);
-        
+
         if (results.length === 0) {
           display = `## No Results for "${args.query}"
 
@@ -343,15 +345,15 @@ Try searching for:
 Or browse by interest: \`discover interests\``;
         } else {
           display = `## People Building: "${args.query}"\n\n`;
-          
+
           for (const person of results) {
             display += `**@${person.handle}**\n`;
             display += `${person.building || 'Building something'}\n`;
-            
+
             if (person.tags && person.tags.length > 0) {
               display += `🏷️ ${person.tags.join(', ')}\n`;
             }
-            
+
             display += `_Last active: ${formatTimeAgo(person.lastSeen)}_\n\n`;
           }
         }
@@ -360,7 +362,7 @@ Or browse by interest: \`discover interests\``;
 
       case 'interests': {
         const interests = await browseByInterests();
-        
+
         if (interests.length === 0) {
           display = `## No Interest Data Yet
 
@@ -370,16 +372,19 @@ People haven't shared their interests yet.
 \`vibe update interests "ai, startups, music"\``;
         } else {
           display = `## Browse by Interest\n\n`;
-          
+
           for (const [interest, people] of interests) {
             display += `**${interest}** (${people.length}): `;
-            display += people.slice(0, 5).map(p => `@${p.handle}`).join(', ');
+            display += people
+              .slice(0, 5)
+              .map(p => `@${p.handle}`)
+              .join(', ');
             if (people.length > 5) {
               display += ` +${people.length - 5} more`;
             }
             display += '\n\n';
           }
-          
+
           display += `**Search for specific interest:**\n`;
           display += `\`discover search "machine learning"\``;
         }
@@ -388,7 +393,7 @@ People haven't shared their interests yet.
 
       case 'active': {
         const similar = await getActiveSimilar(myHandle);
-        
+
         if (similar.length === 0) {
           display = `## No Similar Builders Online
 
@@ -400,18 +405,18 @@ No one with similar interests is active right now.
 - \`discover search <topic>\` to find people by interest`;
         } else {
           display = `## Similar Builders Online Now\n\n`;
-          
+
           for (const person of similar) {
             display += `**@${person.handle}** _(${person.status})_\n`;
             display += `${person.building || person.one_liner || 'Active now'}\n`;
-            
+
             if (person.reasons.length > 0) {
               display += `🔗 ${person.reasons.join(' • ')}\n`;
             }
-            
+
             display += `\n`;
           }
-          
+
           display += `**Perfect time to connect!** 🎯`;
         }
         break;

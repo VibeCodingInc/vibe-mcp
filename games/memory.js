@@ -18,7 +18,7 @@ const DIFFICULTY_LEVELS = {
     description: 'Short sequences, 4 colors'
   },
   medium: {
-    name: 'Medium', 
+    name: 'Medium',
     emoji: '🟡',
     startLength: 4,
     maxLength: 8,
@@ -37,24 +37,34 @@ const DIFFICULTY_LEVELS = {
 
 // Fun encouragement messages
 const ENCOURAGEMENT = [
-  "Great memory! 🧠", "You're on fire! 🔥", "Excellent recall! ⭐",
-  "Perfect! 💫", "Amazing focus! 🎯", "Memory master! 👑",
-  "Brilliant! ✨", "Outstanding! 🌟", "Incredible! 🚀"
+  'Great memory! 🧠',
+  "You're on fire! 🔥",
+  'Excellent recall! ⭐',
+  'Perfect! 💫',
+  'Amazing focus! 🎯',
+  'Memory master! 👑',
+  'Brilliant! ✨',
+  'Outstanding! 🌟',
+  'Incredible! 🚀'
 ];
 
 const WRONG_MESSAGES = [
-  "Close, but not quite! 🤔", "Almost had it! 💭", "Good try! 🎯",
-  "So close! 😅", "Keep practicing! 💪", "Nearly perfect! 🌟"
+  'Close, but not quite! 🤔',
+  'Almost had it! 💭',
+  'Good try! 🎯',
+  'So close! 😅',
+  'Keep practicing! 💪',
+  'Nearly perfect! 🌟'
 ];
 
 // Create initial memory game state
 function createInitialMemoryState(difficulty = 'medium') {
   const difficultyConfig = DIFFICULTY_LEVELS[difficulty] || DIFFICULTY_LEVELS.medium;
   const availableEmojis = PATTERN_EMOJIS.slice(0, difficultyConfig.emojiCount);
-  
+
   // Generate first pattern
   const pattern = generatePattern(availableEmojis, difficultyConfig.startLength);
-  
+
   return {
     difficulty: difficulty,
     difficultyConfig: difficultyConfig,
@@ -91,11 +101,11 @@ function startInput(gameState) {
   if (gameState.gameOver) {
     return { error: 'Game is over! Start a new game to play again.' };
   }
-  
+
   if (!gameState.showingPattern) {
     return { error: 'Already in input phase! Enter your pattern guess.' };
   }
-  
+
   return {
     success: true,
     gameState: {
@@ -112,41 +122,42 @@ function submitPattern(gameState, patternInput) {
   if (gameState.gameOver) {
     return { error: 'Game is over! Start a new game to play again.' };
   }
-  
+
   if (gameState.showingPattern) {
     return { error: 'Wait for the input phase! Use `/game memory --input` first.' };
   }
-  
+
   if (!patternInput || typeof patternInput !== 'string') {
     return { error: 'Please enter your pattern guess!' };
   }
-  
+
   // Parse input - could be space-separated, comma-separated, or just concatenated
   let inputEmojis;
   if (patternInput.includes(' ')) {
     inputEmojis = patternInput.split(' ').filter(e => e.trim().length > 0);
   } else if (patternInput.includes(',')) {
-    inputEmojis = patternInput.split(',').map(e => e.trim()).filter(e => e.length > 0);
+    inputEmojis = patternInput
+      .split(',')
+      .map(e => e.trim())
+      .filter(e => e.length > 0);
   } else {
     // Try to split emoji string (this is tricky, but we'll try character by character)
-    inputEmojis = Array.from(patternInput).filter(char => 
-      PATTERN_EMOJIS.includes(char)
-    );
+    inputEmojis = Array.from(patternInput).filter(char => PATTERN_EMOJIS.includes(char));
   }
-  
+
   // Validate input emojis
   const invalidEmojis = inputEmojis.filter(emoji => !gameState.availableEmojis.includes(emoji));
   if (invalidEmojis.length > 0) {
     const validEmojis = gameState.availableEmojis.join(' ');
     return { error: `Invalid emojis: ${invalidEmojis.join(' ')}. Use only: ${validEmojis}` };
   }
-  
+
   // Check if pattern matches
   const correct = arraysEqual(inputEmojis, gameState.currentPattern);
   const newTotalAttempts = gameState.totalAttempts + 1;
   const newTotalCorrect = correct ? gameState.totalCorrect + 1 : gameState.totalCorrect;
   const newConsecutiveCorrect = correct ? gameState.consecutiveCorrect + 1 : 0;
-  
+
   let newGameState = {
     ...gameState,
     playerInput: inputEmojis,
@@ -156,13 +167,13 @@ function submitPattern(gameState, patternInput) {
     lastResult: correct ? 'correct' : 'wrong',
     inputPhase: false
   };
-  
+
   if (correct) {
     // Correct! Advance to next level
     const newLevel = gameState.level + 1;
-    const newScore = gameState.score + (gameState.level * 10); // More points for harder levels
+    const newScore = gameState.score + gameState.level * 10; // More points for harder levels
     const maxLevelReached = Math.max(gameState.maxLevelReached, newLevel);
-    
+
     // Check if we've reached the maximum length for this difficulty
     const maxLength = gameState.difficultyConfig.maxLength;
     if (gameState.currentPattern.length >= maxLength) {
@@ -178,12 +189,9 @@ function submitPattern(gameState, patternInput) {
       };
     } else {
       // Generate next pattern (slightly longer)
-      const nextLength = Math.min(
-        gameState.currentPattern.length + 1,
-        maxLength
-      );
+      const nextLength = Math.min(gameState.currentPattern.length + 1, maxLength);
       const nextPattern = generatePattern(gameState.availableEmojis, nextLength);
-      
+
       newGameState = {
         ...newGameState,
         currentPattern: nextPattern,
@@ -203,7 +211,7 @@ function submitPattern(gameState, patternInput) {
       endTime: Date.now()
     };
   }
-  
+
   return { success: true, gameState: newGameState };
 }
 
@@ -227,17 +235,31 @@ function getRandomWrongMessage() {
 
 // Format memory game for display
 function formatMemoryDisplay(gameState) {
-  const { 
-    difficulty, difficultyConfig, currentPattern, playerInput, level, score, 
-    gameOver, won, showingPattern, inputPhase, lastResult, consecutiveCorrect,
-    totalCorrect, totalAttempts, maxLevelReached, endTime, startTime
+  const {
+    difficulty,
+    difficultyConfig,
+    currentPattern,
+    playerInput,
+    level,
+    score,
+    gameOver,
+    won,
+    showingPattern,
+    inputPhase,
+    lastResult,
+    consecutiveCorrect,
+    totalCorrect,
+    totalAttempts,
+    maxLevelReached,
+    endTime,
+    startTime
   } = gameState;
-  
+
   let display = `🧠 **Memory Pattern Challenge** ${difficultyConfig.emoji} ${difficultyConfig.name.toUpperCase()}\n\n`;
-  
+
   // Show level and score
   display += `**Level ${level}** • Score: ${score} • Streak: ${consecutiveCorrect}\n\n`;
-  
+
   // Game result
   if (gameOver) {
     if (won) {
@@ -247,7 +269,7 @@ function formatMemoryDisplay(gameState) {
       display += `💥 **Game Over!** ${getRandomWrongMessage()}\n`;
       display += `You reached level ${maxLevelReached} • Max sequence: ${currentPattern.length}\n\n`;
     }
-    
+
     // Show final stats
     const accuracy = totalAttempts > 0 ? Math.round((totalCorrect / totalAttempts) * 100) : 0;
     const timeSeconds = Math.round((endTime - startTime) / 1000);
@@ -255,11 +277,11 @@ function formatMemoryDisplay(gameState) {
     display += `• Accuracy: ${accuracy}% (${totalCorrect}/${totalAttempts})\n`;
     display += `• Time: ${timeSeconds} seconds\n`;
     display += `• Max Level: ${maxLevelReached}\n\n`;
-    
+
     display += `Start a new game to try again!\n`;
     return display;
   }
-  
+
   // Show pattern or input phase
   if (showingPattern) {
     display += `**🔍 MEMORIZE THIS PATTERN:**\n`;
@@ -271,11 +293,11 @@ function formatMemoryDisplay(gameState) {
     display += `Enter the pattern you just saw!\n\n`;
     display += `**Available emojis:** ${gameState.availableEmojis.join(' ')}\n`;
     display += `**Expected length:** ${currentPattern.length}\n\n`;
-    
+
     if (playerInput.length > 0) {
       display += `**Your input so far:** ${playerInput.join(' ')}\n`;
     }
-    
+
     display += `*Use: \`/game memory --pattern "🔴 🟡 🟢"\` (space-separated)*\n`;
   } else {
     // Show result of last attempt
@@ -283,7 +305,7 @@ function formatMemoryDisplay(gameState) {
       display += `✅ **Correct!** ${getRandomEncouragement()}\n`;
       display += `You got: ${playerInput.join(' ')}\n`;
       display += `Next pattern coming up...\n\n`;
-      
+
       display += `**🔍 MEMORIZE THIS PATTERN:**\n`;
       display += `${currentPattern.join(' ')}\n\n`;
       display += `**Sequence length:** ${currentPattern.length}\n`;
@@ -294,10 +316,10 @@ function formatMemoryDisplay(gameState) {
       display += `Correct was: ${currentPattern.join(' ')}\n\n`;
     }
   }
-  
+
   // Show difficulty info
   display += `\n**Difficulty:** ${difficultyConfig.description}\n`;
-  
+
   return display;
 }
 
@@ -314,7 +336,7 @@ function getDifficulties() {
 // Get game statistics
 function getMemoryStats(gameState) {
   const { level, score, consecutiveCorrect, totalCorrect, totalAttempts, maxLevelReached } = gameState;
-  
+
   return {
     level,
     score,

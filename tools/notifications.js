@@ -83,9 +83,7 @@ async function handler(args) {
         display += '**Active Channels:**\n\n';
 
         for (const ch of channels) {
-          const status = ch.enabled
-            ? (ch.verified ? '✅' : '⚠️ Unverified')
-            : '⏸️ Disabled';
+          const status = ch.enabled ? (ch.verified ? '✅' : '⚠️ Unverified') : '⏸️ Disabled';
 
           display += `• **${ch.name}** (${ch.type})\n`;
           display += `  Status: ${status}\n`;
@@ -113,7 +111,6 @@ async function handler(args) {
       display += modeDesc[prefs.filters?.mode || 'all'] + '\n';
 
       return { display };
-
     } catch (e) {
       return {
         display: `❌ Error: ${e.message}`
@@ -129,7 +126,8 @@ async function handler(args) {
 
     if (!channel) {
       return {
-        display: '## Add Notification Channel\n\n' +
+        display:
+          '## Add Notification Channel\n\n' +
           'Choose a channel type:\n\n' +
           '• `vibe notifications add telegram` — Mobile-friendly, recommended\n' +
           '• `vibe notifications add discord` — Discord webhook\n' +
@@ -141,11 +139,16 @@ async function handler(args) {
     if (channel === 'telegram') {
       // Start Telegram linking flow
       try {
-        const result = await api.request('POST', '/api/settings/notifications', {
-          action: 'link_telegram'
-        }, {
-          headers: { 'Authorization': `Bearer ${config.getAuthToken()}` }
-        });
+        const result = await api.request(
+          'POST',
+          '/api/settings/notifications',
+          {
+            action: 'link_telegram'
+          },
+          {
+            headers: { Authorization: `Bearer ${config.getAuthToken()}` }
+          }
+        );
 
         if (!result.success) {
           return {
@@ -154,16 +157,18 @@ async function handler(args) {
         }
 
         return {
-          display: '## 📱 Link Telegram\n\n' +
+          display:
+            '## 📱 Link Telegram\n\n' +
             '**Step 1:** Open Telegram and find **@vibecodings_bot**\n\n' +
             '**Step 2:** Send this command to the bot:\n\n' +
-            '```\n/link ' + result.code + '\n```\n\n' +
-            '**Step 3:** The bot will confirm and you\'ll start receiving notifications!\n\n' +
+            '```\n/link ' +
+            result.code +
+            '\n```\n\n' +
+            "**Step 3:** The bot will confirm and you'll start receiving notifications!\n\n" +
             '_Code expires in 10 minutes._\n\n' +
             '---\n\n' +
             'After linking, run `vibe notifications` to verify it worked.'
         };
-
       } catch (e) {
         return {
           display: `❌ Error: ${e.message}`
@@ -174,7 +179,8 @@ async function handler(args) {
     // Discord/Slack/Webhook - show instructions
     if (channel === 'discord') {
       return {
-        display: '## Add Discord Webhook\n\n' +
+        display:
+          '## Add Discord Webhook\n\n' +
           '**Step 1:** In Discord, go to Server Settings → Integrations → Webhooks\n\n' +
           '**Step 2:** Create a new webhook and copy the URL\n\n' +
           '**Step 3:** Run:\n\n' +
@@ -188,7 +194,8 @@ async function handler(args) {
 
     if (channel === 'slack') {
       return {
-        display: '## Add Slack Webhook\n\n' +
+        display:
+          '## Add Slack Webhook\n\n' +
           '**Step 1:** Go to api.slack.com/apps and create an app\n\n' +
           '**Step 2:** Enable Incoming Webhooks and create one for your channel\n\n' +
           '**Step 3:** Copy the webhook URL and add via API\n\n' +
@@ -197,8 +204,7 @@ async function handler(args) {
     }
 
     return {
-      display: `❌ Unknown channel type: ${channel}\n\n` +
-        'Valid types: telegram, discord, slack, webhook'
+      display: `❌ Unknown channel type: ${channel}\n\n` + 'Valid types: telegram, discord, slack, webhook'
     };
   }
 
@@ -228,12 +234,12 @@ async function handler(args) {
       }
 
       return {
-        display: '## ✅ Telegram Linked!\n\n' +
-          'You\'ll now receive DM notifications on Telegram.\n\n' +
+        display:
+          '## ✅ Telegram Linked!\n\n' +
+          "You'll now receive DM notifications on Telegram.\n\n" +
           'Test it by having someone message you, or run:\n\n' +
           '```\nvibe notifications test\n```'
       };
-
     } catch (e) {
       return {
         display: `❌ Error: ${e.message}`
@@ -251,8 +257,7 @@ async function handler(args) {
 
       if (!prefs.success || !prefs.preferences.channels?.length) {
         return {
-          display: '❌ No notification channels configured.\n\n' +
-            'Add one first: `vibe notifications add telegram`'
+          display: '❌ No notification channels configured.\n\n' + 'Add one first: `vibe notifications add telegram`'
         };
       }
 
@@ -260,8 +265,7 @@ async function handler(args) {
       const channel = prefs.preferences.channels.find(ch => ch.enabled);
       if (!channel) {
         return {
-          display: '❌ All channels are disabled.\n\n' +
-            'Enable one: `vibe notifications enable`'
+          display: '❌ All channels are disabled.\n\n' + 'Enable one: `vibe notifications enable`'
         };
       }
 
@@ -272,18 +276,21 @@ async function handler(args) {
 
       if (!result.success) {
         return {
-          display: `❌ Test failed: ${result.error}\n\n` +
+          display:
+            `❌ Test failed: ${result.error}\n\n` +
             (result.failCount ? `Fail count: ${result.failCount}/5` : '') +
             (result.disabled ? '\n\n⚠️ Channel has been auto-disabled due to repeated failures.' : '')
         };
       }
 
       return {
-        display: '## ✅ Test Notification Sent!\n\n' +
+        display:
+          '## ✅ Test Notification Sent!\n\n' +
           `Channel: **${channel.name}** (${channel.type})\n\n` +
-          'Check your ' + channel.type + ' for the test message.'
+          'Check your ' +
+          channel.type +
+          ' for the test message.'
       };
-
     } catch (e) {
       return {
         display: `❌ Error: ${e.message}`
@@ -300,8 +307,7 @@ async function handler(args) {
 
       if (!prefs.success || !prefs.preferences.channels?.length) {
         return {
-          display: '❌ No notification channels configured.\n\n' +
-            'Add one first: `vibe notifications add telegram`'
+          display: '❌ No notification channels configured.\n\n' + 'Add one first: `vibe notifications add telegram`'
         };
       }
 
@@ -310,25 +316,30 @@ async function handler(args) {
       let updated = 0;
 
       for (const channel of prefs.preferences.channels) {
-        const result = await api.request('POST', '/api/settings/notifications', {
-          action: 'update_channel',
-          channel_id: channel.id,
-          enabled
-        }, {
-          headers: { 'Authorization': `Bearer ${config.getAuthToken()}` }
-        });
+        const result = await api.request(
+          'POST',
+          '/api/settings/notifications',
+          {
+            action: 'update_channel',
+            channel_id: channel.id,
+            enabled
+          },
+          {
+            headers: { Authorization: `Bearer ${config.getAuthToken()}` }
+          }
+        );
 
         if (result.success) updated++;
       }
 
       return {
-        display: `## ${enabled ? '✅ Notifications Enabled' : '⏸️ Notifications Paused'}\n\n` +
+        display:
+          `## ${enabled ? '✅ Notifications Enabled' : '⏸️ Notifications Paused'}\n\n` +
           `Updated ${updated} channel(s).\n\n` +
           (enabled
-            ? 'You\'ll now receive DM alerts on your configured channels.'
-            : 'You won\'t receive external notifications until you enable them again.')
+            ? "You'll now receive DM alerts on your configured channels."
+            : "You won't receive external notifications until you enable them again.")
       };
-
     } catch (e) {
       return {
         display: `❌ Error: ${e.message}`
@@ -358,8 +369,8 @@ async function handler(args) {
       }
 
       // Find channel by type
-      const channelToRemove = prefs.preferences.channels?.find(ch =>
-        ch.type === channel || ch.type === `${channel}_webhook`
+      const channelToRemove = prefs.preferences.channels?.find(
+        ch => ch.type === channel || ch.type === `${channel}_webhook`
       );
 
       if (!channelToRemove) {
@@ -380,11 +391,11 @@ async function handler(args) {
       }
 
       return {
-        display: `## ✅ Channel Removed\n\n` +
+        display:
+          `## ✅ Channel Removed\n\n` +
           `**${channelToRemove.name}** (${channelToRemove.type}) has been removed.\n\n` +
           'You will no longer receive notifications on this channel.'
       };
-
     } catch (e) {
       return {
         display: `❌ Error: ${e.message}`
@@ -393,8 +404,7 @@ async function handler(args) {
   }
 
   return {
-    display: `❌ Unknown action: ${action}\n\n` +
-      'Valid actions: view, add, test, enable, disable, remove'
+    display: `❌ Unknown action: ${action}\n\n` + 'Valid actions: view, add, test, enable, disable, remove'
   };
 }
 

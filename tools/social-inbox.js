@@ -115,7 +115,6 @@ async function handler(args) {
     display += '• `vibe social-inbox --channel webhooks` for webhook events only';
 
     return { display };
-
   } catch (e) {
     return {
       display: `${header('Social Inbox')}\n\n_Error:_ ${e.message}`
@@ -130,29 +129,29 @@ async function handleStatus() {
   const channels = await getChannelStatuses();
 
   for (const [name, status] of Object.entries(channels)) {
-    const icon = status.connected ? '✅' : (status.configured ? '⚠️' : '❌');
+    const icon = status.connected ? '✅' : status.configured ? '⚠️' : '❌';
     display += `${icon} **${name.toUpperCase()}**\n`;
-    
+
     if (status.connected && status.username) {
       display += `   Connected as @${status.username}\n`;
     }
-    
+
     display += `   Configured: ${status.configured ? 'Yes' : 'No'}\n`;
     display += `   Can read: ${status.canRead ? 'Yes' : 'No'}\n`;
     display += `   Can write: ${status.canWrite ? 'Yes' : 'No'}\n`;
-    
+
     if (status.webhook_active) {
       display += `   Webhook: Active (real-time events)\n`;
     }
-    
+
     if (status.error) {
       display += `   Error: ${status.error}\n`;
     }
-    
+
     if (status.setup) {
       display += `   Setup: ${status.setup}\n`;
     }
-    
+
     display += '\n';
   }
 
@@ -183,7 +182,7 @@ async function getChannelStatuses() {
       const me = await twitter.getMe();
       statuses.x.connected = true;
       statuses.x.username = me.data.username;
-      
+
       // Check if webhook is configured
       const webhookSecret = process.env.X_WEBHOOK_SECRET;
       statuses.x.webhook_active = !!webhookSecret;
@@ -259,10 +258,10 @@ async function getWebhookInboxEvents(limit) {
 
     const { kv } = await import('@vercel/kv');
     const inboxKey = 'vibe:social_inbox';
-    
+
     // Get recent webhook events
     const rawEvents = await kv.lrange(inboxKey, 0, limit - 1);
-    
+
     return rawEvents.map(eventStr => {
       const event = JSON.parse(eventStr);
       return {
@@ -278,7 +277,6 @@ async function getWebhookInboxEvents(limit) {
         metadata: event.metadata
       };
     });
-    
   } catch (e) {
     console.error('Error fetching webhook events:', e);
     return [];
@@ -353,11 +351,7 @@ async function getUnifiedInbox(channel, limit, refresh, highSignal, includeWebho
 
   // Filter high signal if requested
   if (highSignal) {
-    return messages.filter(msg => 
-      msg.type === 'mention' || 
-      msg.type === 'dm' || 
-      msg.type === 'follow'
-    ).slice(0, limit);
+    return messages.filter(msg => msg.type === 'mention' || msg.type === 'dm' || msg.type === 'follow').slice(0, limit);
   }
 
   return messages.slice(0, limit);
@@ -374,7 +368,7 @@ function getTwitterAuthor(tweet, includes) {
       };
     }
   }
-  
+
   return {
     id: tweet.author_id,
     handle: 'unknown',
@@ -389,7 +383,7 @@ function formatMessage(msg) {
 
   let result = `${channelIcon} ${sourceIcon} **@${msg.from.handle}** ${typeIcon} — _${msg.timeAgo}_\n`;
   result += `${msg.content}\n`;
-  
+
   // Show engagement if available
   if (msg.replies > 0 || msg.reactions > 0 || msg.recasts > 0) {
     const metrics = [];
@@ -398,14 +392,14 @@ function formatMessage(msg) {
     if (msg.recasts > 0) metrics.push(`${msg.recasts} recasts`);
     result += `_${metrics.join(' • ')}_\n`;
   }
-  
+
   // Show metadata if available
   if (msg.metadata?.url) {
     result += `_${msg.metadata.url}_\n`;
   }
-  
+
   result += `_[${msg.id}]_\n`;
-  
+
   return result;
 }
 

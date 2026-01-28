@@ -48,9 +48,9 @@ const definition = {
 };
 
 const STATUS_EMOJI = {
-  'open': '🔓',
-  'claimed': '🔨',
-  'shipped': '✅'
+  open: '🔓',
+  claimed: '🔨',
+  shipped: '✅'
 };
 
 async function handler(args) {
@@ -84,7 +84,6 @@ async function handler(args) {
       return {
         display: `🔨 claimed \`${args.claim}\``
       };
-
     } catch (error) {
       return { display: `⚠️ Failed to claim: ${error.message}` };
     }
@@ -127,7 +126,6 @@ async function handler(args) {
       }
 
       return { display };
-
     } catch (error) {
       return { display: `⚠️ Failed to post: ${error.message}` };
     }
@@ -136,15 +134,12 @@ async function handler(args) {
   // Browse requests
   try {
     const limit = Math.min(args.limit || 10, 30);
-    let url = `${apiUrl}/api/board?limit=${limit * 2}&category=request`;
+    const url = `${apiUrl}/api/board?limit=${limit * 2}&category=request`;
 
     // Also get claims to show status
     const claimsUrl = `${apiUrl}/api/board?limit=50&category=claim`;
 
-    const [requestsRes, claimsRes] = await Promise.all([
-      fetch(url),
-      fetch(claimsUrl)
-    ]);
+    const [requestsRes, claimsRes] = await Promise.all([fetch(url), fetch(claimsUrl)]);
 
     const requests = (await requestsRes.json()).entries || [];
     const claims = (await claimsRes.json()).entries || [];
@@ -208,7 +203,6 @@ async function handler(args) {
     });
 
     return { display };
-
   } catch (error) {
     return { display: `⚠️ Failed to load requests: ${error.message}` };
   }

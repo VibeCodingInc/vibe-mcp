@@ -33,7 +33,7 @@ async function handler(args) {
   const them = normalizeHandle(handle);
 
   if (them === myHandle) {
-    return { display: 'You can\'t open a thread with yourself.' };
+    return { display: "You can't open a thread with yourself." };
   }
 
   // Get thread and mark as read

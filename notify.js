@@ -65,7 +65,7 @@ function showNotification(title, message, sound = false, bell = true) {
     script += ` sound name "Ping"`;
   }
 
-  exec(`osascript -e '${script}'`, (err) => {
+  exec(`osascript -e '${script}'`, err => {
     if (err) {
       // Silently fail - notifications are best-effort
     }
@@ -198,9 +198,9 @@ function checkPresence(activeUsers) {
     const lastSeen = state.seenHandles[user.handle];
 
     // New user or returning after cooldown
-    if (!lastSeen || (now - lastSeen > COOLDOWN)) {
+    if (!lastSeen || now - lastSeen > COOLDOWN) {
       // Check if they're actually recently active (last 5 min)
-      const userActive = user.lastSeen && (now - user.lastSeen < 5 * 60 * 1000);
+      const userActive = user.lastSeen && now - user.lastSeen < 5 * 60 * 1000;
 
       if (userActive) {
         justJoined.push(user);
@@ -211,8 +211,8 @@ function checkPresence(activeUsers) {
           showNotification(
             `/vibe — @${user.handle} is here`,
             context,
-            false,  // no system sound
-            false   // no terminal bell for presence (too noisy)
+            false, // no system sound
+            false // no terminal bell for presence (too noisy)
           );
         }
       }
@@ -295,8 +295,8 @@ async function checkShips(memoryHandles = []) {
         showNotification(
           `/vibe — @${ship.author} shipped! 🚀`,
           content,
-          false,  // no system sound
-          true    // terminal bell (soft nudge)
+          false, // no system sound
+          true // terminal bell (soft nudge)
         );
         newShips.push(ship);
       }
@@ -311,7 +311,6 @@ async function checkShips(memoryHandles = []) {
 
     state.lastCheck = now;
     saveShipsState(state);
-
   } catch (e) {
     // Silent fail - notifications are best-effort
   }

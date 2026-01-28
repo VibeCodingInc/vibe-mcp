@@ -17,7 +17,8 @@ const crypto = require('../crypto');
 
 const definition = {
   name: 'vibe_migrate',
-  description: 'Migrate your existing handle to GitHub authentication. Use this if you have an existing handle with local keys.',
+  description:
+    'Migrate your existing handle to GitHub authentication. Use this if you have an existing handle with local keys.',
   inputSchema: {
     type: 'object',
     properties: {}
@@ -76,26 +77,29 @@ No migration needed!`
         timestamp
       });
 
-      const req = https.request({
-        hostname: url.hostname,
-        port: 443,
-        path: url.pathname,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': data.length
-        }
-      }, (res) => {
-        let body = '';
-        res.on('data', chunk => body += chunk);
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(body));
-          } catch (e) {
-            resolve({ success: false, error: body });
+      const req = https.request(
+        {
+          hostname: url.hostname,
+          port: 443,
+          path: url.pathname,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': data.length
           }
-        });
-      });
+        },
+        res => {
+          let body = '';
+          res.on('data', chunk => (body += chunk));
+          res.on('end', () => {
+            try {
+              resolve(JSON.parse(body));
+            } catch (e) {
+              resolve({ success: false, error: body });
+            }
+          });
+        }
+      );
 
       req.on('error', reject);
       req.write(data);
@@ -141,7 +145,6 @@ _Migration token expires in 1 hour._`,
       verified: result.verified,
       migrationToken: result.migrationToken
     };
-
   } catch (e) {
     return {
       display: `❌ **Migration request failed**

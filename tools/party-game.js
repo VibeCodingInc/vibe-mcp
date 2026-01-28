@@ -34,7 +34,8 @@ async function postPartyGameResult(game, message) {
 
 const definition = {
   name: 'vibe_party_game',
-  description: 'Social ice breaker and party games. Supports: twotruths (Two Truths and a Lie), werewolf (social deduction)',
+  description:
+    'Social ice breaker and party games. Supports: twotruths (Two Truths and a Lie), werewolf (social deduction)',
   inputSchema: {
     type: 'object',
     properties: {
@@ -47,11 +48,21 @@ const definition = {
         type: 'string',
         description: 'Action to take',
         enum: [
-          'new', 'status', 'join',
+          'new',
+          'status',
+          'join',
           // Two Truths actions
-          'statements', 'guess', 'reveal', 'newround',
+          'statements',
+          'guess',
+          'reveal',
+          'newround',
           // Werewolf actions
-          'start', 'kill', 'investigate', 'startvote', 'vote', 'advance'
+          'start',
+          'kill',
+          'investigate',
+          'startvote',
+          'vote',
+          'advance'
         ]
       },
       // Two Truths specific
@@ -103,7 +114,7 @@ async function handler(args) {
   const gameKey = getGameKey(game, room || myHandle);
 
   // Get or create game state
-  let gameState = activeGames[gameKey];
+  const gameState = activeGames[gameKey];
 
   if (game === 'twotruths') {
     return handleTwoTruths(args, myHandle, gameKey, gameState);
@@ -123,8 +134,7 @@ function handleTwoTruths(args, myHandle, gameKey, gameState) {
     gameState = twotruths.createInitialState(myHandle);
     activeGames[gameKey] = gameState;
     return {
-      display: twotruths.formatDisplay(gameState, myHandle) +
-        `\n\n📍 Game room: \`${gameKey}\``
+      display: twotruths.formatDisplay(gameState, myHandle) + `\n\n📍 Game room: \`${gameKey}\``
     };
   }
 
@@ -196,8 +206,8 @@ function handleWerewolf(args, myHandle, gameKey, gameState) {
     gameState = werewolf.createInitialState(myHandle);
     activeGames[gameKey] = gameState;
     return {
-      display: werewolf.formatDisplay(gameState, myHandle) +
-        `\n\n📍 Game room: \`${gameKey}\`\nShare this to invite others!`
+      display:
+        werewolf.formatDisplay(gameState, myHandle) + `\n\n📍 Game room: \`${gameKey}\`\nShare this to invite others!`
     };
   }
 
@@ -247,7 +257,8 @@ function handleWerewolf(args, myHandle, gameKey, gameState) {
 
     activeGames[gameKey] = result.gameState;
     return {
-      display: `🔮 Investigation result:\n@${result.reveal.target} is... ${result.reveal.result}\n\n` +
+      display:
+        `🔮 Investigation result:\n@${result.reveal.target} is... ${result.reveal.result}\n\n` +
         werewolf.formatDisplay(result.gameState, myHandle)
     };
   }

@@ -21,11 +21,11 @@ const ROLES = {
 };
 
 const PHASES = {
-  LOBBY: 'lobby',       // Waiting for players
-  NIGHT: 'night',       // Werewolves choose victim, seer investigates
-  DAY: 'day',           // Discussion
-  VOTING: 'voting',     // Vote to eliminate
-  ENDED: 'ended'        // Game over
+  LOBBY: 'lobby', // Waiting for players
+  NIGHT: 'night', // Werewolves choose victim, seer investigates
+  DAY: 'day', // Discussion
+  VOTING: 'voting', // Vote to eliminate
+  ENDED: 'ended' // Game over
 };
 
 // Role distribution based on player count
@@ -63,18 +63,18 @@ function createInitialState(host) {
     host,
     phase: PHASES.LOBBY,
     players: [host],
-    roles: {},           // { handle: role }
-    alive: [],           // handles of living players
-    dead: [],            // { handle, role, eliminatedBy: 'werewolf'|'vote' }
+    roles: {}, // { handle: role }
+    alive: [], // handles of living players
+    dead: [], // { handle, role, eliminatedBy: 'werewolf'|'vote' }
     round: 0,
 
     // Night actions
     werewolfTarget: null,
     seerTarget: null,
-    seerReveals: {},     // { handle: role } - what seer has learned
+    seerReveals: {}, // { handle: role } - what seer has learned
 
     // Voting
-    votes: {},           // { voter: target }
+    votes: {}, // { voter: target }
 
     // History
     events: [],
@@ -231,10 +231,7 @@ function advanceToDay(gameState) {
     const victimRole = gameState.roles[victim];
 
     newState.alive = gameState.alive.filter(p => p !== victim);
-    newState.dead = [
-      ...gameState.dead,
-      { handle: victim, role: victimRole, eliminatedBy: 'werewolf' }
-    ];
+    newState.dead = [...gameState.dead, { handle: victim, role: victimRole, eliminatedBy: 'werewolf' }];
 
     events.push(`☀️ Day ${gameState.round} begins.`);
     events.push(`💀 @${victim} was found dead! They were a ${victimRole}.`);
@@ -341,17 +338,18 @@ function tallyVotes(gameState) {
   const events = [...gameState.events];
 
   // Show vote breakdown
-  events.push(`📊 Votes: ${Object.entries(voteCounts).map(([t, c]) => `@${t}: ${c}`).join(', ')}`);
+  events.push(
+    `📊 Votes: ${Object.entries(voteCounts)
+      .map(([t, c]) => `@${t}: ${c}`)
+      .join(', ')}`
+  );
 
   if (tie || !eliminated || maxVotes < 2) {
     events.push(`🤷 No majority reached. No one is eliminated.`);
   } else {
     const role = gameState.roles[eliminated];
     newState.alive = alive.filter(p => p !== eliminated);
-    newState.dead = [
-      ...gameState.dead,
-      { handle: eliminated, role, eliminatedBy: 'vote' }
-    ];
+    newState.dead = [...gameState.dead, { handle: eliminated, role, eliminatedBy: 'vote' }];
     events.push(`⚰️ @${eliminated} has been eliminated! They were a ${role}.`);
   }
 

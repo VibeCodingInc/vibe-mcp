@@ -253,9 +253,10 @@ async function initiateClaim(apiUrl, handle, signature, nonce) {
   const balanceData = await balanceResp.json();
 
   if (!balanceData.canClaim) {
-    const reason = parseFloat(balanceData.pendingBalanceEth) < parseFloat(balanceData.minClaimAmountEth)
-      ? `Balance (${balanceData.pendingBalanceEth} ETH) below minimum (${balanceData.minClaimAmountEth} ETH)`
-      : `Cooldown active until ${balanceData.cooldownEndsAt}`;
+    const reason =
+      parseFloat(balanceData.pendingBalanceEth) < parseFloat(balanceData.minClaimAmountEth)
+        ? `Balance (${balanceData.pendingBalanceEth} ETH) below minimum (${balanceData.minClaimAmountEth} ETH)`
+        : `Cooldown active until ${balanceData.cooldownEndsAt}`;
 
     return {
       display: `❌ Cannot claim yet: ${reason}

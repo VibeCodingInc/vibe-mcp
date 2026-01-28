@@ -21,7 +21,7 @@ function migrate() {
   const db = new Database(DB_PATH);
 
   // Check if thread_id column already exists
-  const columns = db.prepare("PRAGMA table_info(messages)").all();
+  const columns = db.prepare('PRAGMA table_info(messages)').all();
   const hasThreadId = columns.some(col => col.name === 'thread_id');
 
   if (hasThreadId) {
@@ -45,7 +45,7 @@ function migrate() {
     console.log('[Migration] ✅ Successfully added thread_id column and index');
 
     // Verify migration
-    const newColumns = db.prepare("PRAGMA table_info(messages)").all();
+    const newColumns = db.prepare('PRAGMA table_info(messages)').all();
     const threadIdColumn = newColumns.find(col => col.name === 'thread_id');
 
     if (threadIdColumn) {
@@ -54,7 +54,6 @@ function migrate() {
     } else {
       console.error('[Migration] ❌ Verification failed - column not found after migration');
     }
-
   } catch (error) {
     console.error('[Migration] ❌ Migration failed:', error.message);
     throw error;

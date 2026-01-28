@@ -56,8 +56,8 @@ function createEmpty() {
     sessions: {
       total: 0,
       totalMinutes: 0,
-      byHour: Array(24).fill(0),      // Activity by hour of day
-      byDay: Array(7).fill(0),         // Activity by day of week (0=Sun)
+      byHour: Array(24).fill(0), // Activity by hour of day
+      byDay: Array(7).fill(0), // Activity by day of week (0=Sun)
       longestMinutes: 0,
       averageMinutes: 0
     },
@@ -96,7 +96,7 @@ function createEmpty() {
       // Domains they explore
       domains: {},
       // Attribution given/received
-      inspired: [],      // who inspired them
+      inspired: [], // who inspired them
       inspiredOthers: [] // who they've inspired
     }
   };
@@ -140,9 +140,7 @@ function logSessionEnd() {
 
   // Update totals
   patterns.sessions.totalMinutes += durationMinutes;
-  patterns.sessions.averageMinutes = Math.round(
-    patterns.sessions.totalMinutes / patterns.sessions.total
-  );
+  patterns.sessions.averageMinutes = Math.round(patterns.sessions.totalMinutes / patterns.sessions.total);
   if (durationMinutes > patterns.sessions.longestMinutes) {
     patterns.sessions.longestMinutes = durationMinutes;
   }
@@ -312,13 +310,11 @@ function updateTopConnections(patterns) {
     return bTotal - aTotal;
   });
 
-  patterns.social.topConnections = connections
-    .slice(0, 5)
-    .map(([handle, data]) => ({
-      handle,
-      total: data.messages + data.received,
-      lastContact: data.lastContact
-    }));
+  patterns.social.topConnections = connections.slice(0, 5).map(([handle, data]) => ({
+    handle,
+    total: data.messages + data.received,
+    lastContact: data.lastContact
+  }));
 }
 
 // ============ CREATIVE LOGGING ============
@@ -450,9 +446,7 @@ function getDominantState() {
   return {
     state: states[0][0],
     minutes: states[0][1].totalMinutes,
-    percentage: Math.round(
-      (states[0][1].totalMinutes / patterns.sessions.totalMinutes) * 100
-    )
+    percentage: Math.round((states[0][1].totalMinutes / patterns.sessions.totalMinutes) * 100)
   };
 }
 
@@ -595,8 +589,19 @@ function extractModule(filePath) {
   if (!filePath) return null;
 
   const parts = filePath.split('/');
-  const meaningful = ['src', 'lib', 'app', 'components', 'pages', 'api',
-                      'services', 'utils', 'hooks', 'store', 'models'];
+  const meaningful = [
+    'src',
+    'lib',
+    'app',
+    'components',
+    'pages',
+    'api',
+    'services',
+    'utils',
+    'hooks',
+    'store',
+    'models'
+  ];
 
   for (let i = 0; i < parts.length - 1; i++) {
     if (meaningful.includes(parts[i])) {

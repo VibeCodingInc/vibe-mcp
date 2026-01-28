@@ -40,8 +40,8 @@ async function neynarRequest(method, endpoint, params = {}, body = null) {
   let url = `${baseUrl}${endpoint}`;
 
   const headers = {
-    'accept': 'application/json',
-    'api_key': apiKey
+    accept: 'application/json',
+    api_key: apiKey
   };
 
   // GET requests: params in URL
@@ -74,7 +74,7 @@ async function neynarRequest(method, endpoint, params = {}, body = null) {
 async function getUser(fid = null) {
   const { fid: defaultFid } = getCredentials();
   const targetFid = fid || defaultFid;
-  
+
   if (!targetFid) throw new Error('No FID specified');
 
   return neynarRequest('GET', '/farcaster/user/bulk', {
@@ -88,7 +88,7 @@ async function getUser(fid = null) {
 async function getFeed(fid = null, limit = 25) {
   const { fid: defaultFid } = getCredentials();
   const targetFid = fid || defaultFid;
-  
+
   if (!targetFid) throw new Error('No FID specified');
 
   return neynarRequest('GET', '/farcaster/feed/user', {
@@ -103,7 +103,7 @@ async function getFeed(fid = null, limit = 25) {
 async function getMentions(fid = null, limit = 25) {
   const { fid: defaultFid } = getCredentials();
   const targetFid = fid || defaultFid;
-  
+
   if (!targetFid) throw new Error('No FID specified');
 
   return neynarRequest('GET', '/farcaster/notifications', {
@@ -210,7 +210,7 @@ async function searchCasts(query, limit = 25) {
 async function getFollowers(fid = null, limit = 100) {
   const { fid: defaultFid } = getCredentials();
   const targetFid = fid || defaultFid;
-  
+
   if (!targetFid) throw new Error('No FID specified');
 
   return neynarRequest('GET', '/farcaster/followers', {
@@ -225,7 +225,7 @@ async function getFollowers(fid = null, limit = 100) {
 async function getFollowing(fid = null, limit = 100) {
   const { fid: defaultFid } = getCredentials();
   const targetFid = fid || defaultFid;
-  
+
   if (!targetFid) throw new Error('No FID specified');
 
   return neynarRequest('GET', '/farcaster/following', {
@@ -239,7 +239,7 @@ async function getFollowing(fid = null, limit = 100) {
  */
 function processCast(cast) {
   const author = cast.author;
-  
+
   return {
     id: `farcaster:${cast.hash}`,
     channel: 'farcaster',

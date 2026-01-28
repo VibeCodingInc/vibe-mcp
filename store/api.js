@@ -44,9 +44,9 @@ function request(method, path, data = null, options = {}) {
       timeout
     };
 
-    const req = client.request(reqOptions, (res) => {
+    const req = client.request(reqOptions, res => {
       let body = '';
-      res.on('data', chunk => body += chunk);
+      res.on('data', chunk => (body += chunk));
       res.on('end', () => {
         // Handle non-2xx responses
         if (res.statusCode >= 400) {
@@ -73,7 +73,7 @@ function request(method, path, data = null, options = {}) {
       resolve({ success: false, error: 'Request timeout', timeout: true });
     });
 
-    req.on('error', (e) => {
+    req.on('error', e => {
       resolve({ success: false, error: e.message, network: true });
     });
 
@@ -109,7 +109,7 @@ async function registerSession(sessionId, handle, building = null, publicKey = n
       registrationData.publicKey = publicKey;
     }
 
-    const result = await request('POST', '/api/presence', registrationData, { auth: false });  // Don't send token for registration (we don't have one yet)
+    const result = await request('POST', '/api/presence', registrationData, { auth: false }); // Don't send token for registration (we don't have one yet)
 
     if (result.success && result.token) {
       // Use server-issued sessionId and token (not client-generated)
@@ -135,7 +135,7 @@ async function registerSession(sessionId, handle, building = null, publicKey = n
       if (publicKey) {
         userData.publicKey = publicKey;
       }
-      await request('POST', '/api/users', userData, { auth: false });  // User registration doesn't need auth
+      await request('POST', '/api/users', userData, { auth: false }); // User registration doesn't need auth
     } catch (e) {
       // Non-fatal if user registration fails
     }
@@ -269,12 +269,15 @@ async function sendMessage(from, to, body, type = 'dm', payload = null) {
 
       if (keypair) {
         // Full AIRC-compliant signed message
-        data = crypto.createSignedMessage({
-          from,
-          to,
-          body: body || undefined,
-          payload: payload || undefined
-        }, keypair.privateKey);
+        data = crypto.createSignedMessage(
+          {
+            from,
+            to,
+            body: body || undefined,
+            payload: payload || undefined
+          },
+          keypair.privateKey
+        );
 
         // Also include 'text' for backward compat with current API
         if (body) data.text = body;
@@ -292,7 +295,9 @@ async function sendMessage(from, to, body, type = 'dm', payload = null) {
     // Handle auth errors
     if (!result.success && result.error?.includes('Authentication')) {
       // Mark as failed in SQLite
-      try { sqlite.updateMessageStatus(local_id, 'failed'); } catch (e) {}
+      try {
+        sqlite.updateMessageStatus(local_id, 'failed');
+      } catch (e) {}
       console.error('[vibe] Auth failed for message. Try `vibe init` to re-register.');
       return { error: 'auth_failed', message: 'Authentication failed. Try `vibe init` to re-register.' };
     }
@@ -300,7 +305,9 @@ async function sendMessage(from, to, body, type = 'dm', payload = null) {
     // Handle expired token
     if (result.statusCode === 401) {
       // Mark as failed in SQLite
-      try { sqlite.updateMessageStatus(local_id, 'failed'); } catch (e) {}
+      try {
+        sqlite.updateMessageStatus(local_id, 'failed');
+      } catch (e) {}
       console.error('[vibe] Auth expired. Run browser auth to refresh token.');
       return { error: 'auth_expired', message: 'Auth expired. Run `vibe init` to refresh token.' };
     }
@@ -308,7 +315,9 @@ async function sendMessage(from, to, body, type = 'dm', payload = null) {
     // Handle storage errors (KV write failed)
     if (!result.success && result.error === 'storage_error') {
       // Mark as failed in SQLite
-      try { sqlite.updateMessageStatus(local_id, 'failed'); } catch (e) {}
+      try {
+        sqlite.updateMessageStatus(local_id, 'failed');
+      } catch (e) {}
       console.error('[vibe] Storage error:', result.details || result.message);
       return { error: 'storage_error', message: result.message || 'Failed to save message. Please try again.' };
     }
@@ -316,7 +325,9 @@ async function sendMessage(from, to, body, type = 'dm', payload = null) {
     // Handle other errors
     if (!result.success && result.error) {
       // Mark as failed in SQLite
-      try { sqlite.updateMessageStatus(local_id, 'failed'); } catch (e) {}
+      try {
+        sqlite.updateMessageStatus(local_id, 'failed');
+      } catch (e) {}
       console.error('[vibe] Send error:', result.error, result.message);
       return { error: result.error, message: result.message || 'Failed to send message.' };
     }
@@ -346,7 +357,9 @@ async function sendMessage(from, to, body, type = 'dm', payload = null) {
   } catch (e) {
     console.error('Send failed:', e.message);
     // Mark as failed in SQLite
-    try { sqlite.updateMessageStatus(local_id, 'failed'); } catch (sqliteErr) {}
+    try {
+      sqlite.updateMessageStatus(local_id, 'failed');
+    } catch (sqliteErr) {}
     return null;
   }
 }
@@ -375,15 +388,17 @@ async function getInbox(handle) {
         threads.forEach(thread => {
           const msg = thread.last_message;
           if (msg) {
-            sqlite.mergeServerMessages([{
-              server_id: msg.id,
-              thread_id: thread.id,  // V2 thread_id
-              from_handle: msg.from,
-              to_handle: handle === msg.from ? thread.with : handle,
-              content: msg.body,
-              created_at: msg.created_at,
-              status: 'delivered'
-            }]);
+            sqlite.mergeServerMessages([
+              {
+                server_id: msg.id,
+                thread_id: thread.id, // V2 thread_id
+                from_handle: msg.from,
+                to_handle: handle === msg.from ? thread.with : handle,
+                content: msg.body,
+                created_at: msg.created_at,
+                status: 'delivered'
+              }
+            ]);
           }
         });
       } catch (sqliteError) {
@@ -394,12 +409,16 @@ async function getInbox(handle) {
     // Return V2 format
     return threads.map(thread => ({
       handle: thread.with,
-      messages: thread.last_message ? [{
-        from: thread.last_message.from,
-        body: thread.last_message.body,
-        timestamp: new Date(thread.last_message.created_at).getTime(),
-        read: thread.unread === 0
-      }] : [],
+      messages: thread.last_message
+        ? [
+            {
+              from: thread.last_message.from,
+              body: thread.last_message.body,
+              timestamp: new Date(thread.last_message.created_at).getTime(),
+              read: thread.unread === 0
+            }
+          ]
+        : [],
       unread: thread.unread,
       lastMessage: thread.last_message?.body,
       lastTimestamp: thread.last_message ? new Date(thread.last_message.created_at).getTime() : 0
@@ -470,35 +489,40 @@ async function getThread(myHandle, theirHandle) {
     // 3. Merge API messages into SQLite (for future reads)
     if (apiMessages.length > 0) {
       try {
-        sqlite.mergeServerMessages(apiMessages.map(m => ({
-          server_id: m.id || m.messageId,
-          thread_id: m.thread_id || null,  // V2 thread_id (if present)
-          from_handle: m.from,
-          to_handle: m.to || (m.from === myHandle ? theirHandle : myHandle),
-          content: m.body || m.text || '',  // V2 uses 'body'
-          created_at: m.created_at || m.createdAt || new Date().toISOString(),
-          status: 'delivered',
-          sent_at: m.sent_at || m.sentAt || m.created_at || m.createdAt,
-          delivered_at: m.delivered_at || m.deliveredAt || m.created_at || m.createdAt
-        })));
+        sqlite.mergeServerMessages(
+          apiMessages.map(m => ({
+            server_id: m.id || m.messageId,
+            thread_id: m.thread_id || null, // V2 thread_id (if present)
+            from_handle: m.from,
+            to_handle: m.to || (m.from === myHandle ? theirHandle : myHandle),
+            content: m.body || m.text || '', // V2 uses 'body'
+            created_at: m.created_at || m.createdAt || new Date().toISOString(),
+            status: 'delivered',
+            sent_at: m.sent_at || m.sentAt || m.created_at || m.createdAt,
+            delivered_at: m.delivered_at || m.deliveredAt || m.created_at || m.createdAt
+          }))
+        );
       } catch (sqliteError) {
         console.warn('[SQLite] Failed to merge messages:', sqliteError.message);
       }
     }
 
     // 4. Return merged result (prefer API for latest, fallback to local)
-    const messages = apiMessages.length > 0 ? apiMessages : localMessages.map(m => ({
-      id: m.server_id,
-      from: m.from_handle,
-      to: m.to_handle,
-      body: m.content,  // V2 uses 'body'
-      created_at: m.created_at
-    }));
+    const messages =
+      apiMessages.length > 0
+        ? apiMessages
+        : localMessages.map(m => ({
+            id: m.server_id,
+            from: m.from_handle,
+            to: m.to_handle,
+            body: m.content, // V2 uses 'body'
+            created_at: m.created_at
+          }));
 
     return messages.map(m => ({
       from: m.from,
       isAgent: m.isAgent || m.is_agent || false,
-      body: m.body || m.text || m.content || '',  // V2: m.body, fallback to legacy
+      body: m.body || m.text || m.content || '', // V2: m.body, fallback to legacy
       payload: m.payload || null,
       timestamp: new Date(m.created_at || m.createdAt).getTime(),
       direction: m.direction

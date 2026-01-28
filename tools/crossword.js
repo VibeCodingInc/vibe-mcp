@@ -25,7 +25,7 @@ const definition = {
     properties: {
       action: {
         type: 'string',
-        description: 'Action: daily (join today\'s puzzle), create, join, play, hint, status',
+        description: "Action: daily (join today's puzzle), create, join, play, hint, status",
         enum: ['daily', 'create', 'join', 'play', 'hint', 'status', 'list']
       },
       room: {
@@ -344,7 +344,8 @@ Then restart Claude Code.`
 
       if (rooms.length === 0) {
         return {
-          display: '**No active crossword rooms.**\n\nStart one:\n- `crossword daily` - Join today\'s puzzle\n- `crossword create` - Create a new room'
+          display:
+            "**No active crossword rooms.**\n\nStart one:\n- `crossword daily` - Join today's puzzle\n- `crossword create` - Create a new room"
         };
       }
 

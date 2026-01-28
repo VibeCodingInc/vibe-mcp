@@ -32,7 +32,7 @@ const definition = {
         description: 'X coordinate (0-19) for drawing'
       },
       y: {
-        type: 'number', 
+        type: 'number',
         description: 'Y coordinate (0-11) for drawing'
       },
       x1: {
@@ -45,7 +45,8 @@ const definition = {
       },
       char: {
         type: 'string',
-        description: 'Character to draw (empty, dot, circle, square, star, heart, tree, house, sun, moon, water, mountain, person, cat, dog, car, plane, flower, umbrella, rainbow)'
+        description:
+          'Character to draw (empty, dot, circle, square, star, heart, tree, house, sun, moon, water, mountain, person, cat, dog, car, plane, flower, umbrella, rainbow)'
       },
       theme: {
         type: 'string',
@@ -146,7 +147,9 @@ async function handler(args) {
 
     case 'join':
       if (!drawingState) {
-        return { display: `No drawing session found in #${room}. Use \`vibe drawing --action start --room ${room}\` to create one!` };
+        return {
+          display: `No drawing session found in #${room}. Use \`vibe drawing --action start --room ${room}\` to create one!`
+        };
       }
 
       const joinResult = drawing.addPlayer(drawingState, myHandle);
@@ -164,7 +167,9 @@ async function handler(args) {
 
     case 'draw':
       if (!drawingState) {
-        return { display: `No drawing session found in #${room}. Use \`vibe drawing --action start --room ${room}\` to create one!` };
+        return {
+          display: `No drawing session found in #${room}. Use \`vibe drawing --action start --room ${room}\` to create one!`
+        };
       }
 
       if (x === undefined || y === undefined || !char) {
@@ -192,11 +197,16 @@ async function handler(args) {
 
     case 'line':
       if (!drawingState) {
-        return { display: `No drawing session found in #${room}. Use \`vibe drawing --action start --room ${room}\` to create one!` };
+        return {
+          display: `No drawing session found in #${room}. Use \`vibe drawing --action start --room ${room}\` to create one!`
+        };
       }
 
       if (x === undefined || y === undefined || x1 === undefined || y1 === undefined || !char) {
-        return { display: 'For line drawing, you need: --x [start x] --y [start y] --x1 [end x] --y1 [end y] --char [character name]' };
+        return {
+          display:
+            'For line drawing, you need: --x [start x] --y [start y] --x1 [end x] --y1 [end y] --char [character name]'
+        };
       }
 
       const charName2 = char.toLowerCase();
@@ -222,10 +232,12 @@ async function handler(args) {
         return { display: `No drawing session found in #${room}.` };
       }
 
-      const clearResult = drawing.clearRegion(drawingState, 
-        x || 0, y || 0, 
-        x1 !== undefined ? x1 : drawing.CANVAS_WIDTH - 1, 
-        y1 !== undefined ? y1 : drawing.CANVAS_HEIGHT - 1, 
+      const clearResult = drawing.clearRegion(
+        drawingState,
+        x || 0,
+        y || 0,
+        x1 !== undefined ? x1 : drawing.CANVAS_WIDTH - 1,
+        y1 !== undefined ? y1 : drawing.CANVAS_HEIGHT - 1,
         myHandle
       );
 
@@ -259,14 +271,16 @@ async function handler(args) {
       await postDrawingActivity('theme', room, myHandle, theme);
 
       const tips = drawing.getDrawingTips(theme);
-      
+
       return {
         display: `## 🎯 Set Theme in #${room}\n\n${drawing.formatDrawingDisplay(drawingState)}\n\n**Drawing tips for "${theme}":**\n${tips.map(tip => `• ${tip}`).join('\n')}`
       };
 
     case 'view':
       if (!drawingState) {
-        return { display: `No drawing session found in #${room}. Use \`vibe drawing --action start --room ${room}\` to create one!` };
+        return {
+          display: `No drawing session found in #${room}. Use \`vibe drawing --action start --room ${room}\` to create one!`
+        };
       }
 
       return {
@@ -279,7 +293,7 @@ async function handler(args) {
       }
 
       const stats = drawing.getCanvasStats(drawingState);
-      
+
       let statsDisplay = `## 📊 Drawing Stats for #${room}\n\n`;
       statsDisplay += `**Canvas:** ${stats.fillPercentage}% filled (${stats.totalDrawnCells}/${drawing.CANVAS_WIDTH * drawing.CANVAS_HEIGHT} cells)\n`;
       statsDisplay += `**Moves:** ${stats.totalMoves} total\n`;
@@ -292,7 +306,7 @@ async function handler(args) {
       if (Object.keys(stats.playerMoves).length > 0) {
         statsDisplay += `**Artists:**\n`;
         Object.entries(stats.playerMoves)
-          .sort(([,a], [,b]) => b - a)
+          .sort(([, a], [, b]) => b - a)
           .forEach(([player, moves]) => {
             statsDisplay += `• @${player}: ${moves} moves\n`;
           });

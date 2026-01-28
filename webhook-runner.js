@@ -2,13 +2,13 @@
 
 /**
  * /vibe Webhook Server Runner
- * 
+ *
  * Standalone webhook server for receiving real-time updates from external platforms.
  * Run this on a public server to bridge external platforms into /vibe.
- * 
+ *
  * Usage:
  *   node webhook-runner.js [--port 3001]
- *   
+ *
  * Environment Variables:
  *   WEBHOOK_PORT=3001
  *   WEBHOOK_SECRET=your-webhook-secret
@@ -29,8 +29,8 @@ app.use(express.raw({ type: 'application/json', limit: '10mb' }));
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     service: 'vibe-webhook-server',
     timestamp: new Date().toISOString()
   });
@@ -56,7 +56,7 @@ app.use('/webhook', createWebhookHandler());
 // Error handler
 app.use((err, req, res, next) => {
   console.error('Webhook server error:', err);
-  res.status(500).json({ 
+  res.status(500).json({
     error: 'Internal server error',
     timestamp: new Date().toISOString()
   });
@@ -66,7 +66,7 @@ app.use((err, req, res, next) => {
 function startServer() {
   const config = getConfig();
   const port = config.port;
-  
+
   const server = app.listen(port, () => {
     console.log(`🌉 /vibe webhook server running on port ${port}`);
     console.log();
@@ -84,7 +84,7 @@ function startServer() {
     console.log();
     console.log('Visit /setup endpoint for platform-specific setup instructions.');
   });
-  
+
   // Graceful shutdown
   process.on('SIGINT', () => {
     console.log('\n🛑 Shutting down webhook server...');
@@ -93,14 +93,14 @@ function startServer() {
       process.exit(0);
     });
   });
-  
+
   return server;
 }
 
 // CLI handling
 if (require.main === module) {
   const args = process.argv.slice(2);
-  
+
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`
 /vibe Webhook Server
@@ -125,7 +125,7 @@ Examples:
 `);
     process.exit(0);
   }
-  
+
   startServer();
 }
 

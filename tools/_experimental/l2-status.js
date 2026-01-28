@@ -15,17 +15,17 @@ const fetch = require('node-fetch');
 // Chain configuration (matches lib/vibe-l2/config.js)
 const CHAINS = {
   'vibe-l2': {
-    chainId: 84532000,  // Mainnet
+    chainId: 84532000, // Mainnet
     name: 'VIBE L2',
     rpcUrl: process.env.VIBE_L2_RPC || 'https://rpc.vibe.network',
-    explorerUrl: 'https://explorer.vibe.network',
+    explorerUrl: 'https://explorer.vibe.network'
   },
   'vibe-l2-testnet': {
-    chainId: 84532001,  // Testnet
+    chainId: 84532001, // Testnet
     name: 'VIBE L2 Testnet',
     rpcUrl: process.env.VIBE_L2_TESTNET_RPC || 'https://rpc-testnet.vibe.network',
-    explorerUrl: 'https://explorer-testnet.vibe.network',
-  },
+    explorerUrl: 'https://explorer-testnet.vibe.network'
+  }
 };
 
 const definition = {
@@ -48,60 +48,60 @@ const definition = {
 
 async function handler(args) {
   const { network = 'vibe-l2-testnet', verbose = false } = args;
+  try {
+    const chain = CHAINS[network];
+    if (!chain) {
+      return {
+        success: false,
+        error: `Unknown network: ${network}`,
+        available: Object.keys(CHAINS)
+      };
+    }
+
+    // Check RPC health
+    const rpcStatus = await checkRpcHealth(chain.rpcUrl);
+
+    // Get contract addresses from environment
+    // Standardized format: VIBE_ARTIFACTS_TESTNET or VIBE_ARTIFACTS_MAINNET
+    const envSuffix = network === 'vibe-l2' ? 'MAINNET' : 'TESTNET';
+    const contracts = {
+      vibeArtifacts: process.env[`VIBE_ARTIFACTS_${envSuffix}`],
+      shipbackRegistry: process.env[`SHIPBACK_REGISTRY_${envSuffix}`],
+      vibeToken: process.env[`VIBE_TOKEN_${envSuffix}`]
+    };
+
+    // Check Shipback API health
+    const apiUrl = process.env.VIBE_API_URL || 'https://www.slashvibe.dev';
+    let apiHealth = { status: 'unknown' };
     try {
-      const chain = CHAINS[network];
-      if (!chain) {
-        return {
-          success: false,
-          error: `Unknown network: ${network}`,
-          available: Object.keys(CHAINS)
-        };
-      }
+      const apiResp = await fetch(`${apiUrl}/api/health?full=true`, { timeout: 5000 });
+      apiHealth = await apiResp.json();
+    } catch (e) {
+      apiHealth = { status: 'error', error: e.message };
+    }
 
-      // Check RPC health
-      const rpcStatus = await checkRpcHealth(chain.rpcUrl);
+    // Build status report
+    const status = {
+      network: chain.name,
+      chainId: chain.chainId,
+      rpc: {
+        url: chain.rpcUrl,
+        ...rpcStatus
+      },
+      contracts: {
+        vibeArtifacts: contracts.vibeArtifacts || 'not deployed',
+        shipbackRegistry: contracts.shipbackRegistry || 'not deployed',
+        vibeToken: contracts.vibeToken || 'not deployed (optional)'
+      },
+      api: apiHealth.status === 'healthy' ? 'healthy' : apiHealth.status,
+      explorer: chain.explorerUrl
+    };
 
-      // Get contract addresses from environment
-      // Standardized format: VIBE_ARTIFACTS_TESTNET or VIBE_ARTIFACTS_MAINNET
-      const envSuffix = network === 'vibe-l2' ? 'MAINNET' : 'TESTNET';
-      const contracts = {
-        vibeArtifacts: process.env[`VIBE_ARTIFACTS_${envSuffix}`],
-        shipbackRegistry: process.env[`SHIPBACK_REGISTRY_${envSuffix}`],
-        vibeToken: process.env[`VIBE_TOKEN_${envSuffix}`],
-      };
+    // Format output
+    const rpcIcon = rpcStatus.healthy ? '🟢' : '🔴';
+    const apiIcon = apiHealth.status === 'healthy' ? '🟢' : '🟡';
 
-      // Check Shipback API health
-      const apiUrl = process.env.VIBE_API_URL || 'https://www.slashvibe.dev';
-      let apiHealth = { status: 'unknown' };
-      try {
-        const apiResp = await fetch(`${apiUrl}/api/health?full=true`, { timeout: 5000 });
-        apiHealth = await apiResp.json();
-      } catch (e) {
-        apiHealth = { status: 'error', error: e.message };
-      }
-
-      // Build status report
-      const status = {
-        network: chain.name,
-        chainId: chain.chainId,
-        rpc: {
-          url: chain.rpcUrl,
-          ...rpcStatus
-        },
-        contracts: {
-          vibeArtifacts: contracts.vibeArtifacts || 'not deployed',
-          shipbackRegistry: contracts.shipbackRegistry || 'not deployed',
-          vibeToken: contracts.vibeToken || 'not deployed (optional)',
-        },
-        api: apiHealth.status === 'healthy' ? 'healthy' : apiHealth.status,
-        explorer: chain.explorerUrl
-      };
-
-      // Format output
-      const rpcIcon = rpcStatus.healthy ? '🟢' : '🔴';
-      const apiIcon = apiHealth.status === 'healthy' ? '🟢' : '🟡';
-
-      let formatted = `
+    let formatted = `
 ┌─────────────────────────────────────────────────────┐
 │              VIBE L2 STATUS                         │
 ├─────────────────────────────────────────────────────┤
@@ -121,28 +121,27 @@ async function handler(args) {
 └─────────────────────────────────────────────────────┘
 `.trim();
 
-      if (verbose && rpcStatus.healthy) {
-        formatted += `\n\nDetailed RPC Info:
+    if (verbose && rpcStatus.healthy) {
+      formatted += `\n\nDetailed RPC Info:
   Latest Block: ${rpcStatus.blockNumber}
   Block Time: ${rpcStatus.blockTime || 'unknown'}
   Gas Price: ${rpcStatus.gasPrice} gwei
   Chain ID: ${rpcStatus.chainId}`;
-      }
-
-      // Shipback info
-      formatted += `\n\n💰 Shipback Distribution: 80% creator / 15% protocol / 5% foundation`;
-      formatted += `\n📖 Explorer: ${chain.explorerUrl}`;
-
-      return {
-        display: formatted,
-        data: status
-      };
-
-    } catch (error) {
-      return {
-        display: `❌ Failed to check L2 status: ${error.message}`
-      };
     }
+
+    // Shipback info
+    formatted += `\n\n💰 Shipback Distribution: 80% creator / 15% protocol / 5% foundation`;
+    formatted += `\n📖 Explorer: ${chain.explorerUrl}`;
+
+    return {
+      display: formatted,
+      data: status
+    };
+  } catch (error) {
+    return {
+      display: `❌ Failed to check L2 status: ${error.message}`
+    };
+  }
 }
 
 /**
@@ -205,7 +204,6 @@ async function checkRpcHealth(rpcUrl) {
       chainId,
       latency: 'ok'
     };
-
   } catch (error) {
     return {
       healthy: false,

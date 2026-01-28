@@ -43,7 +43,8 @@ const definition = {
       },
       char: {
         type: 'string',
-        description: 'Character to draw (empty, dot, circle, square, star, heart, tree, house, sun, moon, water, mountain, person, cat, dog, car, plane, flower, umbrella, rainbow)'
+        description:
+          'Character to draw (empty, dot, circle, square, star, heart, tree, house, sun, moon, water, mountain, person, cat, dog, car, plane, flower, umbrella, rainbow)'
       },
       position: {
         type: 'number',
@@ -73,7 +74,7 @@ const definition = {
 // Get or create global game room
 function getGameRoom(gameType, roomId = 'default') {
   const key = `${gameType}:${roomId}`;
-  
+
   if (!globalGameRooms[key]) {
     if (gameType === 'drawing') {
       globalGameRooms[key] = drawing.createInitialDrawingState();
@@ -86,7 +87,7 @@ function getGameRoom(gameType, roomId = 'default') {
       globalGameRooms[key] = storybuilder.createInitialStoryBuilderState();
     }
   }
-  
+
   return globalGameRooms[key];
 }
 
@@ -105,8 +106,8 @@ async function handler(args) {
   const roomId = roomName || 'default';
 
   // Get current game state
-  let gameState = getGameRoom(game, roomId);
-  
+  const gameState = getGameRoom(game, roomId);
+
   try {
     if (game === 'drawing') {
       if (action === 'join') {
@@ -115,37 +116,41 @@ async function handler(args) {
           return { display: `❌ ${result.error}` };
         }
         updateGameRoom(game, roomId, result.gameState);
-        return { display: `🎨 **Joined Collaborative Drawing!**\n\n${drawing.formatDrawingDisplay(result.gameState)}\n\nUse commands like:\n• \`vibe multiplayer-game drawing draw --x 10 --y 5 --char star\`\n• \`vibe multiplayer-game drawing theme --theme "house"\`` };
-      
+        return {
+          display: `🎨 **Joined Collaborative Drawing!**\n\n${drawing.formatDrawingDisplay(result.gameState)}\n\nUse commands like:\n• \`vibe multiplayer-game drawing draw --x 10 --y 5 --char star\`\n• \`vibe multiplayer-game drawing theme --theme "house"\``
+        };
       } else if (action === 'draw') {
         if (x === undefined || y === undefined || !char) {
-          return { display: 'Need x, y coordinates and character to draw. Example: `vibe multiplayer-game drawing draw --x 10 --y 5 --char star`' };
+          return {
+            display:
+              'Need x, y coordinates and character to draw. Example: `vibe multiplayer-game drawing draw --x 10 --y 5 --char star`'
+          };
         }
-        
+
         // Convert char name to actual character
         const charMap = drawing.DRAWING_CHARS;
         const actualChar = charMap[char] || char;
-        
+
         const result = drawing.makeMove(gameState, x, y, actualChar, myHandle);
         if (result.error) {
           return { display: `❌ ${result.error}` };
         }
         updateGameRoom(game, roomId, result.gameState);
-        return { display: `🎨 **Drew ${actualChar} at (${x},${y})**\n\n${drawing.formatDrawingDisplay(result.gameState)}` };
-      
+        return {
+          display: `🎨 **Drew ${actualChar} at (${x},${y})**\n\n${drawing.formatDrawingDisplay(result.gameState)}`
+        };
       } else if (action === 'clear') {
         const x0 = x || 0;
         const y0 = y || 0;
         const x1 = args.x1 || x0;
         const y1 = args.y1 || y0;
-        
+
         const result = drawing.clearRegion(gameState, x0, y0, x1, y1, myHandle);
         if (result.error) {
           return { display: `❌ ${result.error}` };
         }
         updateGameRoom(game, roomId, result.gameState);
         return { display: `🧹 **Cleared region**\n\n${drawing.formatDrawingDisplay(result.gameState)}` };
-      
       } else if (action === 'theme') {
         if (!theme) {
           return { display: 'Need a theme! Example: `vibe multiplayer-game drawing theme --theme "house"`' };
@@ -156,12 +161,12 @@ async function handler(args) {
         }
         updateGameRoom(game, roomId, result.gameState);
         const tips = drawing.getDrawingTips(theme);
-        return { display: `🎯 **Set theme: ${theme}**\n\n**Tips:** ${tips.join(', ')}\n\n${drawing.formatDrawingDisplay(result.gameState)}` };
-      
+        return {
+          display: `🎯 **Set theme: ${theme}**\n\n**Tips:** ${tips.join(', ')}\n\n${drawing.formatDrawingDisplay(result.gameState)}`
+        };
       } else if (action === 'show') {
         return { display: drawing.formatDrawingDisplay(gameState) };
       }
-
     } else if (game === 'multiplayer-tictactoe') {
       if (action === 'join') {
         const result = multiTicTacToe.joinRoom(gameState, myHandle, false);
@@ -169,35 +174,41 @@ async function handler(args) {
           return { display: `❌ ${result.error}` };
         }
         updateGameRoom(game, roomId, result.gameState);
-        return { display: `🎯 **Joined Multiplayer Tic-Tac-Toe!**\n\n${multiTicTacToe.formatMultiplayerTicTacToeDisplay(result.gameState, myHandle)}` };
-      
+        return {
+          display: `🎯 **Joined Multiplayer Tic-Tac-Toe!**\n\n${multiTicTacToe.formatMultiplayerTicTacToeDisplay(result.gameState, myHandle)}`
+        };
       } else if (action === 'spectate') {
         const result = multiTicTacToe.joinRoom(gameState, myHandle, true);
         if (result.error) {
           return { display: `❌ ${result.error}` };
         }
         updateGameRoom(game, roomId, result.gameState);
-        return { display: `👁️ **Now spectating Multiplayer Tic-Tac-Toe**\n\n${multiTicTacToe.formatMultiplayerTicTacToeDisplay(result.gameState, myHandle)}` };
-      
+        return {
+          display: `👁️ **Now spectating Multiplayer Tic-Tac-Toe**\n\n${multiTicTacToe.formatMultiplayerTicTacToeDisplay(result.gameState, myHandle)}`
+        };
       } else if (action === 'move') {
         if (!position) {
-          return { display: 'Need position (1-9)! Example: `vibe multiplayer-game multiplayer-tictactoe move --position 5`' };
+          return {
+            display: 'Need position (1-9)! Example: `vibe multiplayer-game multiplayer-tictactoe move --position 5`'
+          };
         }
         const result = multiTicTacToe.makeMove(gameState, position, myHandle);
         if (result.error) {
           return { display: `❌ ${result.error}` };
         }
         updateGameRoom(game, roomId, result.gameState);
-        return { display: `🎯 **Played position ${position}**\n\n${multiTicTacToe.formatMultiplayerTicTacToeDisplay(result.gameState, myHandle)}` };
-      
+        return {
+          display: `🎯 **Played position ${position}**\n\n${multiTicTacToe.formatMultiplayerTicTacToeDisplay(result.gameState, myHandle)}`
+        };
       } else if (action === 'restart') {
         const result = multiTicTacToe.restartGame(gameState, myHandle);
         if (result.error) {
           return { display: `❌ ${result.error}` };
         }
         updateGameRoom(game, roomId, result.gameState);
-        return { display: `🔄 **Restarted game!**\n\n${multiTicTacToe.formatMultiplayerTicTacToeDisplay(result.gameState, myHandle)}` };
-      
+        return {
+          display: `🔄 **Restarted game!**\n\n${multiTicTacToe.formatMultiplayerTicTacToeDisplay(result.gameState, myHandle)}`
+        };
       } else if (action === 'leave') {
         const result = multiTicTacToe.leaveRoom(gameState, myHandle);
         if (result.error) {
@@ -205,41 +216,38 @@ async function handler(args) {
         }
         updateGameRoom(game, roomId, result.gameState);
         return { display: '👋 Left the game room.' };
-      
       } else if (action === 'show') {
         return { display: multiTicTacToe.formatMultiplayerTicTacToeDisplay(gameState, myHandle) };
       }
-
     } else if (game === 'wordchain') {
       if (action === 'join') {
         const result = wordchain.addPlayer && wordchain.addPlayer(gameState, myHandle);
         if (result && result.error) {
           return { display: `❌ ${result.error}` };
         }
-        
+
         // For wordchain, just show the current state since it doesn't have explicit player management
-        return { display: `🔗 **Joined Word Chain!**\n\n${wordchain.formatWordChainDisplay(gameState)}\n\nAdd words with: \`vibe multiplayer-game wordchain word --word "apple"\`` };
-      
+        return {
+          display: `🔗 **Joined Word Chain!**\n\n${wordchain.formatWordChainDisplay(gameState)}\n\nAdd words with: \`vibe multiplayer-game wordchain word --word "apple"\``
+        };
       } else if (action === 'word') {
         if (!word) {
           return { display: 'Need a word! Example: `vibe multiplayer-game wordchain word --word "apple"`' };
         }
-        
+
         // For wordchain, we need to determine if this is player 1 or 2 move
         // For simplicity, let's alternate based on move count
         const isPlayer1Move = gameState.moves % 2 === 0;
-        
+
         const result = wordchain.makeMove(gameState, word, isPlayer1Move);
         if (result.error) {
           return { display: `❌ ${result.error}` };
         }
         updateGameRoom(game, roomId, result.gameState);
         return { display: `🔗 **Added word: ${word}**\n\n${wordchain.formatWordChainDisplay(result.gameState)}` };
-      
       } else if (action === 'show') {
         return { display: wordchain.formatWordChainDisplay(gameState) };
       }
-
     } else if (game === 'storybuilder') {
       if (action === 'join') {
         const result = storybuilder.addPlayer(gameState, myHandle);
@@ -247,11 +255,15 @@ async function handler(args) {
           return { display: `❌ ${result.error}` };
         }
         updateGameRoom(game, roomId, result.gameState);
-        return { display: `📚 **Joined Story Builder!**\n\n${storybuilder.formatStoryBuilderDisplay(result.gameState)}\n\nAdd sentences with: \`vibe multiplayer-game storybuilder sentence --sentence "Once upon a time..."\`` };
-      
+        return {
+          display: `📚 **Joined Story Builder!**\n\n${storybuilder.formatStoryBuilderDisplay(result.gameState)}\n\nAdd sentences with: \`vibe multiplayer-game storybuilder sentence --sentence "Once upon a time..."\``
+        };
       } else if (action === 'sentence') {
         if (!sentence) {
-          return { display: 'Need a sentence! Example: `vibe multiplayer-game storybuilder sentence --sentence "Once upon a time..."`' };
+          return {
+            display:
+              'Need a sentence! Example: `vibe multiplayer-game storybuilder sentence --sentence "Once upon a time..."`'
+          };
         }
         const result = storybuilder.addSentence(gameState, sentence, myHandle);
         if (result.error) {
@@ -259,14 +271,12 @@ async function handler(args) {
         }
         updateGameRoom(game, roomId, result.gameState);
         return { display: `📚 **Added sentence!**\n\n${storybuilder.formatStoryBuilderDisplay(result.gameState)}` };
-      
       } else if (action === 'show') {
         return { display: storybuilder.formatStoryBuilderDisplay(gameState) };
       }
     }
 
     return { display: `❌ Unknown action "${action}" for game "${game}"` };
-
   } catch (error) {
     return { display: `❌ Error: ${error.message}` };
   }

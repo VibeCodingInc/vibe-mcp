@@ -5,8 +5,18 @@
 
 // Chess piece values for basic evaluation
 const PIECE_VALUES = {
-  'P': 1, 'N': 3, 'B': 3, 'R': 5, 'Q': 9, 'K': 0,
-  'p': -1, 'n': -3, 'b': -3, 'r': -5, 'q': -9, 'k': 0
+  P: 1,
+  N: 3,
+  B: 3,
+  R: 5,
+  Q: 9,
+  K: 0,
+  p: -1,
+  n: -3,
+  b: -3,
+  r: -5,
+  q: -9,
+  k: 0
 };
 
 // Initial chess board setup
@@ -43,17 +53,17 @@ function indexToRank(index) {
 function parseAlgebraicNotation(notation, board, isWhiteTurn) {
   // Remove check/checkmate indicators
   const move = notation.replace(/[+#]$/, '');
-  
+
   // Handle castling
   if (move === 'O-O' || move === '0-0') {
-    return isWhiteTurn ? 
-      { from: [7, 4], to: [7, 6], type: 'castle-short' } :
-      { from: [0, 4], to: [0, 6], type: 'castle-short' };
+    return isWhiteTurn
+      ? { from: [7, 4], to: [7, 6], type: 'castle-short' }
+      : { from: [0, 4], to: [0, 6], type: 'castle-short' };
   }
   if (move === 'O-O-O' || move === '0-0-0') {
-    return isWhiteTurn ? 
-      { from: [7, 4], to: [7, 2], type: 'castle-long' } :
-      { from: [0, 4], to: [0, 2], type: 'castle-long' };
+    return isWhiteTurn
+      ? { from: [7, 4], to: [7, 2], type: 'castle-long' }
+      : { from: [0, 4], to: [0, 2], type: 'castle-long' };
   }
 
   // Handle pawn moves (no piece letter)
@@ -62,12 +72,12 @@ function parseAlgebraicNotation(notation, board, isWhiteTurn) {
     const toFile = fileToIndex(move[0]);
     const toRank = rankToIndex(move[1]);
     const fromRank = isWhiteTurn ? toRank + 1 : toRank - 1;
-    
+
     // Check if it's a valid pawn move
     if (fromRank >= 0 && fromRank < 8 && board[fromRank][toFile] === (isWhiteTurn ? 'P' : 'p')) {
       return { from: [fromRank, toFile], to: [toRank, toFile], type: 'move' };
     }
-    
+
     // Check for double pawn move
     const doubleFromRank = isWhiteTurn ? 6 : 1;
     if (board[doubleFromRank][toFile] === (isWhiteTurn ? 'P' : 'p') && board[toRank][toFile] === '') {
@@ -81,7 +91,7 @@ function parseAlgebraicNotation(notation, board, isWhiteTurn) {
     const toFile = fileToIndex(move[2]);
     const toRank = rankToIndex(move[3]);
     const fromRank = isWhiteTurn ? toRank + 1 : toRank - 1;
-    
+
     if (fromRank >= 0 && fromRank < 8 && board[fromRank][fromFile] === (isWhiteTurn ? 'P' : 'p')) {
       return { from: [fromRank, fromFile], to: [toRank, toFile], type: 'capture' };
     }
@@ -115,10 +125,10 @@ function parseAlgebraicNotation(notation, board, isWhiteTurn) {
     }
 
     if (validFromSquares.length === 1) {
-      return { 
-        from: validFromSquares[0], 
-        to: [toRank, toFile], 
-        type: isCapture ? 'capture' : 'move' 
+      return {
+        from: validFromSquares[0],
+        to: [toRank, toFile],
+        type: isCapture ? 'capture' : 'move'
       };
     }
   }
@@ -149,7 +159,7 @@ function canPieceMove(board, piece, fromRank, fromFile, toRank, toFile) {
     case 'p': // Pawn
       const direction = piece === 'P' ? -1 : 1;
       const startRank = piece === 'P' ? 6 : 1;
-      
+
       // Forward move
       if (dx === 0) {
         if (dy === direction && board[toRank][toFile] === '') return true;
@@ -169,8 +179,7 @@ function canPieceMove(board, piece, fromRank, fromFile, toRank, toFile) {
       return false;
 
     case 'n': // Knight
-      return (Math.abs(dx) === 2 && Math.abs(dy) === 1) || 
-             (Math.abs(dx) === 1 && Math.abs(dy) === 2);
+      return (Math.abs(dx) === 2 && Math.abs(dy) === 1) || (Math.abs(dx) === 1 && Math.abs(dy) === 2);
 
     case 'b': // Bishop
       if (Math.abs(dx) === Math.abs(dy)) {
@@ -197,7 +206,7 @@ function isPathClear(board, fromRank, fromFile, toRank, toFile) {
   const dx = toFile - fromFile;
   const dy = toRank - fromRank;
   const steps = Math.max(Math.abs(dx), Math.abs(dy));
-  
+
   const stepX = dx === 0 ? 0 : dx / Math.abs(dx);
   const stepY = dy === 0 ? 0 : dy / Math.abs(dy);
 
@@ -323,10 +332,10 @@ function moveToAlgebraicNotation(board, move) {
   const { from, to, piece } = move;
   const [fromRank, fromFile] = from;
   const [toRank, toFile] = to;
-  
+
   const toSquare = indexToFile(toFile) + indexToRank(toRank);
   const isCapture = board[toRank][toFile] !== '';
-  
+
   if (piece.toLowerCase() === 'p') {
     if (isCapture) {
       return indexToFile(fromFile) + 'x' + toSquare;
@@ -358,18 +367,18 @@ function createInitialChessState() {
 function formatChessBoard(board, lastMove = null) {
   const files = '  a b c d e f g h';
   let display = '```\n' + files + '\n';
-  
+
   for (let rank = 0; rank < 8; rank++) {
-    let row = (8 - rank) + ' ';
+    let row = 8 - rank + ' ';
     for (let file = 0; file < 8; file++) {
       const piece = board[rank][file];
       const symbol = piece || (rank + file) % 2 === 0 ? '·' : ' ';
       row += symbol + ' ';
     }
-    row += (8 - rank);
+    row += 8 - rank;
     display += row + '\n';
   }
-  
+
   display += files + '\n```';
   return display;
 }
@@ -378,7 +387,7 @@ function formatChessBoard(board, lastMove = null) {
 function makeMove(gameState, moveNotation) {
   const { board, turn, moves, history } = gameState;
   const isWhiteTurn = turn === 'white';
-  
+
   const parsedMove = parseAlgebraicNotation(moveNotation, board, isWhiteTurn);
   if (!parsedMove) {
     return { error: 'Invalid move notation' };
@@ -387,7 +396,7 @@ function makeMove(gameState, moveNotation) {
   const { from, to, type } = parsedMove;
   const [fromRank, fromFile] = from;
   const [toRank, toFile] = to;
-  
+
   // Get the piece being moved
   const piece = board[fromRank][fromFile];
   if (!piece) {

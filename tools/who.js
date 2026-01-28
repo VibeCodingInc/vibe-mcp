@@ -17,7 +17,7 @@ const { getTopSerendipity, getAllSerendipity } = require('../intelligence/serend
 
 const definition = {
   name: 'vibe_who',
-  description: 'See who\'s online and what they\'re building.',
+  description: "See who's online and what they're building.",
   inputSchema: {
     type: 'object',
     properties: {}
@@ -50,9 +50,7 @@ function getHeat(user) {
 
   // Check for inferred state from smart detection
   if (user.mood_inferred && user.mood) {
-    const inferredLabel = user.inferred_state
-      ? `${user.inferred_state.replace('-', ' ')}`
-      : 'active';
+    const inferredLabel = user.inferred_state ? `${user.inferred_state.replace('-', ' ')}` : 'active';
     return {
       icon: user.mood,
       label: inferredLabel,
@@ -134,7 +132,7 @@ function formatActivity(user) {
   // GitHub active repos (if no other context and GitHub connected)
   if (user.github?.active_repos?.length > 0) {
     const repos = user.github.active_repos.slice(0, 2);
-    const repoNames = repos.map(r => r.split('/').pop());  // Get just repo name
+    const repoNames = repos.map(r => r.split('/').pop()); // Get just repo name
     return `pushing to ${repoNames.join(', ')}`;
   }
 
@@ -236,7 +234,7 @@ _Check back in a bit — builders come and go._`
     `Say "message @handle" to reach someone`,
     `Try "react 🔥 to @handle" for a quick high-five`,
     `"ping @handle" sends a friendly wave 👋`,
-    `"play tictactoe with @handle" to challenge someone`,
+    `"play tictactoe with @handle" to challenge someone`
   ];
   const randomAction = quickActions[Math.floor(Math.random() * quickActions.length)];
 
@@ -335,11 +333,13 @@ _Check back in a bit — builders come and go._`
     response.actions = formatActions(actions.emptyRoom());
   } else {
     // People are here
-    response.actions = formatActions(actions.dashboard({
-      unreadCount,
-      onlineUsers: onlineHandles,
-      suggestion: topSuggestion
-    }));
+    response.actions = formatActions(
+      actions.dashboard({
+        unreadCount,
+        onlineUsers: onlineHandles,
+        suggestion: topSuggestion
+      })
+    );
   }
 
   return response;

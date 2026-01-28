@@ -43,21 +43,21 @@ const definition = {
 };
 
 const TYPE_CONFIG = {
-  'idea': { emoji: '💡', label: 'idea', verb: 'had an idea' },
-  'riff': { emoji: '↳', label: 'riff', verb: 'riffed' },
-  'shipped': { emoji: '🚀', label: 'ship', verb: 'shipped' },
-  'request': { emoji: '🔓', label: 'request', verb: 'requested' },
-  'claim': { emoji: '🔨', label: 'claim', verb: 'claimed' },
-  'observation': { emoji: '👁️', label: 'observation', verb: 'observed' },
-  'general': { emoji: '📝', label: 'post', verb: 'posted' }
+  idea: { emoji: '💡', label: 'idea', verb: 'had an idea' },
+  riff: { emoji: '↳', label: 'riff', verb: 'riffed' },
+  shipped: { emoji: '🚀', label: 'ship', verb: 'shipped' },
+  request: { emoji: '🔓', label: 'request', verb: 'requested' },
+  claim: { emoji: '🔨', label: 'claim', verb: 'claimed' },
+  observation: { emoji: '👁️', label: 'observation', verb: 'observed' },
+  general: { emoji: '📝', label: 'post', verb: 'posted' }
 };
 
 const CATEGORY_MAP = {
-  'ideas': ['idea', 'riff'],
-  'ships': ['shipped'],
-  'requests': ['request', 'claim'],
-  'riffs': ['riff'],
-  'observations': ['observation']
+  ideas: ['idea', 'riff'],
+  ships: ['shipped'],
+  requests: ['request', 'claim'],
+  riffs: ['riff'],
+  observations: ['observation']
 };
 
 async function handler(args) {
@@ -95,9 +95,7 @@ async function handler(args) {
     // Filter by tag if specified
     if (args.tag) {
       const tag = args.tag.toLowerCase();
-      entries = entries.filter(e =>
-        e.tags && e.tags.some(t => t.toLowerCase().includes(tag))
-      );
+      entries = entries.filter(e => e.tags && e.tags.some(t => t.toLowerCase().includes(tag)));
     }
 
     // Sort by timestamp (newest first)
@@ -148,9 +146,7 @@ async function handler(args) {
       display += `${typeInfo.emoji} **@${entry.author}**${meTag} ${typeInfo.verb}\n`;
 
       // Content (truncated if long)
-      const truncatedContent = mainContent.length > 100
-        ? mainContent.slice(0, 97) + '...'
-        : mainContent;
+      const truncatedContent = mainContent.length > 100 ? mainContent.slice(0, 97) + '...' : mainContent;
       display += `   "${truncatedContent}"\n`;
 
       // Metadata (URL, inspired by, etc.)
@@ -165,7 +161,15 @@ async function handler(args) {
       // Tags (non-system ones)
       if (entry.tags && entry.tags.length > 0) {
         const visibleTags = entry.tags
-          .filter(t => !t.startsWith('inspired:') && !t.startsWith('fulfills:') && !t.startsWith('riff:') && !t.startsWith('claim:') && !t.startsWith('observation:') && !t.startsWith('type:'))
+          .filter(
+            t =>
+              !t.startsWith('inspired:') &&
+              !t.startsWith('fulfills:') &&
+              !t.startsWith('riff:') &&
+              !t.startsWith('claim:') &&
+              !t.startsWith('observation:') &&
+              !t.startsWith('type:')
+          )
           .slice(0, 3);
         if (visibleTags.length > 0) {
           display += `   ${visibleTags.map(t => `#${t}`).join(' ')}\n`;
@@ -187,7 +191,6 @@ async function handler(args) {
     });
 
     return { display };
-
   } catch (error) {
     return { display: `⚠️ Failed to load feed: ${error.message}` };
   }

@@ -90,15 +90,12 @@ Run \`vibe init\` first to set your handle.`
 
 async function viewInbox({ account, limit, adminToken }) {
   try {
-    const response = await fetch(
-      `${API_URL}/api/admin/system-inbox?account=${account}&limit=${limit}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${adminToken}`,
-          'Content-Type': 'application/json'
-        }
+    const response = await fetch(`${API_URL}/api/admin/system-inbox?account=${account}&limit=${limit}`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
       }
-    );
+    });
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
@@ -140,7 +137,6 @@ When users reply to @${account}, they'll appear here.`
     display += `**Reply as @${account}:** Add \`--as=${account}\``;
 
     return { display };
-
   } catch (error) {
     console.error('[admin-inbox] Error:', error);
     return {
@@ -173,7 +169,7 @@ Usage: \`vibe admin-inbox --reply --to=${to} --text="your message"\``
     const response = await fetch(`${API_URL}/api/admin/system-reply`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${adminToken}`,
+        Authorization: `Bearer ${adminToken}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -204,7 +200,6 @@ ${response.status === 401 ? '⚠️ Invalid admin token' : error.error || 'Faile
     display += `\n_"${truncate(text, 100)}"_`;
 
     return { display };
-
   } catch (error) {
     console.error('[admin-inbox] Reply error:', error);
     return {

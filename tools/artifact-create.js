@@ -11,7 +11,8 @@ const { requireInit } = require('./_shared');
 
 const definition = {
   name: 'vibe_create_artifact',
-  description: 'Create a social artifact (guide, learning, workspace) from conversation or memory. Artifacts are first-class objects with provenance and can be shared via DM.',
+  description:
+    'Create a social artifact (guide, learning, workspace) from conversation or memory. Artifacts are first-class objects with provenance and can be shared via DM.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -199,7 +200,7 @@ async function handler(args) {
           creator,
           created_for: recipient,
           template,
-          snippet: content.blocks[0]?.text || content.blocks[0]?.markdown || '',
+          snippet: content.blocks[0]?.text || content.blocks[0]?.markdown || ''
         },
         context: thread_id ? `From your conversation thread` : `Created by ${creator}`
       });

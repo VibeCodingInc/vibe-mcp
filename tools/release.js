@@ -10,7 +10,7 @@ const { requireInit, success, error } = require('./_shared');
 
 const definition = {
   name: 'vibe_release',
-  description: 'Release a file reservation when you\'re done.',
+  description: "Release a file reservation when you're done.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -55,7 +55,9 @@ vibe reservations
   if (!result.success) {
     if (result.error === 'not_found') {
       return {
-        display: error(`Reservation \`${reservation_id}\` not found or already expired.\n\nUse \`vibe reservations\` to see your active reservations.`)
+        display: error(
+          `Reservation \`${reservation_id}\` not found or already expired.\n\nUse \`vibe reservations\` to see your active reservations.`
+        )
       };
     }
     if (result.error === 'not_owner') {

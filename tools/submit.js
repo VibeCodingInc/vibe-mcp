@@ -70,14 +70,16 @@ async function handler(args) {
 
       if (isAutoApproved) {
         return {
-          display: `**Project submitted!**\n\n` +
+          display:
+            `**Project submitted!**\n\n` +
             `**${name}** is now live in the directory.\n` +
             `Reason: ${result.data.reason}\n\n` +
             `View: https://vibecodings.vercel.app/new`
         };
       } else {
         return {
-          display: `**Project submitted for review!**\n\n` +
+          display:
+            `**Project submitted for review!**\n\n` +
             `**${name}** has been added to the curator queue.\n` +
             `Position: #${result.data?.position || '?'}\n\n` +
             `Tip: ${result.data?.tip || 'Deploy to Vercel for instant approval!'}`

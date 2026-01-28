@@ -83,8 +83,8 @@ function reveal(gameState) {
   // Initialize host score if needed
   if (!newScores[host]) newScores[host] = 0;
 
-  let correctGuessers = [];
-  let fooledPlayers = [];
+  const correctGuessers = [];
+  const fooledPlayers = [];
 
   for (const [player, guess] of Object.entries(guesses)) {
     if (!newScores[player]) newScores[player] = 0;

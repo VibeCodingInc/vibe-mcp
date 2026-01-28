@@ -26,49 +26,49 @@ const NotificationEmitter = require('./notification-emitter');
  */
 const TOOL_ANNOTATIONS = {
   // ── Read-only tools ────────────────────────────────────────────
-  vibe_who:            { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_inbox:          { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_recall:         { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  vibe_help:           { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  vibe_feed:           { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_view_artifact:  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_suggest_tags:   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_doctor:         { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_reservations:   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_discover:       { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_who: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_inbox: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_recall: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  vibe_help: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  vibe_feed: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_view_artifact: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_suggest_tags: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_doctor: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_reservations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_discover: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
 
   // ── Write tools (non-destructive) ─────────────────────────────
-  vibe_start:           { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_init:            { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_ping:            { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_react:           { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_dm:              { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_open:            { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_status:          { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_context:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_summarize:       { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: false },
-  vibe_game:            { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_away:            { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_back:            { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_handoff:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_reserve:         { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_remember:        { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: false },
-  vibe_report:          { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_invite:          { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_ship:            { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_session_save:    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_session_fork:    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_start: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_init: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_ping: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_react: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_dm: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_open: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_status: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_context: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_summarize: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  vibe_game: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_away: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_back: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_handoff: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_reserve: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_remember: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  vibe_report: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_invite: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_ship: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_session_save: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_session_fork: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_create_artifact: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_settings:        { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: false },
-  vibe_notifications:   { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_presence_agent:  { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_settings: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  vibe_notifications: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_presence_agent: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
 
   // ── Destructive tools ─────────────────────────────────────────
-  vibe_forget:          { readOnlyHint: false, destructiveHint: true, idempotentHint: true,  openWorldHint: false },
-  vibe_release:         { readOnlyHint: false, destructiveHint: true, idempotentHint: true,  openWorldHint: true },
-  vibe_bye:             { readOnlyHint: false, destructiveHint: true, idempotentHint: true,  openWorldHint: true },
-  vibe_mute:            { readOnlyHint: false, destructiveHint: true, idempotentHint: true,  openWorldHint: true },
-  vibe_update:          { readOnlyHint: false, destructiveHint: true, idempotentHint: true,  openWorldHint: true },
+  vibe_forget: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  vibe_release: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  vibe_bye: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  vibe_mute: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  vibe_update: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }
 };
 
 // Default annotations for any tool not explicitly mapped
@@ -87,36 +87,66 @@ function inferPromptFromArgs(toolName, args) {
   const reaction = args.reaction || '';
 
   switch (action) {
-    case 'start': return 'start vibing';
-    case 'who': return 'who is online';
-    case 'ping': return `ping ${handle} ${note}`.trim();
-    case 'react': return `react ${reaction} to ${handle}`.trim();
-    case 'dm': return `message ${handle} ${message}`.trim();
-    case 'inbox': return 'check inbox';
-    case 'open': return `open thread with ${handle}`;
-    case 'status': return `set status to ${mood}`;
-    case 'context': return 'share context';
-    case 'summarize': return 'summarize session';
-    case 'bye': return 'end session';
-    case 'remember': return `remember about ${handle}`;
-    case 'recall': return `recall ${handle}`;
-    case 'forget': return `forget ${handle}`;
-    case 'invite': return 'generate invite';
-    case 'handoff': return `handoff task to ${handle}`;
-    case 'reserve': return args.paths ? `reserve ${args.paths.join(', ')}` : 'reserve files';
-    case 'release': return `release ${args.reservation_id || 'reservation'}`;
-    case 'reservations': return 'list reservations';
-    case 'game': return `play ${args.game || 'game'} ${handle}`.trim();
-    case 'away': return args.message ? `set away: "${args.message}"` : 'go away';
-    case 'back': return 'come back';
-    case 'discover': return `discover ${args.command || 'suggest'}`;
-    case 'suggest_tags': return `suggest tags ${args.command || 'suggest'}`;
-    case 'ship': return `ship ${args.type || ''} ${args.what || ''}`.trim();
-    case 'session_save': return `save session "${args.title || ''}"`.trim();
-    case 'session_fork': return `fork session ${args.session_id || ''}`.trim();
-    case 'create_artifact': return `create ${args.template || 'artifact'}: ${args.title || 'untitled'}`;
-    case 'view_artifact': return args.slug ? `view artifact ${args.slug}` : `list ${args.list || 'artifacts'}`;
-    default: return `${action} ${handle}`.trim() || null;
+    case 'start':
+      return 'start vibing';
+    case 'who':
+      return 'who is online';
+    case 'ping':
+      return `ping ${handle} ${note}`.trim();
+    case 'react':
+      return `react ${reaction} to ${handle}`.trim();
+    case 'dm':
+      return `message ${handle} ${message}`.trim();
+    case 'inbox':
+      return 'check inbox';
+    case 'open':
+      return `open thread with ${handle}`;
+    case 'status':
+      return `set status to ${mood}`;
+    case 'context':
+      return 'share context';
+    case 'summarize':
+      return 'summarize session';
+    case 'bye':
+      return 'end session';
+    case 'remember':
+      return `remember about ${handle}`;
+    case 'recall':
+      return `recall ${handle}`;
+    case 'forget':
+      return `forget ${handle}`;
+    case 'invite':
+      return 'generate invite';
+    case 'handoff':
+      return `handoff task to ${handle}`;
+    case 'reserve':
+      return args.paths ? `reserve ${args.paths.join(', ')}` : 'reserve files';
+    case 'release':
+      return `release ${args.reservation_id || 'reservation'}`;
+    case 'reservations':
+      return 'list reservations';
+    case 'game':
+      return `play ${args.game || 'game'} ${handle}`.trim();
+    case 'away':
+      return args.message ? `set away: "${args.message}"` : 'go away';
+    case 'back':
+      return 'come back';
+    case 'discover':
+      return `discover ${args.command || 'suggest'}`;
+    case 'suggest_tags':
+      return `suggest tags ${args.command || 'suggest'}`;
+    case 'ship':
+      return `ship ${args.type || ''} ${args.what || ''}`.trim();
+    case 'session_save':
+      return `save session "${args.title || ''}"`.trim();
+    case 'session_fork':
+      return `fork session ${args.session_id || ''}`.trim();
+    case 'create_artifact':
+      return `create ${args.template || 'artifact'}: ${args.title || 'untitled'}`;
+    case 'view_artifact':
+      return args.slug ? `view artifact ${args.slug}` : `list ${args.list || 'artifacts'}`;
+    default:
+      return `${action} ${handle}`.trim() || null;
   }
 }
 
@@ -269,7 +299,7 @@ const tools = {
   vibe_notifications: require('./tools/notifications'),
   vibe_presence_agent: require('./tools/presence-agent'),
   vibe_mute: require('./tools/mute'),
-  vibe_summarize: require('./tools/summarize'),
+  vibe_summarize: require('./tools/summarize')
 };
 
 /**
@@ -360,9 +390,15 @@ class VibeMCPServer {
           // Emit list_changed notification for state-changing tools
           // This triggers Claude to refresh without reconnection
           const stateChangingTools = [
-            'vibe_dm', 'vibe_ping', 'vibe_react', 'vibe_remember',
-            'vibe_status', 'vibe_context', 'vibe_handoff',
-            'vibe_reserve', 'vibe_release'
+            'vibe_dm',
+            'vibe_ping',
+            'vibe_react',
+            'vibe_remember',
+            'vibe_status',
+            'vibe_context',
+            'vibe_handoff',
+            'vibe_reserve',
+            'vibe_release'
           ];
           if (stateChangingTools.includes(params.name)) {
             // Debounced notification (prevents spam)
@@ -384,7 +420,7 @@ class VibeMCPServer {
             const count = result.unread_count || '';
 
             // Build minimal hint string
-            let hintParts = [hint];
+            const hintParts = [hint];
             if (handle) hintParts.push(`@${handle.replace('@', '')}`);
             if (count) hintParts.push(`(${count})`);
 
@@ -395,10 +431,12 @@ class VibeMCPServer {
             jsonrpc: '2.0',
             id,
             result: {
-              content: [{
-                type: 'text',
-                text: (result.display || JSON.stringify(result, null, 2)) + hintIndicator + footer
-              }]
+              content: [
+                {
+                  type: 'text',
+                  text: (result.display || JSON.stringify(result, null, 2)) + hintIndicator + footer
+                }
+              ]
             }
           };
         } catch (e) {
@@ -422,7 +460,7 @@ class VibeMCPServer {
     process.stdin.setEncoding('utf8');
     let buffer = '';
 
-    process.stdin.on('data', async (chunk) => {
+    process.stdin.on('data', async chunk => {
       buffer += chunk;
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -444,14 +482,16 @@ class VibeMCPServer {
     process.stdin.on('end', () => {
       presence.stop();
       // Close SQLite to flush WAL and prevent corruption
-      try { require('./store/sqlite').close(); } catch (e) {}
+      try {
+        require('./store/sqlite').close();
+      } catch (e) {}
       process.exit(0);
     });
 
     // Welcome message
     process.stderr.write('\n/vibe ready.\n');
     process.stderr.write('vibe init → set identity\n');
-    process.stderr.write('vibe who  → see who\'s around\n');
+    process.stderr.write("vibe who  → see who's around\n");
     process.stderr.write('vibe dm   → send a message\n\n');
 
     // Check for updates (non-blocking)

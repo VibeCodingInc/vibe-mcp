@@ -42,7 +42,7 @@ async function whatsappRequest(method, endpoint, body = null) {
   const url = `${baseUrl}${endpoint}`;
 
   const headers = {
-    'Authorization': `Bearer ${accessToken}`,
+    Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json'
   };
 
@@ -98,12 +98,15 @@ async function sendTemplate(to, templateName, languageCode = 'en', parameters = 
     template: {
       name: templateName,
       language: { code: languageCode },
-      components: parameters.length > 0 ? [
-        {
-          type: 'body',
-          parameters: parameters.map(param => ({ type: 'text', text: param }))
-        }
-      ] : undefined
+      components:
+        parameters.length > 0
+          ? [
+              {
+                type: 'body',
+                parameters: parameters.map(param => ({ type: 'text', text: param }))
+              }
+            ]
+          : undefined
     }
   };
 
@@ -196,13 +199,10 @@ function processWebhookUpdate(body) {
  */
 function verifyWebhookSignature(payload, signature, secret) {
   if (!secret) return true;
-  
+
   const crypto = require('crypto');
-  const expectedSignature = crypto
-    .createHmac('sha256', secret)
-    .update(payload)
-    .digest('hex');
-  
+  const expectedSignature = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+
   return signature === `sha256=${expectedSignature}`;
 }
 
@@ -211,11 +211,11 @@ function verifyWebhookSignature(payload, signature, secret) {
  */
 function verifyWebhook(mode, token, challenge) {
   const { webhookVerifyToken } = getCredentials();
-  
+
   if (mode === 'subscribe' && token === webhookVerifyToken) {
     return challenge;
   }
-  
+
   return null;
 }
 
@@ -224,7 +224,7 @@ function verifyWebhook(mode, token, challenge) {
  */
 function parseVibeCommand(text) {
   const trimmed = text.trim();
-  
+
   // /status mood [note]
   const statusMatch = trimmed.match(/^\/status\s+(\w+)(?:\s+(.+))?$/);
   if (statusMatch) {
@@ -236,12 +236,12 @@ function parseVibeCommand(text) {
       }
     };
   }
-  
+
   // /who
   if (trimmed === '/who') {
     return { command: 'who' };
   }
-  
+
   // /ship [message]
   const shipMatch = trimmed.match(/^\/ship(?:\s+(.+))?$/);
   if (shipMatch) {
@@ -252,7 +252,7 @@ function parseVibeCommand(text) {
       }
     };
   }
-  
+
   // /vibe message
   const vibeMatch = trimmed.match(/^\/vibe\s+(.+)$/);
   if (vibeMatch) {
@@ -263,12 +263,12 @@ function parseVibeCommand(text) {
       }
     };
   }
-  
+
   // /help
   if (trimmed === '/help') {
     return { command: 'help' };
   }
-  
+
   return null;
 }
 
@@ -277,13 +277,13 @@ function parseVibeCommand(text) {
  */
 async function notifyActivity(to, activity) {
   const { handle, action, context } = activity;
-  
+
   let text = `🔔 *@${handle}* ${action}`;
   if (context) {
     text += `\n_${context}_`;
   }
   text += '\n\n_From /vibe - slashvibe.dev_';
-  
+
   return sendMessage(to, text);
 }
 
@@ -292,23 +292,23 @@ async function notifyActivity(to, activity) {
  */
 async function notifyStatus(to, handle, mood, note) {
   const moodEmoji = {
-    'shipping': '🔥',
-    'debugging': '🐛', 
-    'deep': '🧠',
-    'afk': '☕',
-    'celebrating': '🎉',
-    'pairing': '👯'
+    shipping: '🔥',
+    debugging: '🐛',
+    deep: '🧠',
+    afk: '☕',
+    celebrating: '🎉',
+    pairing: '👯'
   };
-  
+
   const emoji = moodEmoji[mood] || '●';
   let text = `${emoji} *@${handle}* is ${mood}`;
-  
+
   if (note) {
     text += `\n"${note}"`;
   }
-  
+
   text += '\n\n_From /vibe - slashvibe.dev_';
-  
+
   return sendMessage(to, text);
 }
 
@@ -317,13 +317,13 @@ async function notifyStatus(to, handle, mood, note) {
  */
 async function forwardFromVibe(to, handle, message, context = null) {
   let text = `💭 *@${handle}*: ${message}`;
-  
+
   if (context) {
     text += `\n_via ${context}_`;
   }
-  
+
   text += '\n\n_From /vibe - slashvibe.dev_';
-  
+
   return sendMessage(to, text);
 }
 
@@ -361,14 +361,14 @@ async function sendOnlineList(to, users) {
   }
 
   let text = `👥 *${users.length} online in /vibe*\n\n`;
-  
+
   users.forEach(user => {
     const mood = user.mood ? ` (${user.mood})` : '';
     text += `• *@${user.handle}*${mood}\n  ${user.one_liner || 'building'}\n\n`;
   });
-  
+
   text += '_slashvibe.dev_';
-  
+
   return sendMessage(to, text);
 }
 
@@ -404,7 +404,7 @@ function getSetupInstructions() {
       '4. Generate access token (permanent) for production',
       '5. Add credentials to ~/.vibecodings/config.json:',
       '   - whatsapp_access_token',
-      '   - whatsapp_phone_number_id', 
+      '   - whatsapp_phone_number_id',
       '   - whatsapp_webhook_verify_token (for webhook)',
       '   - whatsapp_vibe_group_id (optional)',
       '6. Set webhook URL in WhatsApp settings',

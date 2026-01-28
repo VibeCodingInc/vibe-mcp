@@ -136,7 +136,7 @@ class MessageStore {
         UPDATE messages
         SET status = 'read', read_at = ?
         WHERE from_handle = ? AND to_handle = ? AND status IN ('sent', 'delivered')
-      `),
+      `)
     };
   }
 
@@ -204,9 +204,7 @@ class MessageStore {
    * Update message status after server response
    */
   updateMessageStatus(local_id, status, server_id = null, thread_id = null) {
-    const sent_at = (status === 'sent' || status === 'delivered' || status === 'read')
-      ? new Date().toISOString()
-      : null;
+    const sent_at = status === 'sent' || status === 'delivered' || status === 'read' ? new Date().toISOString() : null;
 
     this.stmts.updateStatus.run(status, server_id, thread_id, sent_at, local_id);
   }
@@ -223,7 +221,7 @@ class MessageStore {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const transaction = this.db.transaction((msgs) => {
+    const transaction = this.db.transaction(msgs => {
       for (const msg of msgs) {
         insert.run(
           msg.local_id || msg.id || randomUUID(), // Handle both formats
@@ -252,9 +250,15 @@ class MessageStore {
    */
   getInboxThreads(handle) {
     const rows = this.stmts.getInboxThreads.all(
-      handle, handle, handle, // thread_partners CTE
-      handle, handle, handle, handle, // latest_messages CTE
-      handle, handle // unread_counts CTE
+      handle,
+      handle,
+      handle, // thread_partners CTE
+      handle,
+      handle,
+      handle,
+      handle, // latest_messages CTE
+      handle,
+      handle // unread_counts CTE
     );
 
     return rows.map(row => ({
@@ -290,13 +294,17 @@ class MessageStore {
    * Get pending/failed messages for retry
    */
   getPendingMessages() {
-    const rows = this.db.prepare(`
+    const rows = this.db
+      .prepare(
+        `
       SELECT local_id, server_id, from_handle, to_handle, content, created_at,
              status, sent_at, delivered_at, read_at, synced_at, retry_count
       FROM messages
       WHERE status = 'pending' OR status = 'failed'
       ORDER BY created_at ASC
-    `).all();
+    `
+      )
+      .all();
 
     return rows.map(row => ({
       local_id: row.local_id,

@@ -1,6 +1,6 @@
 /**
  * /vibe Webhook Health Monitor
- * 
+ *
  * Monitors webhook endpoint health and provides diagnostics for bridge connectivity.
  * Ensures external platforms can reach /vibe webhook endpoints reliably.
  */
@@ -12,9 +12,9 @@ const { getConfig } = require('./webhook-server');
  * Test webhook endpoint connectivity
  */
 async function testWebhookEndpoint(url) {
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     const startTime = Date.now();
-    
+
     const options = {
       method: 'GET',
       timeout: 5000,
@@ -23,11 +23,11 @@ async function testWebhookEndpoint(url) {
       }
     };
 
-    const req = https.request(url, options, (res) => {
+    const req = https.request(url, options, res => {
       const responseTime = Date.now() - startTime;
       let body = '';
 
-      res.on('data', chunk => body += chunk);
+      res.on('data', chunk => (body += chunk));
       res.on('end', () => {
         resolve({
           success: true,
@@ -39,7 +39,7 @@ async function testWebhookEndpoint(url) {
       });
     });
 
-    req.on('error', (err) => {
+    req.on('error', err => {
       resolve({
         success: false,
         error: err.message,
@@ -64,10 +64,10 @@ async function testWebhookEndpoint(url) {
  * Test webhook endpoint with mock payload
  */
 async function testWebhookPost(url, platform, mockPayload) {
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     const startTime = Date.now();
     const payloadStr = JSON.stringify(mockPayload);
-    
+
     const options = {
       method: 'POST',
       timeout: 10000,
@@ -86,11 +86,11 @@ async function testWebhookPost(url, platform, mockPayload) {
       options.headers['x-signature-timestamp'] = Math.floor(Date.now() / 1000).toString();
     }
 
-    const req = https.request(url, options, (res) => {
+    const req = https.request(url, options, res => {
       const responseTime = Date.now() - startTime;
       let body = '';
 
-      res.on('data', chunk => body += chunk);
+      res.on('data', chunk => (body += chunk));
       res.on('end', () => {
         resolve({
           success: res.statusCode >= 200 && res.statusCode < 300,
@@ -101,7 +101,7 @@ async function testWebhookPost(url, platform, mockPayload) {
       });
     });
 
-    req.on('error', (err) => {
+    req.on('error', err => {
       resolve({
         success: false,
         error: err.message,
@@ -148,7 +148,7 @@ function getMockPayloads() {
         }
       }
     },
-    
+
     discord: {
       type: 1, // PING
       timestamp: new Date().toISOString(),
@@ -172,13 +172,13 @@ async function performWebhookHealthCheck(baseUrl) {
   // Test health endpoint
   const healthUrl = `${baseUrl}/health`;
   console.log(`Testing health endpoint: ${healthUrl}`);
-  
+
   const healthResult = await testWebhookEndpoint(healthUrl);
   results.endpoints.health = {
     url: healthUrl,
     ...healthResult
   };
-  
+
   if (!healthResult.success) {
     results.overall.healthy = false;
     results.overall.issues.push('Health endpoint unreachable');
@@ -187,7 +187,7 @@ async function performWebhookHealthCheck(baseUrl) {
   // Test Telegram webhook endpoint
   const telegramUrl = `${baseUrl}/webhook/telegram`;
   console.log(`Testing Telegram webhook: ${telegramUrl}`);
-  
+
   const mockPayloads = getMockPayloads();
   const telegramResult = await testWebhookPost(telegramUrl, 'telegram', mockPayloads.telegram);
   results.endpoints.telegram = {
@@ -201,10 +201,10 @@ async function performWebhookHealthCheck(baseUrl) {
     results.overall.issues.push(`Telegram webhook issue: ${telegramResult.error || 'HTTP ' + telegramResult.status}`);
   }
 
-  // Test Discord webhook endpoint  
+  // Test Discord webhook endpoint
   const discordUrl = `${baseUrl}/webhook/discord`;
   console.log(`Testing Discord webhook: ${discordUrl}`);
-  
+
   const discordResult = await testWebhookPost(discordUrl, 'discord', mockPayloads.discord);
   results.endpoints.discord = {
     url: discordUrl,
@@ -233,7 +233,7 @@ async function getWebhookStatus(publicUrl) {
 
   try {
     const healthCheck = await performWebhookHealthCheck(publicUrl);
-    
+
     return {
       configured: true,
       healthy: healthCheck.overall.healthy,
@@ -246,7 +246,6 @@ async function getWebhookStatus(publicUrl) {
       issues: healthCheck.overall.issues,
       publicUrl
     };
-
   } catch (e) {
     return {
       configured: true,
@@ -262,7 +261,7 @@ async function getWebhookStatus(publicUrl) {
  */
 function getWebhookDiagnostics() {
   const config = getConfig();
-  
+
   const diagnostics = {
     server: {
       port: config.port,
@@ -290,11 +289,11 @@ function getWebhookDiagnostics() {
   if (!config.secret) {
     diagnostics.recommendations.push('Set WEBHOOK_SECRET for signature verification');
   }
-  
+
   if (!config.telegramSecret) {
     diagnostics.recommendations.push('Set TELEGRAM_WEBHOOK_SECRET for Telegram webhook security');
   }
-  
+
   if (!config.discordPublicKey) {
     diagnostics.recommendations.push('Set DISCORD_PUBLIC_KEY for Discord interaction verification');
   }
@@ -314,7 +313,8 @@ function getWebhookDiagnostics() {
  * Monitor webhook endpoint availability over time
  */
 class WebhookMonitor {
-  constructor(publicUrl, checkIntervalMs = 300000) { // 5 minutes
+  constructor(publicUrl, checkIntervalMs = 300000) {
+    // 5 minutes
     this.publicUrl = publicUrl;
     this.checkIntervalMs = checkIntervalMs;
     this.isRunning = false;
@@ -325,13 +325,13 @@ class WebhookMonitor {
 
   async start() {
     if (this.isRunning) return;
-    
+
     console.log(`🔍 Starting webhook endpoint monitoring (${this.publicUrl})`);
     this.isRunning = true;
-    
+
     // Initial check
     await this.performCheck();
-    
+
     // Schedule regular checks
     this.intervalId = setInterval(() => {
       this.performCheck().catch(err => {
@@ -342,10 +342,10 @@ class WebhookMonitor {
 
   stop() {
     if (!this.isRunning) return;
-    
+
     console.log('🛑 Stopping webhook endpoint monitoring');
     this.isRunning = false;
-    
+
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
@@ -354,18 +354,17 @@ class WebhookMonitor {
 
   async performCheck() {
     const checkResult = await getWebhookStatus(this.publicUrl);
-    
+
     const historyEntry = {
       timestamp: new Date().toISOString(),
       healthy: checkResult.healthy,
-      responseTime: checkResult.endpoints?.health ? 
-        (checkResult.endpoints.health.responseTime || 0) : 0,
+      responseTime: checkResult.endpoints?.health ? checkResult.endpoints.health.responseTime || 0 : 0,
       issues: checkResult.issues || []
     };
 
     // Add to history
     this.history.unshift(historyEntry);
-    
+
     // Trim history to max size
     if (this.history.length > this.maxHistorySize) {
       this.history = this.history.slice(0, this.maxHistorySize);
@@ -390,13 +389,10 @@ class WebhookMonitor {
     const healthyChecks = this.history.filter(h => h.healthy).length;
     const uptime = (healthyChecks / totalChecks) * 100;
 
-    const responseTimes = this.history
-      .filter(h => h.responseTime > 0)
-      .map(h => h.responseTime);
-    
-    const avgResponseTime = responseTimes.length > 0
-      ? responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length
-      : 0;
+    const responseTimes = this.history.filter(h => h.responseTime > 0).map(h => h.responseTime);
+
+    const avgResponseTime =
+      responseTimes.length > 0 ? responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length : 0;
 
     return {
       uptime: `${uptime.toFixed(1)}%`,

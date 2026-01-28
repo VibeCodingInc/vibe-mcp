@@ -17,12 +17,12 @@ const SKILLS_FILE = path.join(config.VIBE_DIR, 'skills.json');
 
 // Core skills categories for structured matching
 const SKILL_CATEGORIES = {
-  'Engineering': ['frontend', 'backend', 'fullstack', 'mobile', 'devops', 'ai/ml', 'data', 'security'],
-  'Design': ['ui/ux', 'visual', 'branding', 'illustration', 'animation', 'research'],
-  'Business': ['marketing', 'sales', 'strategy', 'finance', 'operations', 'legal'],
-  'Content': ['writing', 'copywriting', 'video', 'photography', 'podcast', 'social'],
-  'Product': ['pm', 'growth', 'analytics', 'user-research', 'strategy'],
-  'Other': ['consulting', 'mentoring', 'networking', 'feedback']
+  Engineering: ['frontend', 'backend', 'fullstack', 'mobile', 'devops', 'ai/ml', 'data', 'security'],
+  Design: ['ui/ux', 'visual', 'branding', 'illustration', 'animation', 'research'],
+  Business: ['marketing', 'sales', 'strategy', 'finance', 'operations', 'legal'],
+  Content: ['writing', 'copywriting', 'video', 'photography', 'podcast', 'social'],
+  Product: ['pm', 'growth', 'analytics', 'user-research', 'strategy'],
+  Other: ['consulting', 'mentoring', 'networking', 'feedback']
 };
 
 // Load skills data from disk
@@ -63,11 +63,11 @@ async function addSkillOffer(handle, skill, details = {}) {
     timestamp: Date.now(),
     status: 'active' // active, paused, fulfilled
   };
-  
+
   // Remove duplicate offers for same skill
   data.offers = data.offers.filter(o => !(o.handle === offer.handle && o.skill === offer.skill));
   data.offers.unshift(offer);
-  
+
   saveSkillsData(data);
   return offer;
 }
@@ -87,11 +87,11 @@ async function addSkillRequest(handle, skill, details = {}) {
     timestamp: Date.now(),
     status: 'active' // active, paused, fulfilled
   };
-  
+
   // Remove duplicate requests for same skill
   data.requests = data.requests.filter(r => !(r.handle === request.handle && r.skill === request.skill));
   data.requests.unshift(request);
-  
+
   saveSkillsData(data);
   return request;
 }
@@ -100,16 +100,17 @@ async function addSkillRequest(handle, skill, details = {}) {
 async function getSkillOffers(skillFilter = null) {
   const data = loadSkillsData();
   let offers = data.offers.filter(o => o.status === 'active');
-  
+
   if (skillFilter) {
     const filter = skillFilter.toLowerCase();
-    offers = offers.filter(o => 
-      o.skill.includes(filter) || 
-      o.category.toLowerCase().includes(filter) ||
-      o.description?.toLowerCase().includes(filter)
+    offers = offers.filter(
+      o =>
+        o.skill.includes(filter) ||
+        o.category.toLowerCase().includes(filter) ||
+        o.description?.toLowerCase().includes(filter)
     );
   }
-  
+
   return offers;
 }
 
@@ -117,17 +118,18 @@ async function getSkillOffers(skillFilter = null) {
 async function getSkillRequests(skillFilter = null) {
   const data = loadSkillsData();
   let requests = data.requests.filter(r => r.status === 'active');
-  
+
   if (skillFilter) {
     const filter = skillFilter.toLowerCase();
-    requests = requests.filter(r => 
-      r.skill.includes(filter) || 
-      r.category.toLowerCase().includes(filter) ||
-      r.description?.toLowerCase().includes(filter) ||
-      r.context?.toLowerCase().includes(filter)
+    requests = requests.filter(
+      r =>
+        r.skill.includes(filter) ||
+        r.category.toLowerCase().includes(filter) ||
+        r.description?.toLowerCase().includes(filter) ||
+        r.context?.toLowerCase().includes(filter)
     );
   }
-  
+
   return requests;
 }
 
@@ -149,24 +151,22 @@ async function getUserRequests(handle) {
 async function findSkillMatches(handle) {
   const data = loadSkillsData();
   const key = handle.toLowerCase().replace('@', '');
-  
+
   // Get user's requests and find matching offers
   const myRequests = data.requests.filter(r => r.handle === key && r.status === 'active');
   const myOffers = data.offers.filter(o => o.handle === key && o.status === 'active');
-  
+
   const matches = {
     forMyRequests: [], // People who can help me
-    forMyOffers: []    // People I can help
+    forMyOffers: [] // People I can help
   };
-  
+
   // Find offers that match my requests
   for (const request of myRequests) {
-    const matchingOffers = data.offers.filter(o => 
-      o.handle !== key && 
-      o.status === 'active' && 
-      skillsMatch(request.skill, o.skill)
+    const matchingOffers = data.offers.filter(
+      o => o.handle !== key && o.status === 'active' && skillsMatch(request.skill, o.skill)
     );
-    
+
     for (const offer of matchingOffers) {
       matches.forMyRequests.push({
         type: 'offer',
@@ -176,15 +176,13 @@ async function findSkillMatches(handle) {
       });
     }
   }
-  
+
   // Find requests that match my offers
   for (const offer of myOffers) {
-    const matchingRequests = data.requests.filter(r => 
-      r.handle !== key && 
-      r.status === 'active' && 
-      skillsMatch(offer.skill, r.skill)
+    const matchingRequests = data.requests.filter(
+      r => r.handle !== key && r.status === 'active' && skillsMatch(offer.skill, r.skill)
     );
-    
+
     for (const request of matchingRequests) {
       matches.forMyOffers.push({
         type: 'request',
@@ -194,11 +192,11 @@ async function findSkillMatches(handle) {
       });
     }
   }
-  
+
   // Sort by match score
   matches.forMyRequests.sort((a, b) => b.score - a.score);
   matches.forMyOffers.sort((a, b) => b.score - a.score);
-  
+
   return matches;
 }
 
@@ -206,66 +204,66 @@ async function findSkillMatches(handle) {
 function skillsMatch(skill1, skill2) {
   const s1 = skill1.toLowerCase();
   const s2 = skill2.toLowerCase();
-  
+
   // Exact match
   if (s1 === s2) return true;
-  
+
   // Partial match (one contains the other)
   if (s1.includes(s2) || s2.includes(s1)) return true;
-  
+
   // Synonym matching
   const synonyms = {
-    'frontend': ['frontend', 'front-end', 'ui', 'react', 'vue', 'angular'],
-    'backend': ['backend', 'back-end', 'server', 'api', 'node', 'python'],
-    'design': ['design', 'ui/ux', 'ux', 'ui', 'visual'],
-    'marketing': ['marketing', 'growth', 'seo', 'ads'],
-    'ai': ['ai', 'ml', 'machine learning', 'ai/ml'],
-    'mobile': ['mobile', 'ios', 'android', 'react native', 'flutter']
+    frontend: ['frontend', 'front-end', 'ui', 'react', 'vue', 'angular'],
+    backend: ['backend', 'back-end', 'server', 'api', 'node', 'python'],
+    design: ['design', 'ui/ux', 'ux', 'ui', 'visual'],
+    marketing: ['marketing', 'growth', 'seo', 'ads'],
+    ai: ['ai', 'ml', 'machine learning', 'ai/ml'],
+    mobile: ['mobile', 'ios', 'android', 'react native', 'flutter']
   };
-  
+
   for (const [base, variants] of Object.entries(synonyms)) {
     if (variants.includes(s1) && variants.includes(s2)) {
       return true;
     }
   }
-  
+
   return false;
 }
 
 // Calculate match score between request and offer
 function calculateSkillMatchScore(request, offer) {
   let score = 50; // Base score
-  
+
   // Skill similarity
   if (request.skill === offer.skill) {
     score += 30;
   } else if (skillsMatch(request.skill, offer.skill)) {
     score += 20;
   }
-  
+
   // Format compatibility
   const formatOverlap = request.format.filter(f => offer.format.includes(f));
   score += formatOverlap.length * 10;
-  
+
   // Urgency vs availability
   if (request.urgency === 'high' && offer.availability === 'flexible') {
     score += 15;
   } else if (request.urgency === 'low' && offer.availability === 'busy') {
     score -= 10;
   }
-  
+
   // Level appropriateness (expert offers are good for all requests)
   if (offer.level === 'expert') {
     score += 10;
   }
-  
+
   return score;
 }
 
 // Get skill category for a skill
 function getCategoryForSkill(skill) {
   const skillLower = skill.toLowerCase();
-  
+
   for (const [category, skills] of Object.entries(SKILL_CATEGORIES)) {
     for (const s of skills) {
       if (skillLower.includes(s) || s.includes(skillLower)) {
@@ -273,16 +271,16 @@ function getCategoryForSkill(skill) {
       }
     }
   }
-  
+
   return 'Other';
 }
 
 // Get skills by category
 async function getSkillsByCategory() {
   const [offers, requests] = await Promise.all([getSkillOffers(), getSkillRequests()]);
-  
+
   const categories = {};
-  
+
   // Group offers by category
   for (const offer of offers) {
     if (!categories[offer.category]) {
@@ -290,7 +288,7 @@ async function getSkillsByCategory() {
     }
     categories[offer.category].offers.push(offer);
   }
-  
+
   // Group requests by category
   for (const request of requests) {
     if (!categories[request.category]) {
@@ -298,7 +296,7 @@ async function getSkillsByCategory() {
     }
     categories[request.category].requests.push(request);
   }
-  
+
   return categories;
 }
 
@@ -315,10 +313,10 @@ async function recordExchange(fromHandle, toHandle, skill, details = {}) {
     rating: details.rating || null, // 1-5 stars
     feedback: details.feedback || null
   };
-  
+
   data.exchanges.push(exchange);
   saveSkillsData(data);
-  
+
   return exchange;
 }
 
@@ -333,18 +331,18 @@ async function getExchangeStats() {
     activeRequests: data.requests.filter(r => r.status === 'active').length,
     topSkills: {}
   };
-  
+
   // Count most popular skills
   const skillCount = {};
   [...data.offers, ...data.requests].forEach(item => {
     skillCount[item.skill] = (skillCount[item.skill] || 0) + 1;
   });
-  
+
   stats.topSkills = Object.entries(skillCount)
-    .sort(([,a], [,b]) => b - a)
+    .sort(([, a], [, b]) => b - a)
     .slice(0, 10)
     .map(([skill, count]) => ({ skill, count }));
-  
+
   return stats;
 }
 
@@ -352,13 +350,13 @@ async function getExchangeStats() {
 async function removeSkillItem(handle, id, type) {
   const data = loadSkillsData();
   const key = handle.toLowerCase().replace('@', '');
-  
+
   if (type === 'offer') {
     data.offers = data.offers.filter(o => !(o.handle === key && o.id === id));
   } else if (type === 'request') {
     data.requests = data.requests.filter(r => !(r.handle === key && r.id === id));
   }
-  
+
   saveSkillsData(data);
 }
 

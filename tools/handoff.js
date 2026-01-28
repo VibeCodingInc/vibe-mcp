@@ -140,7 +140,7 @@ async function handler(args) {
       files: context.files || [],
       current_state: context.current_state,
       next_step: context.next_step,
-      blockers: context.blockers || [],
+      blockers: context.blockers || []
     },
 
     history: {
@@ -152,13 +152,7 @@ async function handler(args) {
   const humanMessage = formatHandoffMessage(handoffPayload, myHandle);
 
   // Send via existing message system with structured payload
-  await store.sendMessage(
-    myHandle,
-    them,
-    humanMessage,
-    'handoff',
-    handoffPayload
-  );
+  await store.sendMessage(myHandle, them, humanMessage, 'handoff', handoffPayload);
 
   // Build response
   const filesCount = context.files?.length || 0;

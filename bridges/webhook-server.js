@@ -1,12 +1,12 @@
 /**
  * /vibe Webhook Server
- * 
+ *
  * Unified webhook endpoint for receiving real-time updates from:
  * - Telegram bot updates
  * - Discord bot interactions
  * - GitHub webhooks (future)
  * - Linear webhooks (future)
- * 
+ *
  * Routes events to appropriate bridge handlers and /vibe core.
  */
 
@@ -35,12 +35,9 @@ function getConfig() {
  */
 function verifySignature(payload, signature, secret) {
   if (!secret) return true; // Skip if no secret configured
-  
-  const expectedSignature = crypto
-    .createHmac('sha256', secret)
-    .update(payload)
-    .digest('hex');
-    
+
+  const expectedSignature = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+
   return signature === `sha256=${expectedSignature}`;
 }
 
@@ -50,7 +47,7 @@ function verifySignature(payload, signature, secret) {
 function verifyTelegramWebhook(body, headers) {
   const secretToken = getConfig().telegramSecret;
   if (!secretToken) return true;
-  
+
   const providedToken = headers['x-telegram-bot-api-secret-token'];
   return providedToken === secretToken;
 }
@@ -61,29 +58,28 @@ function verifyTelegramWebhook(body, headers) {
 async function handleTelegramWebhook(body) {
   try {
     const update = typeof body === 'string' ? JSON.parse(body) : body;
-    
+
     // Process the update using telegram bridge
     const message = telegram.processUpdate(update);
     if (!message) return { status: 'ok', processed: false };
-    
+
     // Check for /vibe commands
     const command = telegram.parseVibeCommand(message.content);
     if (command) {
       return await processVibeCommand(command, message, 'telegram');
     }
-    
+
     // Forward regular messages to /vibe if configured
     const config = getConfig();
     if (config.vibeChannelId && message.type === 'dm') {
       await forwardToVibe(message, 'telegram');
     }
-    
-    return { 
-      status: 'ok', 
-      processed: true, 
-      message: `Processed ${message.type} from @${message.from.handle}` 
+
+    return {
+      status: 'ok',
+      processed: true,
+      message: `Processed ${message.type} from @${message.from.handle}`
     };
-    
   } catch (e) {
     console.error('Telegram webhook error:', e);
     return { status: 'error', error: e.message };
@@ -96,22 +92,21 @@ async function handleTelegramWebhook(body) {
 async function handleDiscordWebhook(body, headers) {
   try {
     const interaction = typeof body === 'string' ? JSON.parse(body) : body;
-    
+
     // Handle different interaction types
     switch (interaction.type) {
       case 1: // PING
         return { type: 1 }; // PONG
-        
+
       case 2: // APPLICATION_COMMAND
         return await handleDiscordSlashCommand(interaction);
-        
+
       case 3: // MESSAGE_COMPONENT (buttons, select menus)
         return await handleDiscordComponent(interaction);
-        
+
       default:
         return { status: 'ok', message: 'Interaction type not handled' };
     }
-    
   } catch (e) {
     console.error('Discord webhook error:', e);
     return { status: 'error', error: e.message };
@@ -125,10 +120,10 @@ async function handleDiscordSlashCommand(interaction) {
   const { data, member, user, channel_id } = interaction;
   const commandName = data.name;
   const options = data.options || [];
-  
+
   const discordUser = member?.user || user;
   const handle = discordUser.username;
-  
+
   try {
     switch (commandName) {
       case 'vibe':
@@ -142,26 +137,31 @@ async function handleDiscordSlashCommand(interaction) {
           return createDiscordResponse(`📡 Sent to /vibe: "${message}"`);
         }
         break;
-        
+
       case 'status':
         const mood = options.find(opt => opt.name === 'mood')?.value;
         const note = options.find(opt => opt.name === 'note')?.value;
         if (mood) {
-          await processVibeCommand({
-            command: 'status',
-            params: { mood, note }
-          }, { from: { handle } }, 'discord');
+          await processVibeCommand(
+            {
+              command: 'status',
+              params: { mood, note }
+            },
+            { from: { handle } },
+            'discord'
+          );
           return createDiscordResponse(`✅ Status updated: ${mood}${note ? ` - ${note}` : ''}`);
         }
         break;
-        
+
       case 'who':
         const onlineUsers = await getVibeOnlineUsers();
-        const userList = onlineUsers.length > 0 
-          ? onlineUsers.map(u => `• @${u.handle}: ${u.one_liner || 'building'}`).join('\n')
-          : '_No one is currently online_';
+        const userList =
+          onlineUsers.length > 0
+            ? onlineUsers.map(u => `• @${u.handle}: ${u.one_liner || 'building'}`).join('\n')
+            : '_No one is currently online_';
         return createDiscordResponse(`👥 **Who's in /vibe:**\n${userList}`);
-        
+
       default:
         return createDiscordResponse('Unknown command');
     }
@@ -176,12 +176,12 @@ async function handleDiscordSlashCommand(interaction) {
 async function handleDiscordComponent(interaction) {
   const { data, member, user } = interaction;
   const customId = data.custom_id;
-  
+
   // Handle different component interactions
   switch (customId) {
     case 'vibe_join':
       return createDiscordResponse('Visit https://slashvibe.dev to join /vibe!');
-    
+
     default:
       return createDiscordResponse('Component interaction not handled');
   }
@@ -205,41 +205,41 @@ function createDiscordResponse(content, ephemeral = false) {
  */
 async function processVibeCommand(command, message, platform) {
   const { handle } = message.from;
-  
+
   try {
     switch (command.command) {
       case 'status':
         const { mood, note } = command.params;
         await updateVibeStatus(handle, mood, note);
-        
+
         // Notify other platforms
         await notifyStatusChange(handle, mood, note, platform);
-        
-        return { 
-          status: 'ok', 
-          message: `Status updated for @${handle}: ${mood}` 
+
+        return {
+          status: 'ok',
+          message: `Status updated for @${handle}: ${mood}`
         };
-        
+
       case 'who':
         const users = await getVibeOnlineUsers();
         await sendOnlineList(message, users, platform);
         return { status: 'ok', message: 'Sent online user list' };
-        
+
       case 'ship':
         const { message: shipMessage } = command.params;
         await announceShip(handle, shipMessage);
         return { status: 'ok', message: 'Ship announcement sent' };
-        
+
       case 'dm':
         const { handle: targetHandle, message: dmMessage } = command.params;
         await sendVibeDM(handle, targetHandle, dmMessage);
         return { status: 'ok', message: `DM sent to @${targetHandle}` };
-        
+
       case 'vibe':
         const { message: vibeMessage } = command.params;
         await forwardToVibe(message, platform);
         return { status: 'ok', message: 'Message forwarded to /vibe' };
-        
+
       default:
         return { status: 'error', message: 'Unknown command' };
     }
@@ -254,7 +254,7 @@ async function processVibeCommand(command, message, platform) {
 async function forwardToVibe(message, platform) {
   // This would integrate with /vibe's message handling system
   console.log(`[${platform}] @${message.from.handle}: ${message.content}`);
-  
+
   // For now, just log - in real implementation this would:
   // 1. Add to /vibe message history
   // 2. Notify online users
@@ -285,7 +285,7 @@ async function getVibeOnlineUsers() {
  */
 async function notifyStatusChange(handle, mood, note, skipPlatform) {
   const config = getConfig();
-  
+
   // Notify Discord
   if (skipPlatform !== 'discord' && config.vibeChannelId && discordBot.isConfigured()) {
     try {
@@ -294,7 +294,7 @@ async function notifyStatusChange(handle, mood, note, skipPlatform) {
       console.error('Discord notification failed:', e);
     }
   }
-  
+
   // Notify Telegram
   if (skipPlatform !== 'telegram' && config.telegramChatId && telegram.isConfigured()) {
     try {
@@ -310,19 +310,20 @@ async function notifyStatusChange(handle, mood, note, skipPlatform) {
  */
 async function sendOnlineList(message, users, platform) {
   const config = getConfig();
-  
+
   switch (platform) {
     case 'discord':
       if (config.vibeChannelId) {
         await discordBot.sendOnlineList(config.vibeChannelId, users);
       }
       break;
-      
+
     case 'telegram':
       if (message.chat?.id) {
-        const userList = users.length > 0
-          ? users.map(u => `• **@${u.handle}** (${u.mood || 'online'}) — ${u.one_liner || 'building'}`).join('\n')
-          : '_No one is currently online_';
+        const userList =
+          users.length > 0
+            ? users.map(u => `• **@${u.handle}** (${u.mood || 'online'}) — ${u.one_liner || 'building'}`).join('\n')
+            : '_No one is currently online_';
         await telegram.sendMessage(message.chat.id, `👥 **Who's in /vibe:**\n${userList}`, { markdown: true });
       }
       break;
@@ -335,16 +336,16 @@ async function sendOnlineList(message, users, platform) {
 async function announceShip(handle, message) {
   const config = getConfig();
   const announcement = `🚀 **@${handle}** shipped${message ? `: ${message}` : '!'}`;
-  
+
   // Discord
   if (config.vibeChannelId && discordBot.isConfigured()) {
     await discordBot.notifyActivity(config.vibeChannelId, {
-      handle, 
-      action: 'shipped', 
+      handle,
+      action: 'shipped',
       context: message
     });
   }
-  
+
   // Telegram
   if (config.telegramChatId && telegram.isConfigured()) {
     await telegram.notifyActivity(config.telegramChatId, {
@@ -369,14 +370,14 @@ async function sendVibeDM(fromHandle, toHandle, message) {
 function createWebhookHandler() {
   return async (req, res) => {
     const { path, method, headers, body } = req;
-    
+
     if (method !== 'POST') {
       return res.status(405).json({ error: 'Method not allowed' });
     }
-    
+
     try {
       let result;
-      
+
       switch (path) {
         case '/webhook/telegram':
           if (!verifyTelegramWebhook(body, headers)) {
@@ -384,17 +385,16 @@ function createWebhookHandler() {
           }
           result = await handleTelegramWebhook(body);
           break;
-          
+
         case '/webhook/discord':
           result = await handleDiscordWebhook(body, headers);
           break;
-          
+
         default:
           return res.status(404).json({ error: 'Webhook endpoint not found' });
       }
-      
+
       res.json(result);
-      
     } catch (e) {
       console.error('Webhook handler error:', e);
       res.status(500).json({ error: 'Internal server error' });
@@ -408,7 +408,7 @@ function createWebhookHandler() {
 function getSetupInstructions() {
   const config = getConfig();
   const port = config.port;
-  
+
   return {
     telegram: {
       url: `https://your-domain.com/webhook/telegram`,

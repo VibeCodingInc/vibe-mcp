@@ -23,7 +23,7 @@ const definition = {
 
 // Known agents with descriptions (fallback when API doesn't have details)
 const KNOWN_AGENTS = {
-  'echo': {
+  echo: {
     role: 'Feedback & Welcome',
     description: 'Welcomes newcomers, answers questions, collects feedback'
   },

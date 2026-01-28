@@ -53,20 +53,20 @@ function isQuery(message) {
 // @echo personality responses
 const responses = {
   received: [
-    "Got it! 📝 Feedback received and shared with everyone.",
-    "Noted! 📝 Added to the feedback stream.",
-    "Heard you loud and clear! 🎧",
-    "Thanks for speaking up! 📣 Your feedback is now visible to all."
+    'Got it! 📝 Feedback received and shared with everyone.',
+    'Noted! 📝 Added to the feedback stream.',
+    'Heard you loud and clear! 🎧',
+    'Thanks for speaking up! 📣 Your feedback is now visible to all.'
   ],
   receivedAnon: [
-    "🔒 Stored anonymously. Thanks for helping make /vibe better!",
-    "🔒 Anonymous feedback saved. Your voice matters!",
-    "🔒 Noted anonymously. Appreciate you!"
+    '🔒 Stored anonymously. Thanks for helping make /vibe better!',
+    '🔒 Anonymous feedback saved. Your voice matters!',
+    '🔒 Noted anonymously. Appreciate you!'
   ],
   empty: [
-    "No feedback yet. Be the first to share! 🎤",
-    "The feedback stream is empty... for now. 🔇",
-    "Crickets. Share your thoughts to get things started! 🦗"
+    'No feedback yet. Be the first to share! 🎤',
+    'The feedback stream is empty... for now. 🔇',
+    'Crickets. Share your thoughts to get things started! 🦗'
   ],
   greeting: [
     "Hey! I'm @echo, the /vibe feedback agent. 🎧",

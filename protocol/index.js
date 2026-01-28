@@ -34,7 +34,7 @@ const PROTOCOL_VERSION = '0.1.0';
 const GAME_SCHEMA = {
   type: 'game',
   required: ['game', 'state'],
-  validate: (payload) => {
+  validate: payload => {
     if (!payload.game || typeof payload.game !== 'string') {
       return { valid: false, error: 'Missing or invalid game name' };
     }
@@ -65,7 +65,7 @@ const GAME_SCHEMA = {
 const HANDOFF_SCHEMA = {
   type: 'handoff',
   required: ['task', 'context'],
-  validate: (payload) => {
+  validate: payload => {
     if (!payload.task || typeof payload.task !== 'string') {
       return { valid: false, error: 'Missing or invalid task type' };
     }
@@ -90,7 +90,7 @@ const HANDOFF_SCHEMA = {
 const ACK_SCHEMA = {
   type: 'ack',
   required: ['replyTo', 'status'],
-  validate: (payload) => {
+  validate: payload => {
     if (!payload.replyTo || typeof payload.replyTo !== 'string') {
       return { valid: false, error: 'Missing or invalid replyTo' };
     }
@@ -119,7 +119,7 @@ const ACK_SCHEMA = {
 const ARTIFACT_SCHEMA = {
   type: 'artifact',
   required: ['artifactId', 'slug', 'title', 'template', 'url'],
-  validate: (payload) => {
+  validate: payload => {
     if (!payload.artifactId || typeof payload.artifactId !== 'string') {
       return { valid: false, error: 'Missing or invalid artifactId' };
     }
@@ -230,10 +230,14 @@ function generateIdempotencyKey(prefix, context = '') {
  * @returns {Object} - Game payload
  */
 function createGamePayload(game, state, options = {}) {
-  return createPayload('game', { game, state }, {
-    idempotencyKey: options.idempotencyKey || generateIdempotencyKey('game', game),
-    ...options
-  });
+  return createPayload(
+    'game',
+    { game, state },
+    {
+      idempotencyKey: options.idempotencyKey || generateIdempotencyKey('game', game),
+      ...options
+    }
+  );
 }
 
 /**
@@ -263,10 +267,14 @@ function createTicTacToePayload(board, turn, moves, winner = null) {
  * @returns {Object} - Handoff payload
  */
 function createHandoffPayload(task, context, options = {}) {
-  return createPayload('handoff', { task, context }, {
-    idempotencyKey: options.idempotencyKey || generateIdempotencyKey('handoff', task),
-    ...options
-  });
+  return createPayload(
+    'handoff',
+    { task, context },
+    {
+      idempotencyKey: options.idempotencyKey || generateIdempotencyKey('handoff', task),
+      ...options
+    }
+  );
 }
 
 // ============ ACK HELPERS ============
@@ -318,7 +326,7 @@ function formatGamePayload(payload) {
 
   if (game === 'tictactoe' && state.board) {
     const b = state.board;
-    const cell = (i) => b[i] || '·';
+    const cell = i => b[i] || '·';
     return `🎮 **Tic-Tac-Toe** (move ${state.moves || '?'})
 \`\`\`
  ${cell(0)} │ ${cell(1)} │ ${cell(2)}
@@ -359,7 +367,8 @@ function formatAckPayload(payload) {
 
 function formatArtifactPayload(payload) {
   const template = payload.template || 'artifact';
-  const templateIcon = template === 'guide' ? '📘' : template === 'learning' ? '💡' : template === 'workspace' ? '🗂️' : '📦';
+  const templateIcon =
+    template === 'guide' ? '📘' : template === 'learning' ? '💡' : template === 'workspace' ? '🗂️' : '📦';
 
   let display = `${templateIcon} **${payload.title}**\n`;
 
