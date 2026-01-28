@@ -11,7 +11,7 @@
 
 const config = require('../config');
 const patterns = require('../intelligence/patterns');
-const { requireInit, header, emptyState, formatTimeAgo, divider } = require('./_shared');
+const { requireInit, normalizeHandle, header, emptyState, formatTimeAgo, divider } = require('./_shared');
 
 const definition = {
   name: 'vibe_idea',
@@ -78,7 +78,7 @@ async function handler(args) {
 
     // Add riff metadata
     if (args.riff_on) {
-      const riffTarget = args.riff_on.replace('@', '').toLowerCase();
+      const riffTarget = normalizeHandle(args.riff_on);
       entry.content = `↳ riffing on @${riffTarget}: ${content}`;
       entry.tags = [...(entry.tags || []), `riff:${riffTarget}`];
     }

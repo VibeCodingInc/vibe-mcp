@@ -7,7 +7,7 @@
 
 const config = require('../config');
 const store = require('../store');
-const { requireInit } = require('./_shared');
+const { requireInit, normalizeHandle } = require('./_shared');
 
 const definition = {
   name: 'vibe_create_artifact',
@@ -141,8 +141,8 @@ async function handler(args) {
 
   // Build audience list (always includes creator and recipient)
   const fullAudience = new Set([creator]);
-  if (recipient) fullAudience.add(recipient.replace('@', ''));
-  audience.forEach(h => fullAudience.add(h.replace('@', '')));
+  if (recipient) fullAudience.add(normalizeHandle(recipient));
+  audience.forEach(h => fullAudience.add(normalizeHandle(h)));
 
   const artifact = {
     id: artifactId,
@@ -153,7 +153,7 @@ async function handler(args) {
 
     // Social metadata
     created_by: creator,
-    created_for: recipient ? recipient.replace('@', '') : null,
+    created_for: recipient ? normalizeHandle(recipient) : null,
     thread_id,
 
     // Privacy
@@ -191,7 +191,7 @@ async function handler(args) {
   // Auto-share via DM if requested
   if (autoShare && recipient) {
     try {
-      const dmResult = await store.sendArtifactCard(recipient.replace('@', ''), {
+      const dmResult = await store.sendArtifactCard(normalizeHandle(recipient), {
         type: 'artifact_card',
         artifact_id: artifactId,
         url: artifactUrl,

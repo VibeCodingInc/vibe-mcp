@@ -4,7 +4,7 @@
  * "react fire to stan" → sends 🔥
  */
 
-const { requireInit } = require('./_shared');
+const { requireInit, normalizeHandle } = require('./_shared');
 const config = require('../config');
 const store = require('../store');
 const patterns = require('../intelligence/patterns');
@@ -80,7 +80,7 @@ async function handler(args) {
 
   const { handle, reaction, note } = args;
   const myHandle = config.getHandle();
-  const them = handle?.toLowerCase().replace('@', '');
+  const them = normalizeHandle(handle);
 
   if (!them) {
     return { display: 'Who should I react to? e.g., `react fire to @stan`' };

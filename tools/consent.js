@@ -9,7 +9,7 @@
 
 const config = require('../config');
 const store = require('../store');
-const { requireInit, header, emptyState, formatTimeAgo, divider } = require('./_shared');
+const { requireInit, normalizeHandle, header, emptyState, formatTimeAgo, divider } = require('./_shared');
 
 const definition = {
   name: 'vibe_consent',
@@ -76,7 +76,7 @@ async function handler(args) {
     };
   }
 
-  const targetHandle = handle.toLowerCase().replace('@', '');
+  const targetHandle = normalizeHandle(handle);
 
   if (action === 'accept') {
     const result = await store.acceptConsent(targetHandle, myHandle);

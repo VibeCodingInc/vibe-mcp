@@ -9,7 +9,7 @@
  *   vibe recall              — Show all threads with memories
  */
 
-const { requireInit } = require('./_shared');
+const { requireInit, normalizeHandle } = require('./_shared');
 const memory = require('../memory');
 
 const definition = {
@@ -67,7 +67,7 @@ async function handler(args) {
   }
 
   // Clean handle
-  handle = handle.replace(/^@/, '').toLowerCase();
+  handle = normalizeHandle(handle);
 
   // Get memories for this thread
   let memories = memory.recall(handle, limit);

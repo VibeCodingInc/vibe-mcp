@@ -9,7 +9,7 @@
  *   vibe remember "We discussed OAuth implementation" (uses last DM thread)
  */
 
-const { requireInit } = require('./_shared');
+const { requireInit, normalizeHandle } = require('./_shared');
 const config = require('../config');
 const memory = require('../memory');
 const store = require('../store');
@@ -49,7 +49,7 @@ async function handler(args) {
 
   // Clean handle
   if (handle) {
-    handle = handle.replace(/^@/, '').toLowerCase();
+    handle = normalizeHandle(handle);
   } else {
     // Try to find last active thread
     const myHandle = config.getHandle();

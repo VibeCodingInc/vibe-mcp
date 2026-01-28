@@ -2,7 +2,7 @@
  * vibe ping — Tap someone on the shoulder
  */
 
-const { requireInit } = require('./_shared');
+const { requireInit, normalizeHandle } = require('./_shared');
 const config = require('../config');
 const store = require('../store');
 
@@ -31,7 +31,7 @@ async function handler(args) {
 
   const { handle, note } = args;
   const myHandle = config.getHandle();
-  const them = handle.toLowerCase().replace('@', '');
+  const them = normalizeHandle(handle);
 
   if (them === myHandle) {
     return { display: "You can't ping yourself." };

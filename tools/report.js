@@ -8,7 +8,7 @@
 
 const config = require('../config');
 const store = require('../store');
-const { requireInit } = require('./_shared');
+const { requireInit, normalizeHandle } = require('./_shared');
 
 const definition = {
   name: 'vibe_report',
@@ -58,7 +58,7 @@ Please specify who to report:
   }
 
   // Clean handle
-  const reportedHandle = handle.replace('@', '').toLowerCase();
+  const reportedHandle = normalizeHandle(handle);
 
   if (reportedHandle === myHandle) {
     return {

@@ -13,7 +13,7 @@
  */
 
 const config = require('../config');
-const { requireInit, header, emptyState, formatTimeAgo, divider } = require('./_shared');
+const { requireInit, normalizeHandle, header, emptyState, formatTimeAgo, divider } = require('./_shared');
 
 const definition = {
   name: 'vibe_feed',
@@ -88,7 +88,7 @@ async function handler(args) {
 
     // Filter by author if specified
     if (args.from) {
-      const targetHandle = args.from.replace('@', '').toLowerCase();
+      const targetHandle = normalizeHandle(args.from);
       entries = entries.filter(e => e.author.toLowerCase() === targetHandle);
     }
 
@@ -109,7 +109,7 @@ async function handler(args) {
       let suggestion = 'Start something! "idea: [your idea]"';
 
       if (args.from) {
-        emptyMsg = `No activity from @${args.from.replace('@', '')} yet`;
+        emptyMsg = `No activity from @${normalizeHandle(args.from)} yet`;
         suggestion = `Try "feed" to see all activity`;
       }
 
@@ -124,7 +124,7 @@ async function handler(args) {
       display += ` (${args.filter})`;
     }
     if (args.from) {
-      display += ` @${args.from.replace('@', '')}`;
+      display += ` @${normalizeHandle(args.from)}`;
     }
     if (args.tag) {
       display += ` #${args.tag}`;

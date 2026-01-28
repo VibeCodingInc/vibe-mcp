@@ -9,7 +9,7 @@
  *   vibe forget --all        — Delete all memories (requires confirmation)
  */
 
-const { requireInit } = require('./_shared');
+const { requireInit, normalizeHandle } = require('./_shared');
 const memory = require('../memory');
 const fs = require('fs');
 
@@ -90,7 +90,7 @@ async function handler(args) {
   }
 
   // Clean handle
-  handle = handle.replace(/^@/, '').toLowerCase();
+  handle = normalizeHandle(handle);
 
   // Check if thread exists
   const countBefore = memory.count(handle);

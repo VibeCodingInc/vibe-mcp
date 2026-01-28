@@ -12,7 +12,7 @@
 const config = require('../config');
 const userProfiles = require('../store/profiles');
 const patterns = require('../intelligence/patterns');
-const { requireInit, formatTimeAgo } = require('./_shared');
+const { requireInit, normalizeHandle, formatTimeAgo } = require('./_shared');
 
 // Delegate handlers for absorbed tools
 const ideaTool = require('./idea');
@@ -104,7 +104,7 @@ async function handler(args) {
       metaParts.push(`🔗 ${args.url}`);
     }
     if (args.inspired_by) {
-      const inspiree = args.inspired_by.replace('@', '').toLowerCase();
+      const inspiree = normalizeHandle(args.inspired_by);
       metaParts.push(`✨ inspired by @${inspiree}`);
     }
     if (args.for_request) {
@@ -118,7 +118,7 @@ async function handler(args) {
     // Build tags with attribution
     const tags = args.tags || [];
     if (args.inspired_by) {
-      tags.push(`inspired:${args.inspired_by.replace('@', '')}`);
+      tags.push(`inspired:${normalizeHandle(args.inspired_by)}`);
     }
     if (args.for_request) {
       tags.push(`fulfills:${args.for_request}`);
@@ -154,7 +154,7 @@ async function handler(args) {
       display += `\n${args.url}`;
     }
     if (args.inspired_by) {
-      display += `\n_via @${args.inspired_by.replace('@', '')}_`;
+      display += `\n_via @${normalizeHandle(args.inspired_by)}_`;
     }
 
     display += '\n';
