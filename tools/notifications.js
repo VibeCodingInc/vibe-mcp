@@ -144,7 +144,7 @@ async function handler(args) {
         const result = await api.request('POST', '/api/settings/notifications', {
           action: 'link_telegram'
         }, {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: { 'Authorization': `Bearer ${config.getAuthToken()}` }
         });
 
         if (!result.success) {
@@ -315,7 +315,7 @@ async function handler(args) {
           channel_id: channel.id,
           enabled
         }, {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: { 'Authorization': `Bearer ${config.getAuthToken()}` }
         });
 
         if (result.success) updated++;

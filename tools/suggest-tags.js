@@ -38,15 +38,17 @@ async function handler(args) {
   const command = args.command || 'suggest';
 
   try {
+    let display = '';
+
     switch (command) {
       case 'suggest': {
         const result = await tagSuggestions.generateSuggestions(myHandle);
-        
+
         if (result.error) {
           return { display: `## Tag Suggestions\n\n${result.error}` };
         }
-        
-        let display = `## Smart Tag Suggestions\n\n`;
+
+        display = `## Smart Tag Suggestions\n\n`;
         display += `**What you're building:**\n`;
         display += `"${result.building}"\n\n`;
         
@@ -107,8 +109,8 @@ async function handler(args) {
       
       case 'trending': {
         const trends = await tagSuggestions.getTrendingTags();
-        
-        let display = `## Trending Tags & Interests\n\n`;
+
+        display = `## Trending Tags & Interests\n\n`;
         
         if (trends.popularTags.length > 0) {
           display += `**🔥 Popular tech tags:**\n`;
@@ -156,7 +158,7 @@ async function handler(args) {
           };
         }
         
-        let display = `## Tag Completions for "${args.query}"\n\n`;
+        display = `## Tag Completions for "${args.query}"\n\n`;
         for (const tag of suggestions) {
           display += `- \`${tag}\`\n`;
         }
