@@ -13,7 +13,7 @@
 const config = require('../config');
 const { header, divider, formatTimeAgo, truncate } = require('./_shared');
 
-const API_URL = process.env.VIBE_API_URL || 'https://www.slashvibe.dev';
+const API_URL = config.getApiUrl();
 
 const definition = {
   name: 'vibe_admin_inbox',

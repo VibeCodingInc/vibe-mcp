@@ -15,7 +15,7 @@ const werewolf = require('../games/werewolf');
 
 // Post game results to board
 async function postPartyGameResult(game, message) {
-  const API_URL = process.env.VIBE_API_URL || 'https://www.slashvibe.dev';
+  const API_URL = config.getApiUrl();
 
   try {
     await fetch(`${API_URL}/api/board`, {

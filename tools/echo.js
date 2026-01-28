@@ -14,7 +14,7 @@ const config = require('../config');
 const { formatTimeAgo, requireInit } = require('./_shared');
 const store = require('../store');
 
-const API_URL = process.env.VIBE_API_URL || 'https://www.slashvibe.dev';
+const API_URL = config.getApiUrl();
 
 const definition = {
   name: 'vibe_echo',

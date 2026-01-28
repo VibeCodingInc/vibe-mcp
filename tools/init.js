@@ -18,7 +18,7 @@ const store = require('../store');
 const discord = require('../discord');
 
 const CALLBACK_PORT = 9876;
-const API_BASE = 'https://www.slashvibe.dev';
+const API_BASE = config.getApiUrl();
 
 /**
  * Fetch online count from presence API
@@ -170,7 +170,7 @@ async function sendPersonalizedWelcome(handle, oneLiner) {
 }
 
 const LOGIN_URL = 'https://www.slashvibe.dev/login';
-const API_URL = process.env.VIBE_API_URL || 'https://www.slashvibe.dev';
+const API_URL = config.getApiUrl();
 const AUTH_TIMEOUT_MS = 120000; // 2 minutes
 
 /**
