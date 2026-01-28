@@ -230,6 +230,19 @@ function validateRequired(args, required) {
   return null;
 }
 
+// ============ DEBUG ============
+
+/**
+ * Debug logging — only outputs when VIBE_DEBUG=true
+ * @param {string} tag - Log tag (e.g., 'DM', 'GAME')
+ * @param {...any} args - Values to log
+ */
+function debug(tag, ...args) {
+  if (process.env.VIBE_DEBUG === 'true') {
+    console.error(`[vibe:${tag}]`, ...args);
+  }
+}
+
 module.exports = {
   // Init
   requireInit,
@@ -258,5 +271,8 @@ module.exports = {
   withDefaults,
 
   // Validation
-  validateRequired
+  validateRequired,
+
+  // Debug
+  debug
 };

@@ -8,7 +8,7 @@
 const twitter = require('../twitter');
 const telegram = require('../bridges/telegram');
 const farcaster = require('../bridges/farcaster');
-const { requireInit, header, divider, formatTimeAgo } = require('./_shared');
+const { requireInit, header, divider, formatTimeAgo, debug } = require('./_shared');
 
 const definition = {
   name: 'vibe_social_inbox',
@@ -278,7 +278,7 @@ async function getWebhookInboxEvents(limit) {
       };
     });
   } catch (e) {
-    console.error('Error fetching webhook events:', e);
+    debug('social-inbox', 'Error fetching webhook events:', e);
     return [];
   }
 }
@@ -292,7 +292,7 @@ async function getUnifiedInbox(channel, limit, refresh, highSignal, includeWebho
       const webhookEvents = await getWebhookInboxEvents(Math.min(20, limit));
       messages.push(...webhookEvents);
     } catch (e) {
-      console.error('Webhook events error:', e.message);
+      debug('social-inbox', 'Webhook events error:', e.message);
     }
   }
 
@@ -320,7 +320,7 @@ async function getUnifiedInbox(channel, limit, refresh, highSignal, includeWebho
         }
       }
     } catch (e) {
-      console.error('X mentions error:', e.message);
+      debug('social-inbox', 'X mentions error:', e.message);
     }
   }
 
@@ -342,7 +342,7 @@ async function getUnifiedInbox(channel, limit, refresh, highSignal, includeWebho
         }
       }
     } catch (e) {
-      console.error('Farcaster mentions error:', e.message);
+      debug('social-inbox', 'Farcaster mentions error:', e.message);
     }
   }
 

@@ -12,7 +12,7 @@
 const config = require('../config');
 const store = require('../store');
 const { createTicTacToePayload, createGamePayload, formatPayload } = require('../protocol');
-const { requireInit, normalizeHandle } = require('./_shared');
+const { requireInit, normalizeHandle, debug } = require('./_shared');
 
 // Chess game implementation
 const chess = require('../games/chess');
@@ -44,7 +44,7 @@ async function postGameResult(winner, loser, isDraw, game = 'tic-tac-toe') {
       })
     });
   } catch (e) {
-    console.error('[game] Failed to post to board:', e.message);
+    debug('game', 'Failed to post to board:', e.message);
   }
 
   // Post to Discord
@@ -65,7 +65,7 @@ async function postGameResult(winner, loser, isDraw, game = 'tic-tac-toe') {
       })
     });
   } catch (e) {
-    console.error('[game] Failed to post to Discord:', e.message);
+    debug('game', 'Failed to post to Discord:', e.message);
   }
 }
 

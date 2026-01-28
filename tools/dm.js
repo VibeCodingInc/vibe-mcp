@@ -8,7 +8,7 @@ const memory = require('../memory');
 const userProfiles = require('../store/profiles');
 const patterns = require('../intelligence/patterns');
 const { trackMessage, checkBurst } = require('./summarize');
-const { requireInit, normalizeHandle, truncate, warning } = require('./_shared');
+const { requireInit, normalizeHandle, truncate, warning, debug } = require('./_shared');
 const { actions, formatActions } = require('./_actions');
 
 const definition = {
@@ -74,7 +74,7 @@ async function handler(args) {
       const protocol = require('../protocol');
       finalPayload = protocol.createArtifactPayload(artifact);
     } catch (error) {
-      console.error('Failed to load artifact:', error);
+      debug('dm', 'Failed to load artifact:', error);
       return { display: `Failed to load artifact: ${error.message}` };
     }
   }
@@ -109,7 +109,7 @@ async function handler(args) {
     }
   } catch (error) {
     // Don't fail the message if profile update fails
-    console.warn('Failed to update profile connection:', error);
+    debug('dm', 'Failed to update profile connection:', error);
   }
 
   // Track for session summary

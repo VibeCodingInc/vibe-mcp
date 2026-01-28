@@ -16,6 +16,7 @@ const path = require('path');
 const config = require('../config');
 const store = require('../store');
 const discord = require('../discord');
+const { debug } = require('./_shared');
 
 const CALLBACK_PORT = 9876;
 const API_BASE = config.getApiUrl();
@@ -161,11 +162,11 @@ async function sendPersonalizedWelcome(handle, oneLiner) {
         githubProfile: null // Could be passed from callback if available
       })
     }).catch(e => {
-      console.error('[vibe_init] Personalized welcome failed:', e.message);
+      debug('init', 'Personalized welcome failed:', e.message);
     });
   } catch (e) {
     // Non-fatal - continue without personalized welcome
-    console.error('[vibe_init] Context detection failed:', e.message);
+    debug('init', 'Context detection failed:', e.message);
   }
 }
 
@@ -186,7 +187,7 @@ async function sendWelcomeMessage(handle, one_liner) {
     const result = await response.json();
     return result.success;
   } catch (e) {
-    console.error('[vibe_init] Welcome message failed:', e.message);
+    debug('init', 'Welcome message failed:', e.message);
     return false;
   }
 }
@@ -228,7 +229,7 @@ function openBrowser(url) {
 
   exec(command, err => {
     if (err) {
-      console.error('[vibe_init] Failed to open browser:', err.message);
+      debug('init', 'Failed to open browser:', err.message);
     }
   });
 }

@@ -12,7 +12,7 @@
 const config = require('../config');
 const userProfiles = require('../store/profiles');
 const patterns = require('../intelligence/patterns');
-const { requireInit, normalizeHandle, formatTimeAgo } = require('./_shared');
+const { requireInit, normalizeHandle, formatTimeAgo, debug } = require('./_shared');
 
 // Delegate handlers for absorbed tools
 const ideaTool = require('./idea');
@@ -211,7 +211,7 @@ async function findSimilarShippers(myHandle, whatIShipped) {
       return b.timestamp - a.timestamp;
     });
   } catch (error) {
-    console.warn('Error finding similar shippers:', error);
+    debug('ship', 'Error finding similar shippers:', error);
     return [];
   }
 }

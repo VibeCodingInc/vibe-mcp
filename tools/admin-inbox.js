@@ -11,7 +11,7 @@
  */
 
 const config = require('../config');
-const { header, divider, formatTimeAgo, truncate } = require('./_shared');
+const { header, divider, formatTimeAgo, truncate, debug } = require('./_shared');
 
 const API_URL = config.getApiUrl();
 
@@ -138,7 +138,7 @@ When users reply to @${account}, they'll appear here.`
 
     return { display };
   } catch (error) {
-    console.error('[admin-inbox] Error:', error);
+    debug('admin-inbox', 'Error:', error);
     return {
       display: `## Error
 
@@ -201,7 +201,7 @@ ${response.status === 401 ? '⚠️ Invalid admin token' : error.error || 'Faile
 
     return { display };
   } catch (error) {
-    console.error('[admin-inbox] Reply error:', error);
+    debug('admin-inbox', 'Reply error:', error);
     return {
       display: `## Error
 

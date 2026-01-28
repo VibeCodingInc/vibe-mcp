@@ -11,6 +11,7 @@
  */
 
 const config = require('../config');
+const { debug } = require('./_shared');
 
 // Discovery-specific actions
 async function suggest_connection(from, to, reason) {
@@ -21,7 +22,7 @@ async function suggest_connection(from, to, reason) {
     // You could also send a notification here
     return { success: true, from, to, reason };
   } catch (error) {
-    console.warn(`Failed to suggest connection ${from} -> ${to}:`, error.message);
+    debug('actions', `Failed to suggest connection ${from} -> ${to}:`, error.message);
     return { success: false, error: error.message };
   }
 }
@@ -36,7 +37,7 @@ async function dm_user(handle, message) {
 
     return { success: true, to: handle, message };
   } catch (error) {
-    console.warn(`Failed to DM ${handle}:`, error.message);
+    debug('actions', `Failed to DM ${handle}:`, error.message);
     return { success: false, error: error.message };
   }
 }

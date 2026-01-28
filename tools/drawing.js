@@ -7,7 +7,7 @@
 const config = require('../config');
 const store = require('../store');
 const { createGamePayload } = require('../protocol');
-const { requireInit, normalizeHandle } = require('./_shared');
+const { requireInit, normalizeHandle, debug } = require('./_shared');
 
 // Drawing game implementation
 const drawing = require('../games/drawing');
@@ -66,7 +66,7 @@ async function getDrawingState(room) {
     const state = await store.get(key);
     return state ? JSON.parse(state) : null;
   } catch (e) {
-    console.error('[drawing] Failed to get state:', e.message);
+    debug('drawing', 'Failed to get state:', e.message);
     return null;
   }
 }
@@ -79,7 +79,7 @@ async function saveDrawingState(room, state) {
     const key = `drawing:${room}`;
     await store.set(key, JSON.stringify(state));
   } catch (e) {
-    console.error('[drawing] Failed to save state:', e.message);
+    debug('drawing', 'Failed to save state:', e.message);
   }
 }
 
@@ -115,7 +115,7 @@ async function postDrawingActivity(action, room, player, details = '') {
       })
     });
   } catch (e) {
-    console.error('[drawing] Failed to post to board:', e.message);
+    debug('drawing', 'Failed to post to board:', e.message);
   }
 }
 

@@ -7,7 +7,7 @@
 
 const config = require('../config');
 const store = require('../store');
-const { requireInit, normalizeHandle } = require('./_shared');
+const { requireInit, normalizeHandle, debug } = require('./_shared');
 
 const definition = {
   name: 'vibe_create_artifact',
@@ -132,7 +132,7 @@ async function handler(args) {
   if (personalize === 'recipient_opt_in' && recipient) {
     // TODO: Check if recipient has granted permission
     // For now, downgrade to creator_only
-    console.warn('[ARTIFACT] recipient_opt_in not yet implemented, using creator_only');
+    debug('artifact-create', 'recipient_opt_in not yet implemented, using creator_only');
   }
 
   // Build artifact object
@@ -206,10 +206,10 @@ async function handler(args) {
       });
 
       if (!dmResult.success) {
-        console.warn('[ARTIFACT] Failed to send DM:', dmResult.error);
+        debug('artifact-create', 'Failed to send DM:', dmResult.error);
       }
     } catch (e) {
-      console.warn('[ARTIFACT] DM send error:', e.message);
+      debug('artifact-create', 'DM send error:', e.message);
     }
   }
 

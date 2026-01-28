@@ -6,7 +6,7 @@
 
 const config = require('../config');
 const store = require('../store');
-const { requireInit } = require('./_shared');
+const { requireInit, debug } = require('./_shared');
 
 /**
  * Helper function to get artifact by slug (for use in other tools)
@@ -33,7 +33,7 @@ async function getArtifactBySlug(slug) {
 
     return null;
   } catch (error) {
-    console.error('Error fetching artifact:', error);
+    debug('artifact-view', 'Error fetching artifact:', error);
     return null;
   }
 }

@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { debug } = require('./_shared');
 
 const QUEUE_FILE = path.join(config.VIBE_DIR, 'connection-queue.json');
 const SUGGESTION_COOLDOWN = 24 * 60 * 60 * 1000; // 24 hours
@@ -24,7 +25,7 @@ function loadQueue() {
       return JSON.parse(data);
     }
   } catch (e) {
-    console.warn('Failed to load connection queue:', e.message);
+    debug('connection-queue', 'Failed to load connection queue:', e.message);
   }
   return {
     recent_suggestions: [],
@@ -38,7 +39,7 @@ function saveQueue(queueData) {
   try {
     fs.writeFileSync(QUEUE_FILE, JSON.stringify(queueData, null, 2));
   } catch (e) {
-    console.error('Failed to save connection queue:', e.message);
+    debug('connection-queue', 'Failed to save connection queue:', e.message);
   }
 }
 

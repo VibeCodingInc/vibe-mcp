@@ -7,7 +7,7 @@
 const config = require('../config');
 const store = require('../store');
 const { createGamePayload } = require('../protocol');
-const { requireInit, normalizeHandle } = require('./_shared');
+const { requireInit, normalizeHandle, debug } = require('./_shared');
 
 // Import game implementations
 const twotruths = require('../games/twotruths');
@@ -28,7 +28,7 @@ async function postPartyGameResult(game, message) {
       })
     });
   } catch (e) {
-    console.error('[party-game] Failed to post to board:', e.message);
+    debug('party-game', 'Failed to post to board:', e.message);
   }
 }
 

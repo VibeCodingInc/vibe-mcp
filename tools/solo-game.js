@@ -7,7 +7,7 @@
 const config = require('../config');
 const store = require('../store');
 const { createGamePayload } = require('../protocol');
-const { requireInit } = require('./_shared');
+const { requireInit, debug } = require('./_shared');
 
 // Import game implementations
 const hangman = require('../games/hangman');
@@ -36,7 +36,7 @@ async function postSoloGameResult(player, game, won, score = null) {
       })
     });
   } catch (e) {
-    console.error('[solo-game] Failed to post to board:', e.message);
+    debug('solo-game', 'Failed to post to board:', e.message);
   }
 }
 
