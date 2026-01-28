@@ -1,7 +1,12 @@
 /**
- * vibe game — Start or continue a game with someone
+ * vibe game — Unified game entry point
  *
- * Supports: tic-tac-toe, chess
+ * Routes to all game types:
+ * - Multiplayer: tictactoe, chess
+ * - Solo: hangman, rps, memory
+ * - Party: twotruths, werewolf
+ * - AI: tictactoe-ai (play vs AI)
+ * - Collaborative: drawing, crossword, wordassociation, multiplayer-tictactoe, wordchain, storybuilder
  */
 
 const config = require('../config');
@@ -11,6 +16,15 @@ const { requireInit, normalizeHandle } = require('./_shared');
 
 // Chess game implementation
 const chess = require('../games/chess');
+
+// Delegate handlers for absorbed game tools
+const soloGameTool = require('./solo-game');
+const partyGameTool = require('./party-game');
+const tictactoeTool = require('./tictactoe');
+const wordassociationTool = require('./wordassociation');
+const multiplayerGameTool = require('./multiplayer-game');
+const drawingTool = require('./drawing');
+const crosswordTool = require('./crossword');
 
 // Post game results to board and Discord
 async function postGameResult(winner, loser, isDraw, game = 'tic-tac-toe') {
@@ -57,27 +71,58 @@ async function postGameResult(winner, loser, isDraw, game = 'tic-tac-toe') {
   }
 }
 
+// Games that delegate to absorbed tool handlers
+const DELEGATED_GAMES = {
+  // Solo games (from solo-game.js)
+  'hangman': 'solo', 'rps': 'solo', 'memory': 'solo',
+  // Party games (from party-game.js)
+  'twotruths': 'party', 'werewolf': 'party',
+  // AI tictactoe (from tictactoe.js)
+  'tictactoe-ai': 'tictactoe-ai',
+  // Collaborative (from multiplayer-game.js)
+  'multiplayer-tictactoe': 'multiplayer', 'wordchain': 'multiplayer', 'storybuilder': 'multiplayer',
+  // Standalone tools
+  'wordassociation': 'wordassociation',
+  'drawing': 'drawing',
+  'crossword': 'crossword',
+};
+
 const definition = {
   name: 'vibe_game',
-  description: 'Start or continue a game with someone. Supports: tictactoe, chess',
+  description: 'Start or play any game. Multiplayer: tictactoe, chess. Solo: hangman, rps, memory. Party: twotruths, werewolf. AI: tictactoe-ai. Collaborative: drawing, crossword, wordassociation, wordchain, storybuilder, multiplayer-tictactoe.',
   inputSchema: {
     type: 'object',
     properties: {
       handle: {
         type: 'string',
-        description: 'Who to play with (e.g., @solienne)'
+        description: 'Who to play with (for multiplayer games like tictactoe, chess)'
       },
       game: {
         type: 'string',
         description: 'Game to play (default: tictactoe)',
-        enum: ['tictactoe', 'chess']
+        enum: [
+          'tictactoe', 'chess',
+          'hangman', 'rps', 'memory',
+          'twotruths', 'werewolf',
+          'tictactoe-ai',
+          'drawing', 'crossword', 'wordassociation',
+          'multiplayer-tictactoe', 'wordchain', 'storybuilder'
+        ]
       },
       move: {
         type: ['number', 'string'],
         description: 'Move to make (tictactoe: 1-9, chess: algebraic notation like e4, Nf3)'
+      },
+      action: {
+        type: 'string',
+        description: 'Action for party/collaborative games (e.g., new, join, draw, play, hint)'
+      },
+      difficulty: {
+        type: 'string',
+        description: 'Difficulty for solo/AI games (easy, medium, hard)',
+        enum: ['easy', 'medium', 'hard']
       }
-    },
-    required: ['handle']
+    }
   }
 };
 
@@ -169,8 +214,37 @@ async function handler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
 
-  const { handle, move } = args;
   const game = args.game || 'tictactoe';
+
+  // Delegate to absorbed game handlers
+  const delegateType = DELEGATED_GAMES[game];
+  if (delegateType === 'solo') {
+    return soloGameTool.handler({ ...args, game });
+  }
+  if (delegateType === 'party') {
+    return partyGameTool.handler({ ...args, game });
+  }
+  if (delegateType === 'tictactoe-ai') {
+    return tictactoeTool.handler(args);
+  }
+  if (delegateType === 'wordassociation') {
+    return wordassociationTool.handler(args);
+  }
+  if (delegateType === 'drawing') {
+    return drawingTool.handler(args);
+  }
+  if (delegateType === 'crossword') {
+    return crosswordTool.handler(args);
+  }
+  if (delegateType === 'multiplayer') {
+    return multiplayerGameTool.handler({ ...args, game });
+  }
+
+  // Original tictactoe/chess multiplayer logic
+  const { handle, move } = args;
+  if (!handle) {
+    return { display: `Game "${game}" requires a handle. Usage: vibe game --handle @someone --game ${game}` };
+  }
   const myHandle = config.getHandle();
   const them = normalizeHandle(handle);
 

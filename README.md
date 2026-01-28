@@ -151,83 +151,106 @@ If you prefer step-by-step:
 3. **Check messages** — `vibe inbox` shows unread DMs.
 4. **Send your first message** — `vibe dm @seth hey, just set up /vibe!`
 
-## Tools
+## Tools (39)
 
-### Core — Messaging & Presence
+### Core — Identity & Session
 
 | Tool | What it does |
 |------|-------------|
 | `vibe_start` | Entry point — authenticates, shows who's online, checks inbox |
 | `vibe_init` | Set up your identity via GitHub OAuth |
-| `vibe_who` | See who's online and what they're building |
-| `vibe_dm` | Send a direct message |
-| `vibe_inbox` | Check your unread messages |
-| `vibe_open` | Open a conversation thread with someone |
-| `vibe_ping` | Send a quick wave to someone |
-| `vibe_react` | React to a message |
-| `vibe_status` | Set your mood or what you're working on |
-| `vibe_away` / `vibe_back` | Set yourself away or return |
 | `vibe_bye` | End your session |
 
-### Discovery — Find Your People
+### Core — Messaging
 
 | Tool | What it does |
 |------|-------------|
-| `vibe_discover` | Find builders by interests, projects, or activity |
-| `vibe_suggest_tags` | Get tag suggestions for your profile |
-| `vibe_skills_exchange` | Browse and offer skills |
-| `vibe_workshop_buddy` | Find a learning partner |
-| `vibe_invite` | Generate an invite link |
+| `vibe_dm` | Send a direct message |
+| `vibe_inbox` | Check your unread messages |
+| `vibe_ping` | Send a quick wave to someone |
+| `vibe_react` | React to a message |
+| `vibe_open` | Open a conversation thread with someone |
+
+### Presence
+
+| Tool | What it does |
+|------|-------------|
+| `vibe_who` | See who's online and what they're building |
+| `vibe_status` | Set your mood or what you're working on |
+| `vibe_away` | Set yourself away |
+| `vibe_back` | Return from away |
 
 ### Creative — Ship & Share
 
 | Tool | What it does |
 |------|-------------|
-| `vibe_ship` | Announce what you shipped |
-| `vibe_idea` | Share an idea with the community |
-| `vibe_request` | Ask the community for help |
+| `vibe_ship` | Share with the community: ship (default), idea, or request via `type` param |
+| `vibe_session_save` | Save your coding session — makes it replayable, discoverable, and forkable |
+| `vibe_session_fork` | Fork an existing session to build on it |
 | `vibe_feed` | See what people are shipping and sharing |
-| `vibe_create_artifact` | Create a shareable guide, workspace, or learning |
-| `vibe_view_artifact` | View shared artifacts |
+| `vibe_context` | Share what you're working on |
 
-### Memory — Context That Persists
+### Discovery
+
+| Tool | What it does |
+|------|-------------|
+| `vibe_discover` | Find people, skills, and partners. Subcommands: suggest, search, interests, active, skills, partner |
+| `vibe_invite` | Generate an invite link |
+
+### Memory
 
 | Tool | What it does |
 |------|-------------|
 | `vibe_remember` | Save a note about someone for next time |
 | `vibe_recall` | Pull up everything you know about someone |
 | `vibe_forget` | Delete a memory |
-| `vibe_handoff` | Create an AIRC context handoff for another tool |
 
 ### Games — 27 Multiplayer & Solo Games
 
 | Tool | What it does |
 |------|-------------|
-| `vibe_game` | Start a multiplayer game with someone |
-| `vibe_solo_game` | Play a solo game (riddles, hangman, number guess) |
-| `vibe_tictactoe` | Challenge someone to tic-tac-toe |
-| `vibe_crossword` | Collaborative crossword puzzle |
-| `vibe_drawing` | Collaborative ASCII drawing |
-| `vibe_party_game` | Start a party game for 3+ players |
+| `vibe_game` | All games via one tool. Multiplayer (tictactoe, chess), solo (hangman, rps, memory), party (twotruths, werewolf), AI (tictactoe-ai), collaborative (drawing, crossword, wordassociation, wordchain, storybuilder) |
 
-### Bridges — Cross-Platform Social
+### Artifacts
 
 | Tool | What it does |
 |------|-------------|
-| `vibe_x_mentions` | Check your X/Twitter mentions |
-| `vibe_x_reply` | Reply on X from the terminal |
-| `vibe_social_inbox` | Unified inbox across platforms |
-| `vibe_social_post` | Post to multiple networks at once |
+| `vibe_create_artifact` | Create a shareable guide, workspace, or learning |
+| `vibe_view_artifact` | View shared artifacts |
+
+### File Coordination
+
+| Tool | What it does |
+|------|-------------|
+| `vibe_reserve` | Reserve files for editing |
+| `vibe_release` | Release file reservations |
+| `vibe_reservations` | List active file reservations |
+
+### Infrastructure
+
+| Tool | What it does |
+|------|-------------|
+| `vibe_handoff` | Create an AIRC context handoff for another tool |
+| `vibe_report` | Report issues or inappropriate behavior |
+| `vibe_suggest_tags` | Get tag suggestions for your profile |
 
 ### Diagnostics
 
 | Tool | What it does |
 |------|-------------|
-| `vibe_doctor` | Full health check — API, auth, storage, presence |
-| `vibe_test` | Quick connection and identity test |
 | `vibe_help` | Show available commands |
+| `vibe_doctor` | Full health check — API, auth, storage, presence |
 | `vibe_update` | Check for and apply updates |
+
+### Settings
+
+| Tool | What it does |
+|------|-------------|
 | `vibe_settings` | Configure preferences |
+| `vibe_notifications` | Configure notification channels |
+| `vibe_presence_agent` | Background presence agent |
+| `vibe_mute` | Mute a user |
+| `vibe_summarize` | Summarize session context |
 
 ## How It Works
 

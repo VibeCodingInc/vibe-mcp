@@ -3,7 +3,7 @@
  *
  * Smart matchmaking based on:
  * - What you're building (similar projects)
- * - What you've shipped (complementary skills)  
+ * - What you've shipped (complementary skills)
  * - When you're active (timezone overlap)
  * - Shared interests (tags)
  *
@@ -12,6 +12,8 @@
  * - discover search <query> — Find people building specific things
  * - discover interests — Browse people by interest tags
  * - discover active — Show who's building similar things right now
+ * - discover skills — Skills marketplace (absorbed from skills-exchange)
+ * - discover partner — Find workshop partner (absorbed from workshop-buddy)
  */
 
 const config = require('../config');
@@ -19,20 +21,51 @@ const store = require('../store');
 const userProfiles = require('../store/profiles');
 const { formatTimeAgo, requireInit } = require('./_shared');
 
+// Delegate handlers for absorbed tools
+const skillsExchangeTool = require('./skills-exchange');
+const workshopBuddyTool = require('./workshop-buddy');
+
 const definition = {
   name: 'vibe_discover',
-  description: 'Find interesting people to connect with based on what they\'re building.',
+  description: 'Find people, skills, and partners. Commands: suggest, search, interests, active, skills (marketplace), partner (workshop buddy).',
   inputSchema: {
     type: 'object',
     properties: {
       command: {
         type: 'string',
-        enum: ['suggest', 'search', 'interests', 'active'],
+        enum: ['suggest', 'search', 'interests', 'active', 'skills', 'partner'],
         description: 'Discovery command to run'
       },
       query: {
         type: 'string',
         description: 'Search query (for search command)'
+      },
+      skills_command: {
+        type: 'string',
+        enum: ['post', 'browse', 'match', 'requests'],
+        description: 'Skills subcommand (for command=skills)'
+      },
+      partner_command: {
+        type: 'string',
+        enum: ['find', 'offer', 'seeking', 'matches'],
+        description: 'Partner subcommand (for command=partner)'
+      },
+      type: {
+        type: 'string',
+        enum: ['offer', 'request'],
+        description: 'Type for skills post'
+      },
+      skill: {
+        type: 'string',
+        description: 'Skill name (for skills command)'
+      },
+      skills: {
+        type: 'string',
+        description: 'Skills to offer/seek (for partner command)'
+      },
+      details: {
+        type: 'string',
+        description: 'Additional details'
       }
     }
   }
@@ -231,6 +264,22 @@ async function handler(args) {
 
   const myHandle = config.getHandle();
   const command = args.command || 'suggest';
+
+  // Route to absorbed tools
+  if (command === 'skills') {
+    return skillsExchangeTool.handler({
+      command: args.skills_command || 'browse',
+      type: args.type,
+      skill: args.skill,
+      details: args.details
+    });
+  }
+  if (command === 'partner') {
+    return workshopBuddyTool.handler({
+      command: args.partner_command || 'find',
+      skills: args.skills
+    });
+  }
 
   let display = '';
 

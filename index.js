@@ -26,33 +26,20 @@ const NotificationEmitter = require('./notification-emitter');
  */
 const TOOL_ANNOTATIONS = {
   // ── Read-only tools ────────────────────────────────────────────
-  // These tools only fetch and display data
   vibe_who:            { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_inbox:          { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_recall:         { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   vibe_help:           { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  vibe_agents:         { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_feed:           { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_insights:       { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_view_artifact:  { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_suggest_tags:   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_admin_inbox:    { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_test:           { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_doctor:         { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_patterns:       { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_x_mentions:     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_social_inbox:   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_onboarding:     { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_l2_status:      { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_reservations:   { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_discover:       { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
 
   // ── Write tools (non-destructive) ─────────────────────────────
-  // These tools create, send, or modify data but don't destroy it
   vibe_start:           { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_init:            { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_token:           { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: false },
-  vibe_migrate:         { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
   vibe_ping:            { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_react:           { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_dm:              { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -61,41 +48,22 @@ const TOOL_ANNOTATIONS = {
   vibe_context:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_summarize:       { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: false },
   vibe_game:            { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_solo_game:       { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-  vibe_party_game:      { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_tictactoe:       { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_wordassociation: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_multiplayer_game:{ readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_drawing:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_crossword:       { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_away:            { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
   vibe_back:            { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
   vibe_handoff:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_reserve:         { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
   vibe_remember:        { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: false },
-  vibe_consent:         { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
   vibe_report:          { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_invite:          { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_submit:          { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_observe:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_idea:            { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_request:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_ship:            { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_session_save:    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_session_fork:    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_create_artifact: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_skills_exchange: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_workshop_buddy:  { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_echo:            { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_x_reply:         { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_social_post:     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_settings:        { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: false },
   vibe_notifications:   { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
   vibe_presence_agent:  { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_l2:              { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_shipback:        { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_bridge:          { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
 
   // ── Destructive tools ─────────────────────────────────────────
-  // These tools delete data or perform irreversible actions
   vibe_forget:          { readOnlyHint: false, destructiveHint: true, idempotentHint: true,  openWorldHint: false },
   vibe_release:         { readOnlyHint: false, destructiveHint: true, idempotentHint: true,  openWorldHint: true },
   vibe_bye:             { readOnlyHint: false, destructiveHint: true, idempotentHint: true,  openWorldHint: true },
@@ -107,7 +75,7 @@ const TOOL_ANNOTATIONS = {
 const DEFAULT_ANNOTATIONS = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
 
 // Tools that shouldn't show presence footer (would be redundant/noisy)
-const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_test', 'vibe_update', 'vibe_settings', 'vibe_notifications'];
+const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_update', 'vibe_settings', 'vibe_notifications'];
 
 // Infer user prompt from tool arguments (for pattern logging)
 function inferPromptFromArgs(toolName, args) {
@@ -133,28 +101,19 @@ function inferPromptFromArgs(toolName, args) {
     case 'remember': return `remember about ${handle}`;
     case 'recall': return `recall ${handle}`;
     case 'forget': return `forget ${handle}`;
-    case 'board': return args.content ? 'post to board' : 'view board';
-    case 'observe': return args.content ? 'record observation' : 'view observations';
     case 'invite': return 'generate invite';
-    case 'echo': return 'send feedback';
-    case 'x_mentions': return 'check x mentions';
-    case 'x_reply': return 'reply on x';
     case 'handoff': return `handoff task to ${handle}`;
     case 'reserve': return args.paths ? `reserve ${args.paths.join(', ')}` : 'reserve files';
     case 'release': return `release ${args.reservation_id || 'reservation'}`;
     case 'reservations': return 'list reservations';
-    case 'solo_game': return `play ${args.game || 'game'}`;
-    case 'tictactoe': return `play tic-tac-toe ${args.difficulty || ''}`.trim();
-    case 'wordassociation': return args.word ? `word association: ${args.word}` : 'play word association';
-    case 'multiplayer_game': return `multiplayer ${args.game || 'game'}`;
-    case 'drawing': return args.action ? `drawing ${args.action}` : 'collaborative drawing';
-    case 'crossword': return `crossword ${args.action || 'daily'}`;
+    case 'game': return `play ${args.game || 'game'} ${handle}`.trim();
     case 'away': return args.message ? `set away: "${args.message}"` : 'go away';
     case 'back': return 'come back';
     case 'discover': return `discover ${args.command || 'suggest'}`;
     case 'suggest_tags': return `suggest tags ${args.command || 'suggest'}`;
-    case 'skills_exchange': return `skills exchange ${args.command || 'browse'}`;
-    case 'workshop_buddy': return `workshop buddy ${args.command || 'find'}`;
+    case 'ship': return `ship ${args.type || ''} ${args.what || ''}`.trim();
+    case 'session_save': return `save session "${args.title || ''}"`.trim();
+    case 'session_fork': return `fork session ${args.session_id || ''}`.trim();
     case 'create_artifact': return `create ${args.template || 'artifact'}: ${args.title || 'untitled'}`;
     case 'view_artifact': return args.slug ? `view artifact ${args.slug}` : `list ${args.list || 'artifacts'}`;
     default: return `${action} ${handle}`.trim() || null;
@@ -258,100 +217,59 @@ async function getPresenceFooter() {
   }
 }
 
-// Load all tools
+// Load all tools (~37 registered)
 const tools = {
-  // Entry point
+  // Core — Identity & Session
   vibe_start: require('./tools/start'),
-  // Core
   vibe_init: require('./tools/init'),
-  vibe_token: require('./tools/token'),  // Privy OAuth token setter
-  vibe_migrate: require('./tools/migrate'),  // Migrate existing handle to GitHub auth
-  vibe_who: require('./tools/who'),
-  vibe_ping: require('./tools/ping'),
-  vibe_react: require('./tools/react'),
+  vibe_bye: require('./tools/bye'),
+  // Core — Messaging
   vibe_dm: require('./tools/dm'),
   vibe_inbox: require('./tools/inbox'),
+  vibe_ping: require('./tools/ping'),
+  vibe_react: require('./tools/react'),
   vibe_open: require('./tools/open'),
+  // Presence
+  vibe_who: require('./tools/who'),
   vibe_status: require('./tools/status'),
-  vibe_context: require('./tools/context'),
-  vibe_summarize: require('./tools/summarize'),
-  vibe_bye: require('./tools/bye'),
-  vibe_game: require('./tools/game'),
-  vibe_solo_game: require('./tools/solo-game'),
-  vibe_party_game: require('./tools/party-game'),
-  vibe_tictactoe: require('./tools/tictactoe'),
-  vibe_wordassociation: require('./tools/wordassociation'),
-  vibe_multiplayer_game: require('./tools/multiplayer-game'),
-  vibe_drawing: require('./tools/drawing'),
-  // Nostalgia Stack
-  vibe_crossword: require('./tools/crossword'),
   vibe_away: require('./tools/away'),
   vibe_back: require('./tools/back'),
-  // AIRC Handoff (v1) — context portability
-  vibe_handoff: require('./tools/handoff'),
-  // File reservations (advisory locks)
-  vibe_reserve: require('./tools/reserve'),
-  vibe_release: require('./tools/release'),
-  vibe_reservations: require('./tools/reservations'),
-  // Memory tools (Tier 1 — Collaborative Memory)
+  // Creative
+  vibe_ship: require('./tools/ship'),
+  vibe_session_save: require('./tools/session-save'),
+  vibe_session_fork: require('./tools/session-fork'),
+  vibe_feed: require('./tools/feed'),
+  vibe_context: require('./tools/context'),
+  // Discovery
+  vibe_discover: require('./tools/discover'),
+  vibe_invite: require('./tools/invite'),
+  // Memory
   vibe_remember: require('./tools/remember'),
   vibe_recall: require('./tools/recall'),
   vibe_forget: require('./tools/forget'),
-  // Consent (AIRC compliance)
-  vibe_consent: require('./tools/consent'),
-  // Trust & Safety
-  vibe_report: require('./tools/report'),
-  // Support
-  vibe_help: require('./tools/help'),
-  vibe_agents: require('./tools/agents'),
-  // Community
-  vibe_invite: require('./tools/invite'),
-  vibe_submit: require('./tools/submit'),
-  vibe_observe: require('./tools/observe'),
-  // Creative Layer — Ideas, Requests, Ships
-  vibe_idea: require('./tools/idea'),
-  vibe_request: require('./tools/request'),
-  vibe_ship: require('./tools/ship'),
-  vibe_feed: require('./tools/feed'),
-  vibe_insights: require('./tools/insights'),
-  // Artifacts — Just-in-time social objects
+  // Games (single entry point for all 27 games)
+  vibe_game: require('./tools/game'),
+  // Artifacts
   vibe_create_artifact: require('./tools/artifact-create'),
   vibe_view_artifact: require('./tools/artifact-view'),
-  // Discovery & Matchmaking
-  vibe_discover: require('./tools/discover'),
+  // File Coordination
+  vibe_reserve: require('./tools/reserve'),
+  vibe_release: require('./tools/release'),
+  vibe_reservations: require('./tools/reservations'),
+  // Infrastructure
+  vibe_handoff: require('./tools/handoff'),
+  vibe_report: require('./tools/report'),
   vibe_suggest_tags: require('./tools/suggest-tags'),
-  vibe_skills_exchange: require('./tools/skills-exchange'),
-  vibe_workshop_buddy: require('./tools/workshop-buddy'),
-  // Admin tools
-  vibe_admin_inbox: require('./tools/admin-inbox'),
   // Diagnostics
-  vibe_test: require('./tools/test'),
+  vibe_help: require('./tools/help'),
   vibe_doctor: require('./tools/doctor'),
   vibe_update: require('./tools/update'),
-  // @echo feedback agent (by Flynn)
-  vibe_echo: require('./tools/echo'),
-  // X/Twitter bridge
-  vibe_x_mentions: require('./tools/x-mentions'),
-  vibe_x_reply: require('./tools/x-reply'),
-  // Unified social inbox (Phase 1a)
-  vibe_social_inbox: require('./tools/social-inbox'),
-  vibe_social_post: require('./tools/social-post'),
-  // Language evolution
-  vibe_patterns: require('./tools/patterns'),
   // Settings
   vibe_settings: require('./tools/settings'),
-  // External notification channels
   vibe_notifications: require('./tools/notifications'),
-  // Background presence agent (Claude Code 2.1)
   vibe_presence_agent: require('./tools/presence-agent'),
   vibe_mute: require('./tools/mute'),
-  // Onboarding checklist
-  vibe_onboarding: require('./tools/onboarding'),
-  // VIBE L2 tools
-  vibe_l2: require('./tools/l2'),
-  vibe_l2_status: require('./tools/l2-status'),
-  vibe_shipback: require('./tools/shipback'),
-  vibe_bridge: require('./tools/l2-bridge')
+  vibe_summarize: require('./tools/summarize'),
 };
 
 /**

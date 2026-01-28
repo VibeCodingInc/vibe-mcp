@@ -1,13 +1,12 @@
 /**
- * vibe ship — Announce what you just shipped
+ * vibe ship — Share with the community
  *
- * Share your wins with the community and update your profile.
- * Tracks your shipping history for better discovery matches.
+ * Unified creative entry point with type parameter:
+ * - type: "ship" (default) — Announce what you shipped
+ * - type: "idea" — Post a raw idea for others to riff on
+ * - type: "request" — Post a build request / wish
  *
- * Usage:
- * - ship "Built a new feature for my AI chat app"
- * - ship "Deployed my portfolio website"
- * - ship "Published blog post about React patterns"
+ * Absorbs former vibe_idea and vibe_request tools.
  */
 
 const config = require('../config');
@@ -15,15 +14,28 @@ const userProfiles = require('../store/profiles');
 const patterns = require('../intelligence/patterns');
 const { requireInit, formatTimeAgo } = require('./_shared');
 
+// Delegate handlers for absorbed tools
+const ideaTool = require('./idea');
+const requestTool = require('./request');
+
 const definition = {
   name: 'vibe_ship',
-  description: 'Announce something you just shipped to the community board and update your profile.',
+  description: 'Share with the community. type="ship" (default): announce what you shipped. type="idea": post an idea for others to riff on. type="request": post a build request.',
   inputSchema: {
     type: 'object',
     properties: {
+      type: {
+        type: 'string',
+        enum: ['ship', 'idea', 'request'],
+        description: 'What to share: ship (default), idea, or request'
+      },
       what: {
         type: 'string',
-        description: 'What you shipped (brief description)'
+        description: 'What you shipped (for type=ship)'
+      },
+      content: {
+        type: 'string',
+        description: 'Content for idea or request (for type=idea/request)'
       },
       url: {
         type: 'string',
@@ -41,9 +53,20 @@ const definition = {
         type: 'array',
         items: { type: 'string' },
         description: 'Tags for discovery (e.g., ["ai", "mcp", "tools"])'
+      },
+      riff_on: {
+        type: 'string',
+        description: 'Handle to riff on (for type=idea)'
+      },
+      claim: {
+        type: 'string',
+        description: 'Request ID to claim (for type=request)'
+      },
+      bounty: {
+        type: 'string',
+        description: 'What you\'re offering for a request (for type=request)'
       }
-    },
-    required: ['what']
+    }
   }
 };
 
@@ -51,6 +74,16 @@ async function handler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
 
+  // Route to absorbed tools by type
+  const type = args.type || 'ship';
+  if (type === 'idea') {
+    return ideaTool.handler(args);
+  }
+  if (type === 'request') {
+    return requestTool.handler(args);
+  }
+
+  // Default: ship
   if (!args.what) {
     return { error: 'Please tell us what you shipped: ship "Built a new feature"' };
   }
