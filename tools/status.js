@@ -2,6 +2,7 @@
  * vibe status — Set your mood/status
  */
 
+const { requireInit } = require('./_shared');
 const config = require('../config');
 const store = require('../store');
 const discord = require('../discord');
@@ -39,11 +40,8 @@ const definition = {
 };
 
 async function handler(args) {
-  if (!config.isInitialized()) {
-    return {
-      display: 'Run `vibe init` first to set your identity.'
-    };
-  }
+  const initCheck = requireInit();
+  if (initCheck) return initCheck;
 
   const { mood } = args;
   const moodKey = mood.toLowerCase().replace(/[^a-z]/g, '');

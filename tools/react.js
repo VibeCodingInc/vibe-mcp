@@ -4,6 +4,7 @@
  * "react fire to stan" → sends 🔥
  */
 
+const { requireInit } = require('./_shared');
 const config = require('../config');
 const store = require('../store');
 const patterns = require('../intelligence/patterns');
@@ -74,11 +75,8 @@ const definition = {
 };
 
 async function handler(args) {
-  if (!config.isInitialized()) {
-    return {
-      display: 'Run `vibe init` first to set your identity.'
-    };
-  }
+  const initCheck = requireInit();
+  if (initCheck) return initCheck;
 
   const { handle, reaction, note } = args;
   const myHandle = config.getHandle();

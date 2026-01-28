@@ -9,6 +9,7 @@
  */
 
 const { execSync } = require('child_process');
+const { requireInit } = require('./_shared');
 const config = require('../config');
 const store = require('../store');
 
@@ -55,11 +56,8 @@ function getGitRoot() {
 }
 
 async function handler(args) {
-  if (!config.isInitialized()) {
-    return {
-      display: 'Run `vibe init` first to set your identity.'
-    };
-  }
+  const initCheck = requireInit();
+  if (initCheck) return initCheck;
 
   const handle = config.getHandle();
   const { file, error, note, clear } = args;

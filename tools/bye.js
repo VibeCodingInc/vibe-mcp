@@ -5,6 +5,7 @@
  * The summary appears locally before sign-off.
  */
 
+const { requireInit } = require('./_shared');
 const config = require('../config');
 const store = require('../store');
 const summarize = require('./summarize');
@@ -20,11 +21,8 @@ const definition = {
 };
 
 async function handler(args) {
-  if (!config.isInitialized()) {
-    return {
-      display: 'No active session to end.'
-    };
-  }
+  const initCheck = requireInit();
+  if (initCheck) return initCheck;
 
   const myHandle = config.getHandle();
 

@@ -2,6 +2,7 @@
  * vibe ping — Tap someone on the shoulder
  */
 
+const { requireInit } = require('./_shared');
 const config = require('../config');
 const store = require('../store');
 
@@ -25,11 +26,8 @@ const definition = {
 };
 
 async function handler(args) {
-  if (!config.isInitialized()) {
-    return {
-      display: 'Run `vibe init` first to set your identity.'
-    };
-  }
+  const initCheck = requireInit();
+  if (initCheck) return initCheck;
 
   const { handle, note } = args;
   const myHandle = config.getHandle();

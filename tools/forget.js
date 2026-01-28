@@ -9,7 +9,7 @@
  *   vibe forget --all        — Delete all memories (requires confirmation)
  */
 
-const config = require('../config');
+const { requireInit } = require('./_shared');
 const memory = require('../memory');
 const fs = require('fs');
 
@@ -36,11 +36,8 @@ const definition = {
 };
 
 async function handler(args) {
-  if (!config.isInitialized()) {
-    return {
-      display: 'Run `vibe init` first to set your identity.'
-    };
-  }
+  const initCheck = requireInit();
+  if (initCheck) return initCheck;
 
   const { all, confirm } = args;
   let { handle } = args;

@@ -9,7 +9,7 @@
  *   vibe recall              — Show all threads with memories
  */
 
-const config = require('../config');
+const { requireInit } = require('./_shared');
 const memory = require('../memory');
 
 const definition = {
@@ -35,11 +35,8 @@ const definition = {
 };
 
 async function handler(args) {
-  if (!config.isInitialized()) {
-    return {
-      display: 'Run `vibe init` first to set your identity.'
-    };
-  }
+  const initCheck = requireInit();
+  if (initCheck) return initCheck;
 
   let { handle, limit = 10, search } = args;
 

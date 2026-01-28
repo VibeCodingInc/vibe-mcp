@@ -10,6 +10,7 @@
  * - Burst: 5+ messages in thread (future)
  */
 
+const { requireInit } = require('./_shared');
 const config = require('../config');
 const store = require('../store');
 const fs = require('fs');
@@ -105,11 +106,8 @@ const definition = {
 };
 
 async function handler(args) {
-  if (!config.isInitialized()) {
-    return {
-      display: 'Run `vibe init` first to set your identity.'
-    };
-  }
+  const initCheck = requireInit();
+  if (initCheck) return initCheck;
 
   const myHandle = config.getHandle();
   const { share = false } = args;
