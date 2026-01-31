@@ -172,6 +172,10 @@ async function handler(args) {
 
   display += `\n\n_Handoff ID: ${handoff_id}_`;
 
+  // Push handoff event to subscribed agent gateways
+  const { pushToAgents } = require('../notify');
+  pushToAgents('handoff', { from: myHandle, to: them, task, context, handoff_id }).catch(() => {});
+
   return {
     display,
     hint: 'handoff_sent',

@@ -13,6 +13,7 @@
 const crypto = require('crypto');
 const telegram = require('./telegram');
 const discordBot = require('./discord-bot');
+const agentGateway = require('./agent-gateway');
 const config = require('../config');
 
 /**
@@ -378,6 +379,12 @@ function createWebhookHandler() {
     try {
       let result;
 
+      // Agent gateway routes (AIRC-verified)
+      if (path.startsWith('/agent/')) {
+        result = await agentGateway.handleRequest({ path, method, headers, body });
+        return res.status(result.status || 200).json(result);
+      }
+
       switch (path) {
         case '/webhook/telegram':
           if (!verifyTelegramWebhook(body, headers)) {
@@ -433,5 +440,7 @@ module.exports = {
   createWebhookHandler,
   getSetupInstructions,
   verifySignature,
-  verifyTelegramWebhook
+  verifyTelegramWebhook,
+  // Agent gateway (AIRC-verified agent communication)
+  agentGateway
 };

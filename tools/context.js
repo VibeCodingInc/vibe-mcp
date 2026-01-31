@@ -69,7 +69,7 @@ async function handler(args) {
       branch: null,
       error: null,
       note: null
-    });
+    }, 'mcp');
     return { display: "Context cleared. Others no longer see what you're working on." };
   }
 
@@ -111,7 +111,8 @@ vibe context --clear
   }
 
   // Send to presence
-  await store.heartbeat(handle, config.getOneLiner(), context);
+  // Phase 1 Presence Bridge: include source so platform knows this came from MCP
+  await store.heartbeat(handle, config.getOneLiner(), context, 'mcp');
 
   // Build confirmation display
   let display = '## Context Shared\n\n';

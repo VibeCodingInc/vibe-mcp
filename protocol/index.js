@@ -139,11 +139,56 @@ const ARTIFACT_SCHEMA = {
   }
 };
 
+/**
+ * Agent wire schema — For agent-to-agent communication on the wire
+ *
+ * Used when external agents (Clawdbot, @seth) communicate via /vibe.
+ * AIRC-signed for identity verification.
+ *
+ * Example:
+ * {
+ *   type: 'agent',
+ *   version: '0.1.0',
+ *   action: 'session_sync',
+ *   idempotencyKey: 'agent_seth_session_abc',
+ *   source: { platform: 'telegram', gateway: 'clawdbot' },
+ *   context: {
+ *     session: 'NODE logistics',
+ *     mood: 'shipping',
+ *     file: 'node365/submit/page.tsx'
+ *   }
+ * }
+ */
+const AGENT_SCHEMA = {
+  type: 'agent',
+  required: ['action'],
+  validate: payload => {
+    if (!payload.action || typeof payload.action !== 'string') {
+      return { valid: false, error: 'Missing or invalid action' };
+    }
+    const validActions = [
+      'session_sync',   // Sync session state to /vibe presence
+      'event_subscribe', // Subscribe to event pushes
+      'memory_query',   // Query local memory
+      'memory_store',   // Store observation
+      'identity_verify', // AIRC identity verification
+      'heartbeat',      // Agent heartbeat
+      'capability_announce' // Announce agent capabilities
+    ];
+    // Allow unknown actions for forward compat
+    if (!validActions.includes(payload.action)) {
+      return { valid: true, unknown_action: true };
+    }
+    return { valid: true };
+  }
+};
+
 const SCHEMAS = {
   game: GAME_SCHEMA,
   handoff: HANDOFF_SCHEMA,
   ack: ACK_SCHEMA,
-  artifact: ARTIFACT_SCHEMA
+  artifact: ARTIFACT_SCHEMA,
+  agent: AGENT_SCHEMA
 };
 
 // ============ PROTOCOL FUNCTIONS ============
@@ -315,6 +360,8 @@ function formatPayload(payload) {
       return formatAckPayload(payload);
     case 'artifact':
       return formatArtifactPayload(payload);
+    case 'agent':
+      return formatAgentPayload(payload);
     default:
       return `📦 _${payload.type} payload_`;
   }
@@ -409,6 +456,56 @@ function createArtifactPayload(artifact) {
   });
 }
 
+// ============ AGENT HELPERS ============
+
+/**
+ * Create an agent wire payload
+ * @param {string} action - Agent action (session_sync, event_subscribe, etc.)
+ * @param {object} data - Action-specific data
+ * @param {object} [options] - Options (idempotencyKey, source)
+ * @returns {object} - Agent payload
+ */
+function createAgentPayload(action, data = {}, options = {}) {
+  const payload = {
+    action,
+    ...data
+  };
+
+  if (options.source) {
+    payload.source = options.source;
+  }
+
+  return createPayload('agent', payload, {
+    idempotencyKey: options.idempotencyKey || generateIdempotencyKey('agent', action),
+    ...options
+  });
+}
+
+/**
+ * Format agent payload for display
+ */
+function formatAgentPayload(payload) {
+  const action = payload.action || 'unknown';
+  const source = payload.source
+    ? ` (via ${payload.source.platform || payload.source.gateway || 'unknown'})`
+    : '';
+
+  switch (action) {
+    case 'session_sync':
+      return `🤖 **Session sync**${source}\n> ${payload.context?.session || 'active'}`;
+    case 'event_subscribe':
+      return `🔔 **Event subscription**${source}\n> ${(payload.events || []).join(', ')}`;
+    case 'heartbeat':
+      return `💓 **Agent heartbeat**${source}`;
+    case 'identity_verify':
+      return `🔑 **Identity verification**${source}`;
+    case 'capability_announce':
+      return `📡 **Capabilities**${source}\n> ${(payload.capabilities || []).join(', ')}`;
+    default:
+      return `🤖 **Agent: ${action}**${source}`;
+  }
+}
+
 module.exports = {
   PROTOCOL_VERSION,
 
@@ -430,6 +527,9 @@ module.exports = {
 
   // Artifact helpers
   createArtifactPayload,
+
+  // Agent helpers
+  createAgentPayload,
 
   // Schemas (for extension)
   SCHEMAS

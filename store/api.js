@@ -147,7 +147,7 @@ async function registerSession(sessionId, handle, building = null, publicKey = n
   }
 }
 
-async function heartbeat(handle, one_liner, context = null) {
+async function heartbeat(handle, one_liner, context = null, source = null) {
   try {
     // Token-based auth: server extracts handle from token
     // Only need to send workingOn and context
@@ -161,6 +161,12 @@ async function heartbeat(handle, one_liner, context = null) {
     // Add context (mood, file, etc.) if provided
     if (context) {
       payload.context = context;
+    }
+
+    // Phase 1 Presence Bridge: track which surface is reporting
+    // See VIBE_CLAWDBOT_INTEGRATION_SPEC.md
+    if (source) {
+      payload.source = source;
     }
 
     await request('POST', '/api/presence', payload);

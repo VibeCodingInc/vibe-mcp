@@ -85,7 +85,8 @@ _Say "set status guided" to re-enable interactive menus._`
   const handle = config.getHandle();
 
   // Update presence with mood via context
-  await store.heartbeat(handle, config.getOneLiner(), { mood: emoji });
+  // Phase 1 Presence Bridge: include source so platform knows this came from MCP
+  await store.heartbeat(handle, config.getOneLiner(), { mood: emoji }, 'mcp');
 
   // Track for session summary
   if (emoji) {

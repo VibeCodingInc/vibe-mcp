@@ -148,6 +148,10 @@ async function handler(args) {
       patterns.logInspiredBy(args.inspired_by);
     }
 
+    // Push ship event to subscribed agent gateways
+    const { pushToAgents } = require('../notify');
+    pushToAgents('ship', { author: myHandle, what: args.what, url: args.url, tags }).catch(() => {});
+
     let display = `🚀 shipped\n\n${args.what}`;
 
     if (args.url) {

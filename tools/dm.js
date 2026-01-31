@@ -101,6 +101,10 @@ async function handler(args) {
   // Log social pattern (quietly, in background)
   patterns.logMessageSent(them);
 
+  // Push event to subscribed agent gateways (Clawdbot, etc.)
+  const { pushToAgents } = require('../notify');
+  pushToAgents('dm', { from: myHandle, to: them, body: finalMessage }).catch(() => {});
+
   // Record connection in profiles (if first time messaging)
   try {
     const hasConnected = await userProfiles.hasBeenConnected(myHandle, them);

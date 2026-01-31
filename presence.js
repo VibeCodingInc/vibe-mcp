@@ -60,7 +60,7 @@ async function sendHeartbeat() {
   const handle = config.getHandle();
   const one_liner = config.getOneLiner();
   if (handle) {
-    store.heartbeat(handle, one_liner || '');
+    store.heartbeat(handle, one_liner || '', null, 'mcp');
 
     // Check for notifications (runs in background, non-blocking)
     notify.checkAll(store).catch(() => {});
@@ -84,7 +84,7 @@ async function forceHeartbeat() {
 
   // Send heartbeat
   const one_liner = config.getOneLiner();
-  await store.heartbeat(handle, one_liner || '');
+  await store.heartbeat(handle, one_liner || '', null, 'mcp');
 
   return { success: true, handle };
 }

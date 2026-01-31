@@ -355,6 +355,26 @@ async function checkAll(store) {
   }
 }
 
+/**
+ * Push event to subscribed agent gateways (Clawdbot, @seth, etc.)
+ * Wraps agent-gateway pushEvent for use in tool handlers.
+ *
+ * Call this from any tool that produces a notable event:
+ *   pushToAgents('dm', { from, to, body })
+ *   pushToAgents('ship', { author, what, tags })
+ *   pushToAgents('presence', { handle, status, mood })
+ *   pushToAgents('mention', { handle, context })
+ *   pushToAgents('handoff', { from, to, task, context })
+ */
+async function pushToAgents(eventType, eventData) {
+  try {
+    const agentGateway = require('./bridges/agent-gateway');
+    await agentGateway.pushEvent(eventType, eventData);
+  } catch (e) {
+    // Silent fail — agent gateway is optional infrastructure
+  }
+}
+
 module.exports = {
   showNotification,
   checkAndNotify,
@@ -362,5 +382,6 @@ module.exports = {
   checkShips,
   checkAll,
   notify,
-  ringBell
+  ringBell,
+  pushToAgents
 };
