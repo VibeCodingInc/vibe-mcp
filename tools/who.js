@@ -13,7 +13,7 @@ const notify = require('../notify');
 const { formatTimeAgo, requireInit } = require('./_shared');
 const { actions, formatActions } = require('./_actions');
 const { enhanceUsersWithInference } = require('../intelligence/infer');
-const { getTopSerendipity, getAllSerendipity } = require('../intelligence/serendipity');
+const { getTopSerendipity } = require('../intelligence/serendipity');
 
 const definition = {
   name: 'vibe_who',
@@ -188,11 +188,20 @@ _Check back in a bit — builders come and go._`
       const activity = formatActivity(u);
       const timeAgo = formatTimeAgo(u.lastSeen);
 
-      display += `${heat.icon} **@${u.handle}**${agentBadge}${tag}${heatLabel}\n`;
+      // Phase 1 Presence Bridge: source badges + reach channels
+      const sourceBadge = u.sources && u.sources.length > 0
+        ? ` _(via ${u.sources.join(', ')})_`
+        : '';
+      const reachTag = u.reach_via && u.reach_via.length > 0
+        ? `   reach: ${u.reach_via.join(', ')}\n`
+        : '';
+
+      display += `${heat.icon} **@${u.handle}**${agentBadge}${tag}${heatLabel}${sourceBadge}\n`;
       if (operatorTag) {
         display += `   ${operatorTag}\n`;
       }
       display += `   ${activity}\n`;
+      if (reachTag) display += reachTag;
       display += `   _${timeAgo}_\n\n`;
     });
   }

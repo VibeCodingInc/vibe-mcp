@@ -13,7 +13,7 @@
  */
 
 const config = require('../config');
-const store = require('../store');
+const _store = require('../store');
 const userProfiles = require('../store/profiles');
 const { formatTimeAgo, requireInit } = require('./_shared');
 

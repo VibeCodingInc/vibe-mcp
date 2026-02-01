@@ -224,7 +224,15 @@ async function getActiveUsers() {
       note: u.context?.note || null,
       // Away status
       awayMessage: u.context?.awayMessage || null,
-      awayAt: u.context?.awayAt || null
+      awayAt: u.context?.awayAt || null,
+      // Agent fields (used by who.js for badges)
+      is_agent: u.isAgent || false,
+      operator: u.operator || null,
+      // GitHub activity (used by who.js heat detection)
+      github: u.github || null,
+      // Phase 1 Presence Bridge: multi-source tracking
+      sources: u.sources || null,
+      reach_via: u.reach_via || null
     }));
   } catch (e) {
     console.error('Who failed:', e.message);

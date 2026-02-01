@@ -130,6 +130,15 @@ async function checkAndNotify(inbox) {
         reason === 'mention' // Sound only for mentions
       );
 
+      // Phase 2: Forward inbound DMs to subscribed agent gateways (clawdbot → Telegram)
+      pushToAgents('dm_received', {
+        from: msg.from,
+        to: myHandle,
+        body: msg.text,
+        reason,
+        id: msg.id
+      });
+
       state.notifiedIds.push(msg.id);
       notified = true;
     }

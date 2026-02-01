@@ -9,7 +9,7 @@ const twitter = require('../twitter');
 const telegram = require('./telegram');
 const farcaster = require('./farcaster');
 const discord = require('../discord');
-const config = require('../config');
+const _config = require('../config');
 
 /**
  * Bridge health status tracker
@@ -106,24 +106,26 @@ class BridgeMonitor {
    */
   async checkBridgeHealth(bridge) {
     switch (bridge) {
-      case 'x':
+      case 'x': {
         if (!twitter.isConfigured()) return false;
         const me = await twitter.getMe();
         return !!(me && me.data && me.data.id);
+      }
 
-      case 'telegram':
+      case 'telegram': {
         if (!telegram.isConfigured()) return false;
         const botInfo = await telegram.getBotInfo();
         return !!(botInfo && botInfo.id);
+      }
 
-      case 'farcaster':
+      case 'farcaster': {
         if (!farcaster.isConfigured()) return false;
         const user = await farcaster.getUser();
         return !!(user && user.users && user.users.length > 0);
+      }
 
       case 'discord':
         if (!discord.isConfigured()) return false;
-        // Discord webhooks can't be tested without sending, so assume healthy if configured
         return true;
 
       default:

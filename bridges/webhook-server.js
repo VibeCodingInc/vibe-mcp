@@ -15,6 +15,7 @@ const telegram = require('./telegram');
 const discordBot = require('./discord-bot');
 const agentGateway = require('./agent-gateway');
 const config = require('../config');
+const debug = require('../debug');
 
 /**
  * Webhook server configuration
@@ -118,16 +119,16 @@ async function handleDiscordWebhook(body, headers) {
  * Handle Discord slash commands
  */
 async function handleDiscordSlashCommand(interaction) {
-  const { data, member, user, channel_id } = interaction;
+  const { data } = interaction;
   const commandName = data.name;
   const options = data.options || [];
 
-  const discordUser = member?.user || user;
+  const discordUser = (interaction.member?.user) || interaction.user;
   const handle = discordUser.username;
 
   try {
     switch (commandName) {
-      case 'vibe':
+      case 'vibe': {
         const message = options.find(opt => opt.name === 'message')?.value;
         if (message) {
           await forwardToVibe({
@@ -138,8 +139,9 @@ async function handleDiscordSlashCommand(interaction) {
           return createDiscordResponse(`📡 Sent to /vibe: "${message}"`);
         }
         break;
+      }
 
-      case 'status':
+      case 'status': {
         const mood = options.find(opt => opt.name === 'mood')?.value;
         const note = options.find(opt => opt.name === 'note')?.value;
         if (mood) {
@@ -154,14 +156,16 @@ async function handleDiscordSlashCommand(interaction) {
           return createDiscordResponse(`✅ Status updated: ${mood}${note ? ` - ${note}` : ''}`);
         }
         break;
+      }
 
-      case 'who':
+      case 'who': {
         const onlineUsers = await getVibeOnlineUsers();
         const userList =
           onlineUsers.length > 0
             ? onlineUsers.map(u => `• @${u.handle}: ${u.one_liner || 'building'}`).join('\n')
             : '_No one is currently online_';
         return createDiscordResponse(`👥 **Who's in /vibe:**\n${userList}`);
+      }
 
       default:
         return createDiscordResponse('Unknown command');
@@ -175,7 +179,7 @@ async function handleDiscordSlashCommand(interaction) {
  * Handle Discord message components (buttons, etc.)
  */
 async function handleDiscordComponent(interaction) {
-  const { data, member, user } = interaction;
+  const { data } = interaction;
   const customId = data.custom_id;
 
   // Handle different component interactions
@@ -209,37 +213,38 @@ async function processVibeCommand(command, message, platform) {
 
   try {
     switch (command.command) {
-      case 'status':
+      case 'status': {
         const { mood, note } = command.params;
         await updateVibeStatus(handle, mood, note);
-
-        // Notify other platforms
         await notifyStatusChange(handle, mood, note, platform);
-
         return {
           status: 'ok',
           message: `Status updated for @${handle}: ${mood}`
         };
+      }
 
-      case 'who':
+      case 'who': {
         const users = await getVibeOnlineUsers();
         await sendOnlineList(message, users, platform);
         return { status: 'ok', message: 'Sent online user list' };
+      }
 
-      case 'ship':
+      case 'ship': {
         const { message: shipMessage } = command.params;
         await announceShip(handle, shipMessage);
         return { status: 'ok', message: 'Ship announcement sent' };
+      }
 
-      case 'dm':
+      case 'dm': {
         const { handle: targetHandle, message: dmMessage } = command.params;
         await sendVibeDM(handle, targetHandle, dmMessage);
         return { status: 'ok', message: `DM sent to @${targetHandle}` };
+      }
 
-      case 'vibe':
-        const { message: vibeMessage } = command.params;
+      case 'vibe': {
         await forwardToVibe(message, platform);
         return { status: 'ok', message: 'Message forwarded to /vibe' };
+      }
 
       default:
         return { status: 'error', message: 'Unknown command' };
@@ -250,35 +255,43 @@ async function processVibeCommand(command, message, platform) {
 }
 
 /**
- * Forward message to /vibe core (placeholder)
+ * Forward message to /vibe core — sends as DM via platform API
  */
 async function forwardToVibe(message, platform) {
-  // This would integrate with /vibe's message handling system
-  console.log(`[${platform}] @${message.from.handle}: ${message.content}`);
+  const store = require('../store');
+  const notify = require('../notify');
+  const { handle } = message.from;
+  const content = message.content;
 
-  // For now, just log - in real implementation this would:
-  // 1. Add to /vibe message history
-  // 2. Notify online users
-  // 3. Trigger any relevant automations
+  // If it's a DM with a target, send it
+  if (message.to) {
+    const result = await store.sendMessage(handle, message.to, content);
+    // Push to agent gateways so other surfaces see it
+    notify.pushToAgents('dm', { from: handle, to: message.to, body: content, source: platform });
+    return result;
+  }
+
+  // Otherwise log — no broadcast messaging yet
+  debug(`[${platform}] @${handle}: ${content} (no target, skipped)`);
 }
 
 /**
- * Update /vibe status (placeholder)
+ * Update /vibe status via heartbeat with mood context
  */
 async function updateVibeStatus(handle, mood, note) {
-  // This would integrate with /vibe's status system
-  console.log(`Status update: @${handle} is ${mood}${note ? ` - ${note}` : ''}`);
+  const store = require('../store');
+  const context = { mood };
+  if (note) context.note = note;
+  await store.heartbeat(handle, note || '', context, 'bridge');
 }
 
 /**
- * Get current online users from /vibe (placeholder)
+ * Get current online users from /vibe presence API
  */
 async function getVibeOnlineUsers() {
-  // This would integrate with /vibe's presence system
-  return [
-    { handle: 'alice', mood: 'shipping', one_liner: 'building the future' },
-    { handle: 'bob', mood: 'debugging', one_liner: 'fixing the past' }
-  ];
+  const store = require('../store');
+  const users = await store.getActiveUsers();
+  return users.filter(u => u.status === 'active');
 }
 
 /**
@@ -336,7 +349,6 @@ async function sendOnlineList(message, users, platform) {
  */
 async function announceShip(handle, message) {
   const config = getConfig();
-  const announcement = `🚀 **@${handle}** shipped${message ? `: ${message}` : '!'}`;
 
   // Discord
   if (config.vibeChannelId && discordBot.isConfigured()) {
@@ -358,11 +370,14 @@ async function announceShip(handle, message) {
 }
 
 /**
- * Send DM in /vibe (placeholder)
+ * Send DM in /vibe via platform API
  */
 async function sendVibeDM(fromHandle, toHandle, message) {
-  console.log(`DM: @${fromHandle} → @${toHandle}: ${message}`);
-  // This would integrate with /vibe's DM system
+  const store = require('../store');
+  const notify = require('../notify');
+  const result = await store.sendMessage(fromHandle, toHandle, message);
+  notify.pushToAgents('dm', { from: fromHandle, to: toHandle, body: message, source: 'bridge' });
+  return result;
 }
 
 /**
