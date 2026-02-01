@@ -98,3 +98,90 @@ GET  → sources: ["mcp", "clawdbot"], reach_via: ["whatsapp","telegram","discor
 - Phase 2 inbound DM forwarding: dm_received events pushed to agent gateways
 - Agent gateway test suite: 31 tests covering full register→subscribe→push round-trip
 - Webhook server: all placeholders replaced with real store calls
+
+### Cleanup (Feb 1, 2026)
+
+- [x] Lint warnings reduced 265 → 244 (fixed case blocks in webhook-server.js, bridge-monitor.js; removed unused imports)
+- [x] All 467 tests passing (11 smoke + 456 unit/integration)
+- [x] Committed as `0dbf916`, pushed to main
+- [x] Remaining 244 warnings are all pre-existing in games/ and utility code (catch blocks, unused destructured vars)
+
+---
+
+## Role & Ownership
+
+**Owner: vibe-mcp** — the MCP server that makes /vibe work inside Claude Code and MCP-compatible IDEs.
+
+**Scope:**
+- Presence: heartbeats, source tracking, context sharing
+- Messaging: DMs, inbox, notifications, threading
+- Agent gateway: event push, AIRC identity, local memory — bridge layer to external agents
+- Protocol: wire schemas, signing, message formats
+- Social tools: who, discover, feed, ship, games, artifacts
+- Bridges: webhook server, Telegram/Discord/X integrations (outbound from MCP)
+
+**Not owned:** vibe-platform (backend API), seth-agent (clawdbot intelligence), vibe-terminal (Rust desktop), vibe-app (iOS)
+
+---
+
+## Next Phase: 2A/2B/2C — Agent Gateway Live
+
+**Goal:** Go from tested plumbing to a live subscriber receiving events. Produce the USV demo moment: bidirectional flow across surfaces.
+
+### Phase 2A: Agent Subscriber SDK (vibe-mcp scope, do first)
+
+Write `lib/agent-client.js` — a lightweight client library any agent can import to connect to the gateway.
+
+**What it does:**
+- Register with AIRC keypair on startup
+- Subscribe to event types (dm, ship, presence, handoff) with callback endpoint
+- Retry/reconnect on failure
+- Health check / keepalive to maintain subscription
+
+**Deliverable:** Importable module. Seth-agent adds `require('vibe-mcp/lib/agent-client')` and calls `connect()`.
+
+**Files to create:**
+- `lib/agent-client.js` — subscriber SDK
+- `test/agent-client.test.js` — tests against local gateway
+
+### Phase 2B: Gateway Hardening (vibe-mcp scope, parallel)
+
+Production gaps in `bridges/agent-gateway.js`:
+- [ ] Subscription persistence (currently in-memory Maps — lost on MCP restart)
+- [ ] Retry logic for failed event pushes (currently fire-and-forget)
+- [ ] Subscription TTL / keepalive (stale subscriptions should expire)
+- [ ] Rate limiting on push endpoints
+
+### Phase 2C: Cross-Surface Demo (coordination with seth-agent)
+
+Wire seth-agent to:
+1. Heartbeat with `source: "clawdbot"` → produces `(via mcp, clawdbot)` in who.js
+2. Subscribe to gateway events → receives dm_received, ship, presence pushes
+3. Route events to Telegram/WhatsApp/Discord channels
+
+**Demo moment:**
+```
+Terminal:  ⚡ @seth (via mcp, clawdbot)
+              building agent gateway
+              reach: WhatsApp, Telegram
+
+Flow:      stan DMs seth on /vibe
+           → dm_received event fires
+           → clawdbot forwards to Telegram
+           → seth replies on Telegram
+           → clawdbot sends DM back to stan on /vibe
+```
+
+This crosses repo boundaries. vibe-mcp provides the SDK and integration guide. Seth-agent wires it in.
+
+### Priority Order
+
+1. **2A** (agent-client SDK) — unblocks everything, pure vibe-mcp work
+2. **2C** (live demo) — requires seth-agent coordination, highest USV impact
+3. **2B** (hardening) — important but not demo-blocking
+
+### What to skip
+
+- Phases 3-7 from integration spec (session context, ship pipeline, memory merge, agent-to-agent, hardware) — good ideas, premature
+- More game/social test coverage — stable, not the story
+- Inbox source channel display — blocked on platform bridge API, minor UX
