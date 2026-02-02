@@ -523,26 +523,47 @@ async function getThread(myHandle, theirHandle) {
       }
     }
 
-    // 4. Return merged result (prefer API for latest, fallback to local)
-    const messages =
-      apiMessages.length > 0
-        ? apiMessages
-        : localMessages.map(m => ({
-            id: m.server_id,
-            from: m.from_handle,
-            to: m.to_handle,
-            body: m.content, // V2 uses 'body'
-            created_at: m.created_at
-          }));
+    // 4. Merge API + local messages (local may have optimistic sends not yet on server)
+    // Build a set of server_ids from API results for deduplication
+    const apiServerIds = new Set(apiMessages.map(m => m.id || m.messageId).filter(Boolean));
 
-    return messages.map(m => ({
+    // Normalize API messages
+    const normalizedApi = apiMessages.map(m => ({
       from: m.from,
       isAgent: m.isAgent || m.is_agent || false,
-      body: m.body || m.text || m.content || '', // V2: m.body, fallback to legacy
+      body: m.body || m.text || m.content || '',
       payload: m.payload || null,
       timestamp: new Date(m.created_at || m.createdAt).getTime(),
       direction: m.direction
     }));
+
+    // Find local messages not yet on the server (pending/sent without matching server_id)
+    const localOnly = localMessages
+      .filter(m => !m.server_id || !apiServerIds.has(m.server_id))
+      .filter(m => m.status === 'pending' || m.status === 'sent')
+      .map(m => ({
+        from: m.from_handle,
+        isAgent: false,
+        body: m.content,
+        payload: null,
+        timestamp: new Date(m.created_at).getTime(),
+        direction: m.from_handle === myHandle ? 'sent' : 'received'
+      }));
+
+    // Combine: API messages + any local-only optimistic sends, sorted by time
+    const merged = [...normalizedApi, ...localOnly].sort((a, b) => a.timestamp - b.timestamp);
+
+    // If neither source had messages, return empty
+    return merged.length > 0
+      ? merged
+      : localMessages.map(m => ({
+          from: m.from_handle,
+          isAgent: false,
+          body: m.content,
+          payload: null,
+          timestamp: new Date(m.created_at).getTime(),
+          direction: m.from_handle === myHandle ? 'sent' : 'received'
+        }));
   } catch (e) {
     console.error('Thread failed:', e.message);
 

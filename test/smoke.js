@@ -71,8 +71,8 @@ test('tools/ directory has tool files', () => {
 
 test('index.js registers ~37 tools (pruned from 68)', () => {
   const content = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf-8');
-  // Count tool registrations (lines matching vibe_xxx: require)
-  const toolLines = content.match(/vibe_\w+:\s*require/g) || [];
+  // Count tool registrations (lazy: ['vibe_xxx', () => require(...)] or direct: vibe_xxx: require)
+  const toolLines = content.match(/\['vibe_\w+',\s*\(\)\s*=>/g) || content.match(/vibe_\w+:\s*require/g) || [];
   const count = toolLines.length;
   assert(count >= 30 && count <= 50, `expected 30-50 tools, found ${count}`);
 });

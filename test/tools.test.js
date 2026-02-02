@@ -8,11 +8,17 @@ const path = require('path');
 const indexPath = path.join(__dirname, '..', 'index.js');
 const indexContent = fs.readFileSync(indexPath, 'utf-8');
 
-// Extract tool name → require path pairs from the TOOLS map
+// Extract tool name → require path pairs from the toolEntries array or direct TOOLS map
 const toolEntries = [];
-const toolRegex = /(\w+):\s*require\(['"](.+?)['"]\)/g;
+// Lazy pattern: ['vibe_xxx', () => require('./tools/yyy').zzz]
+const lazyRegex = /\['(vibe_\w+)',\s*\(\)\s*=>\s*require\(['"](.+?)['"]\)/g;
+// Direct pattern: vibe_xxx: require('./tools/yyy')
+const directRegex = /(vibe_\w+):\s*require\(['"](.+?)['"]\)/g;
 let match;
-while ((match = toolRegex.exec(indexContent)) !== null) {
+while ((match = lazyRegex.exec(indexContent)) !== null) {
+  toolEntries.push({ name: match[1], requirePath: match[2] });
+}
+while ((match = directRegex.exec(indexContent)) !== null) {
   toolEntries.push({ name: match[1], requirePath: match[2] });
 }
 

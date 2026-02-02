@@ -251,65 +251,81 @@ async function getPresenceFooter() {
   }
 }
 
-// Load all tools (~37 registered)
-const tools = {
+// Safe tool loader — one bad import doesn't crash the server
+function loadTool(name, loader) {
+  try {
+    return loader();
+  } catch (e) {
+    process.stderr.write(`[vibe] Failed to load ${name}: ${e.message}\n`);
+    return null;
+  }
+}
+
+// Load all tools (~37 registered), skipping any that fail
+const toolEntries = [
   // Core — Identity & Session
-  vibe_start: require('./tools/start'),
-  vibe_init: require('./tools/init'),
-  vibe_bye: require('./tools/bye'),
+  ['vibe_start', () => require('./tools/start')],
+  ['vibe_init', () => require('./tools/init')],
+  ['vibe_bye', () => require('./tools/bye')],
   // Core — Messaging
-  vibe_dm: require('./tools/dm'),
-  vibe_inbox: require('./tools/inbox'),
-  vibe_ping: require('./tools/ping'),
-  vibe_follow: require('./tools/follow').follow,
-  vibe_unfollow: require('./tools/follow').unfollow,
+  ['vibe_dm', () => require('./tools/dm')],
+  ['vibe_inbox', () => require('./tools/inbox')],
+  ['vibe_ping', () => require('./tools/ping')],
+  ['vibe_follow', () => require('./tools/follow').follow],
+  ['vibe_unfollow', () => require('./tools/follow').unfollow],
   // Watch / Live
-  vibe_watch: require('./tools/watch').watch,
-  vibe_live: require('./tools/watch').live,
-  vibe_react: require('./tools/react'),
-  vibe_open: require('./tools/open'),
+  ['vibe_watch', () => require('./tools/watch').watch],
+  ['vibe_live', () => require('./tools/watch').live],
+  ['vibe_react', () => require('./tools/react')],
+  ['vibe_open', () => require('./tools/open')],
   // Presence
-  vibe_who: require('./tools/who'),
-  vibe_status: require('./tools/status'),
-  vibe_away: require('./tools/away'),
-  vibe_back: require('./tools/back'),
+  ['vibe_who', () => require('./tools/who')],
+  ['vibe_status', () => require('./tools/status')],
+  ['vibe_away', () => require('./tools/away')],
+  ['vibe_back', () => require('./tools/back')],
   // Creative
-  vibe_ship: require('./tools/ship'),
-  vibe_session_save: require('./tools/session-save'),
-  vibe_session_fork: require('./tools/session-fork'),
-  vibe_feed: require('./tools/feed'),
-  vibe_context: require('./tools/context'),
+  ['vibe_ship', () => require('./tools/ship')],
+  ['vibe_session_save', () => require('./tools/session-save')],
+  ['vibe_session_fork', () => require('./tools/session-fork')],
+  ['vibe_feed', () => require('./tools/feed')],
+  ['vibe_context', () => require('./tools/context')],
   // Discovery
-  vibe_discover: require('./tools/discover'),
-  vibe_invite: require('./tools/invite'),
+  ['vibe_discover', () => require('./tools/discover')],
+  ['vibe_invite', () => require('./tools/invite')],
   // Memory
-  vibe_remember: require('./tools/remember'),
-  vibe_recall: require('./tools/recall'),
-  vibe_forget: require('./tools/forget'),
+  ['vibe_remember', () => require('./tools/remember')],
+  ['vibe_recall', () => require('./tools/recall')],
+  ['vibe_forget', () => require('./tools/forget')],
   // Games (single entry point for all 27 games)
-  vibe_game: require('./tools/game'),
+  ['vibe_game', () => require('./tools/game')],
   // Artifacts
-  vibe_create_artifact: require('./tools/artifact-create'),
-  vibe_view_artifact: require('./tools/artifact-view'),
+  ['vibe_create_artifact', () => require('./tools/artifact-create')],
+  ['vibe_view_artifact', () => require('./tools/artifact-view')],
   // File Coordination
-  vibe_reserve: require('./tools/reserve'),
-  vibe_release: require('./tools/release'),
-  vibe_reservations: require('./tools/reservations'),
+  ['vibe_reserve', () => require('./tools/reserve')],
+  ['vibe_release', () => require('./tools/release')],
+  ['vibe_reservations', () => require('./tools/reservations')],
   // Infrastructure
-  vibe_handoff: require('./tools/handoff'),
-  vibe_report: require('./tools/report'),
-  vibe_suggest_tags: require('./tools/suggest-tags'),
+  ['vibe_handoff', () => require('./tools/handoff')],
+  ['vibe_report', () => require('./tools/report')],
+  ['vibe_suggest_tags', () => require('./tools/suggest-tags')],
   // Diagnostics
-  vibe_help: require('./tools/help'),
-  vibe_doctor: require('./tools/doctor'),
-  vibe_update: require('./tools/update'),
+  ['vibe_help', () => require('./tools/help')],
+  ['vibe_doctor', () => require('./tools/doctor')],
+  ['vibe_update', () => require('./tools/update')],
   // Settings
-  vibe_settings: require('./tools/settings'),
-  vibe_notifications: require('./tools/notifications'),
-  vibe_presence_agent: require('./tools/presence-agent'),
-  vibe_mute: require('./tools/mute'),
-  vibe_summarize: require('./tools/summarize')
-};
+  ['vibe_settings', () => require('./tools/settings')],
+  ['vibe_notifications', () => require('./tools/notifications')],
+  ['vibe_presence_agent', () => require('./tools/presence-agent')],
+  ['vibe_mute', () => require('./tools/mute')],
+  ['vibe_summarize', () => require('./tools/summarize')]
+];
+
+const tools = {};
+for (const [name, loader] of toolEntries) {
+  const tool = loadTool(name, loader);
+  if (tool) tools[name] = tool;
+}
 
 /**
  * MCP Protocol Handler
