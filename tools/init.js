@@ -610,16 +610,13 @@ To check messages: \`vibe inbox\``
       const result = await waitForCallback(h, one_liner);
 
       // Check for unread messages
-      let unreadNotice = '';
+      let unreadCount = 0;
       try {
-        const unreadCount = await store.getUnreadCount(result.handle);
-        if (unreadCount > 0) {
-          unreadNotice = `\n\n📬 **${unreadCount} unread messages** — say "check my messages"`;
-        }
+        unreadCount = await store.getUnreadCount(result.handle);
       } catch (e) {}
 
       // Generate authenticated banner with handle + unread (3 lines only - won't collapse)
-      const authBanner = generateAuthBanner(result.handle, 1, onlineCount);
+      const authBanner = generateAuthBanner(result.handle, unreadCount, onlineCount);
 
       return {
         display: authBanner,

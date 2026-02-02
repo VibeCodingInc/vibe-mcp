@@ -41,6 +41,10 @@ const TOOL_ANNOTATIONS = {
   vibe_start: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_init: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_ping: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_follow: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_unfollow: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_watch: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_live: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_react: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_dm: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_open: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -257,6 +261,11 @@ const tools = {
   vibe_dm: require('./tools/dm'),
   vibe_inbox: require('./tools/inbox'),
   vibe_ping: require('./tools/ping'),
+  vibe_follow: require('./tools/follow').follow,
+  vibe_unfollow: require('./tools/follow').unfollow,
+  // Watch / Live
+  vibe_watch: require('./tools/watch').watch,
+  vibe_live: require('./tools/watch').live,
   vibe_react: require('./tools/react'),
   vibe_open: require('./tools/open'),
   // Presence

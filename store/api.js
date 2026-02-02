@@ -78,7 +78,9 @@ function request(method, path, data = null, options = {}) {
     });
 
     if (data) {
-      req.write(JSON.stringify(data));
+      const payload = JSON.stringify(data);
+      req.setHeader('Content-Length', Buffer.byteLength(payload));
+      req.write(payload);
     }
     req.end();
   });
@@ -795,6 +797,105 @@ async function getChecklistStatus(handle) {
   }
 }
 
+// ============ FOLLOW ============
+
+/**
+ * Follow a user
+ * @param {string} follower - Handle of the follower
+ * @param {string} following - Handle of the user to follow
+ */
+async function followUser(follower, following) {
+  try {
+    const result = await request('POST', '/api/follow', { follower, following });
+    return result;
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Unfollow a user
+ * @param {string} follower - Handle of the follower
+ * @param {string} following - Handle of the user to unfollow
+ */
+async function unfollowUser(follower, following) {
+  try {
+    const result = await request('DELETE', '/api/follow', { follower, following });
+    return result;
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Get list of users someone is following
+ * @param {string} handle - User handle
+ */
+async function getFollowing(handle) {
+  try {
+    const result = await request('GET', `/api/following?handle=${encodeURIComponent(handle)}`);
+    return result;
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Get list of followers for a user
+ * @param {string} handle - User handle
+ */
+async function getFollowers(handle) {
+  try {
+    const result = await request('GET', `/api/followers?handle=${encodeURIComponent(handle)}`);
+    return result;
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+// ============ WATCH / LIVE ============
+
+/**
+ * Get all active broadcasts
+ * @returns {Object} { success, broadcasts, upcoming, count }
+ */
+async function getLiveBroadcasts() {
+  try {
+    const result = await request('GET', '/api/live?format=json');
+    return result;
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Get broadcast info for a specific room
+ * @param {string} roomId - Broadcast room ID
+ * @returns {Object} { success, broadcast }
+ */
+async function getBroadcast(roomId) {
+  try {
+    const result = await request('GET', `/api/watch?room=${encodeURIComponent(roomId)}`);
+    return result;
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Get engagement metrics for a broadcast
+ * @param {string} roomId - Broadcast room ID
+ * @returns {Object} { success, viewers, chat, reactions, engagement }
+ */
+async function getBroadcastMetrics(roomId) {
+  try {
+    const result = await request('GET', `/api/watch/metrics?room=${encodeURIComponent(roomId)}`);
+    return result;
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
 // ============ ARTIFACTS ============
 
 /**
@@ -946,6 +1047,17 @@ module.exports = {
 
   // Onboarding
   getChecklistStatus,
+
+  // Follow
+  followUser,
+  unfollowUser,
+  getFollowing,
+  getFollowers,
+
+  // Watch / Live
+  getLiveBroadcasts,
+  getBroadcast,
+  getBroadcastMetrics,
 
   // Auth
   verifyPrivyToken
