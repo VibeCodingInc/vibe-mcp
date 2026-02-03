@@ -141,13 +141,14 @@ function formatActivity(user) {
 }
 
 async function handler(args) {
-  const initCheck = requireInit();
-  if (initCheck) return initCheck;
+  // Allow unauthenticated users to see who's online (read-only)
+  // This powers the "10 seconds after install" requirement
+  const isAuthed = config.isInitialized();
 
   const rawUsers = await store.getActiveUsers();
   // Apply smart detection — infer states from context signals
   const users = enhanceUsersWithInference(rawUsers);
-  const myHandle = config.getHandle();
+  const myHandle = isAuthed ? config.getHandle() : null;
 
   // Check for notifications (presence + messages)
   notify.checkAll(store);
@@ -250,13 +251,15 @@ _Check back in a bit — builders come and go._`
   display += `---\n`;
   display += randomAction;
 
-  // Check for unread to add urgency
-  try {
-    const unread = await store.getUnreadCount(myHandle);
-    if (unread > 0) {
-      display += `\n\n📬 **NEW MESSAGE — ${unread} UNREAD** — \`vibe inbox\``;
-    }
-  } catch (e) {}
+  // Check for unread to add urgency (only if authenticated)
+  if (myHandle) {
+    try {
+      const unread = await store.getUnreadCount(myHandle);
+      if (unread > 0) {
+        display += `\n\n📬 **NEW MESSAGE — ${unread} UNREAD** — \`vibe inbox\``;
+      }
+    } catch (e) {}
+  }
 
   // Fun flourish when room is lively
   if (active.length >= 3) {
@@ -333,22 +336,25 @@ _Check back in a bit — builders come and go._`
     }
   }
 
-  // Add guided mode actions
-  const onlineHandles = active.filter(u => u.handle !== myHandle).map(u => u.handle);
-  const unreadCount = await store.getUnreadCount(myHandle).catch(() => 0);
+  // Add guided mode actions (only if authenticated)
+  if (myHandle) {
+    const onlineHandles = active.filter(u => u.handle !== myHandle).map(u => u.handle);
+    const unreadCount = await store.getUnreadCount(myHandle).catch(() => 0);
 
-  if (active.length === 0 || (active.length === 1 && active[0].handle === myHandle)) {
-    // Empty room
-    response.actions = formatActions(actions.emptyRoom());
+    if (active.length === 0 || (active.length === 1 && active[0].handle === myHandle)) {
+      response.actions = formatActions(actions.emptyRoom());
+    } else {
+      response.actions = formatActions(
+        actions.dashboard({
+          unreadCount,
+          onlineUsers: onlineHandles,
+          suggestion: topSuggestion
+        })
+      );
+    }
   } else {
-    // People are here
-    response.actions = formatActions(
-      actions.dashboard({
-        unreadCount,
-        onlineUsers: onlineHandles,
-        suggestion: topSuggestion
-      })
-    );
+    // Not authenticated — nudge to join
+    response.display += `\n\n---\n**Join the room:** \`vibe init\` — sign in with GitHub in 10 seconds`;
   }
 
   return response;

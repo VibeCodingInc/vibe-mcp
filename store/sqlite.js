@@ -5,7 +5,7 @@
  * Schema matches src-tauri/src/db.rs exactly (LocalMessage struct)
  */
 
-const Database = require('better-sqlite3');
+let Database;
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
@@ -15,6 +15,11 @@ const DB_PATH = path.join(os.homedir(), '.vibecodings', 'sessions.db');
 
 class MessageStore {
   constructor() {
+    // Lazy-load better-sqlite3 — fails gracefully if native build is missing
+    if (!Database) {
+      Database = require('better-sqlite3');
+    }
+
     // Ensure directory exists
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) {
