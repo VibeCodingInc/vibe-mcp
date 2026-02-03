@@ -93,7 +93,21 @@
       "WebFetch(domain:www.mintlify.com)",
       "WebFetch(domain:mintlify.com)",
       "Bash(gh release:*)",
-      "WebFetch(domain:www.slashvibe.dev)"
+      "WebFetch(domain:www.slashvibe.dev)",
+      "Bash(npm test:*)",
+      "mcp__vibe__vibe_context",
+      "Bash(git status:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: Phase 1 presence bridge + agent gateway infrastructure\n\nPhase 1 \\(VIBE_CLAWDBOT_INTEGRATION_SPEC\\):\n- Add source: \"mcp\" to all presence heartbeat calls \\(status, context,\n  background heartbeat, force heartbeat\\)\n- heartbeat\\(\\) in store/api.js accepts 4th param `source`\n\nAgent gateway bridge \\(bridges/agent-gateway.js\\):\n- Agent registration with AIRC Ed25519 identity verification\n- Event push subscriptions \\(dm, ship, handoff, presence, mention\\)\n- Local memory queries \\(recall/remember/threads\\)\n- HTTP routes at /agent/* wired into webhook server\n\nAgent wire protocol \\(protocol/index.js\\):\n- New `agent` schema for agent-to-agent communication\n- Actions: session_sync, heartbeat, capability_announce, etc.\n- createAgentPayload\\(\\) helper + display formatting\n\nEvent push wiring:\n- pushToAgents\\(\\) in notify.js for event distribution\n- dm.js, ship.js, handoff.js push events to subscribed gateways\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push)",
+      "mcp__vibe__vibe_ship",
+      "Bash(npx eslint .)",
+      "Bash(npx eslint:*)",
+      "Bash(npx vercel logs --prod --since 2m)",
+      "Bash(npx vercel logs:*)",
+      "Bash(npx vercel ls)",
+      "Bash(npx vercel inspect:*)",
+      "Bash(lsof:*)",
+      "Bash(npm pack:*)"
     ]
   }
 }
