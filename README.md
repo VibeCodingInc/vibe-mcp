@@ -294,6 +294,50 @@ Config lives at `~/.vibecodings/config.json` (primary) or `~/.vibe/config.json` 
 
 Local message database: `~/.vibecodings/sessions.db` (SQLite, shared with Vibe Terminal desktop app).
 
+## Development
+
+### Multi-Machine Workflow
+
+This project is developed across multiple machines. Always sync before starting work:
+
+```bash
+git pull origin main
+npm install
+npm test
+```
+
+### Codex Integration
+
+Codex worktree configs are in `.codex/`:
+- `CODEX_SETUP.md` — Quick start and test commands
+- `worktree-1-presence.md` — Buddy list/heartbeat hardening
+- `worktree-2-messaging.md` — DM reliability
+- `worktree-3-init.md` — Auth stability
+
+### Local Development
+
+```bash
+npm install
+npm test              # Run all tests
+npm run lint          # ESLint
+npm run typecheck     # TypeScript validation
+```
+
+### Architecture
+
+```
+vibe-mcp/
+├── index.js          # MCP server entry
+├── config.js         # User identity (~/.vibecodings/config.json)
+├── presence.js       # Heartbeat loop (30s)
+├── tools/            # 78 MCP tools
+├── store/            # Data persistence (api.js, sqlite.js)
+├── games/            # Game logic
+├── bridges/          # Platform integrations
+├── intelligence/     # AI features
+└── protocol/         # AIRC protocol
+```
+
 ## Contributing
 
 We welcome contributions. Please read our [Contributor License Agreement](./CLA.md) before submitting pull requests.
