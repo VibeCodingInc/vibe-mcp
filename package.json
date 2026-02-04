@@ -14,7 +14,9 @@
     "lint:fix": "npx eslint . --fix",
     "format": "npx prettier --write \"**/*.js\" \"**/*.json\" \"**/*.md\" \"**/*.yml\"",
     "format:check": "npx prettier --check \"**/*.js\" \"**/*.json\" \"**/*.yml\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "version-sync": "node scripts/sync-version.js",
+    "prepublishOnly": "node scripts/sync-version.js && npm test"
   },
   "keywords": [
     "mcp",
@@ -53,13 +55,11 @@
     "store/",
     "protocol/",
     "intelligence/",
-    "games/",
     "bridges/",
+    "scripts/",
     "README.md"
   ],
-  "dependencies": {
-    "crossword-layout-generator": "^0.1.1"
-  },
+  "dependencies": {},
   "optionalDependencies": {
     "better-sqlite3": "^11.10.0"
   },

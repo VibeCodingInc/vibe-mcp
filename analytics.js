@@ -97,11 +97,35 @@ function trackSession(event, sessionData = {}) {
   track(event === 'started' ? 'session_started' : 'session_ended', sessionData);
 }
 
+/**
+ * Track editor install via universal installer
+ * @param {string} editor - Editor name configured
+ * @param {string} status - 'configured', 'exists', 'error'
+ */
+function trackInstall(editor, status) {
+  track('editor_install', {
+    editor,
+    status,
+    platform: process.platform,
+    node: process.version
+  });
+}
+
+/**
+ * Track tool usage distribution (called per tool invocation)
+ * @param {string} toolName - Tool name (vibe_*)
+ */
+function trackToolUsage(toolName) {
+  track('tool_call', { tool: toolName });
+}
+
 module.exports = {
   track,
   trackEmptyInbox,
   trackLurkMode,
   trackOnboardingTask,
   trackDiscovery,
-  trackSession
+  trackSession,
+  trackInstall,
+  trackToolUsage
 };

@@ -9,6 +9,9 @@
 const config = require('./config');
 const store = require('./store');
 const notify = require('./notify');
+const analytics = require('./analytics');
+const os = require('os');
+const { execSync } = require('child_process');
 
 let heartbeatInterval = null;
 let sessionInitialized = false;
@@ -28,6 +31,17 @@ function stop() {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
+
+  // End local session journal + analytics
+  try {
+    const sessionId = config.getSessionId();
+    if (sessionId) {
+      const getSessions = require('./store/sessions');
+      getSessions().endSession(sessionId);
+    }
+    analytics.trackSession('ended');
+  } catch (e) { /* journal/analytics is best-effort */ }
+
   // Clean up session file
   config.clearSession();
 }
@@ -48,6 +62,29 @@ async function initSession() {
     const result = await store.registerSession(sessionId, handle);
     sessionInitialized = result.success;
   }
+
+  // Track session start (anonymous analytics)
+  analytics.trackSession('started', {
+    machine: os.hostname(),
+    platform: process.platform,
+    node: process.version
+  });
+
+  // Start local session journal
+  try {
+    const getSessions = require('./store/sessions');
+    let repo = null;
+    let branch = null;
+    try {
+      repo = execSync('git rev-parse --show-toplevel', { encoding: 'utf8', timeout: 2000 }).trim();
+      branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8', timeout: 2000 }).trim();
+    } catch (e) { /* not in a git repo */ }
+    getSessions().startSession(sessionId, handle, {
+      repo,
+      branch,
+      machineId: os.hostname()
+    });
+  } catch (e) { /* journal is best-effort */ }
 
   // Send initial heartbeat
   sendHeartbeat();

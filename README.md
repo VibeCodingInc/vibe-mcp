@@ -1,22 +1,35 @@
 # /vibe MCP Server
 
 [![npm version](https://img.shields.io/npm/v/slashvibe-mcp.svg)](https://www.npmjs.com/package/slashvibe-mcp)
+[![npm downloads](https://img.shields.io/npm/dw/slashvibe-mcp.svg)](https://www.npmjs.com/package/slashvibe-mcp)
+[![CI](https://github.com/VibeCodingInc/vibe-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/VibeCodingInc/vibe-mcp/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/slashvibe-mcp.svg)](./LICENSE)
 [![node](https://img.shields.io/node/v/slashvibe-mcp.svg)](https://nodejs.org)
-[![CI](https://github.com/VibeCodingInc/vibe-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/VibeCodingInc/vibe-mcp/actions/workflows/ci.yml)
+[![MCP](https://img.shields.io/badge/MCP-compatible-blue)](https://modelcontextprotocol.io)
+[![Smithery](https://smithery.ai/badge/slashvibe-mcp)](https://smithery.ai/server/slashvibe-mcp)
 
-The social layer for AI coding. DMs, presence, discovery, and games between developers — without leaving your editor.
+The presence layer for AI-mediated work. See who's building, message them, share context — without leaving your editor.
 
 Works with Claude Code, Cursor, VS Code, Windsurf, Cline, Continue.dev, JetBrains, and any MCP-compatible client.
 
 ## Install
 
-Add to your MCP config and restart your editor:
+**Quick install** — auto-detects your editors and configures all of them:
+
+```bash
+npx slashvibe-mcp install
+```
+
+**Or** add to your MCP config manually and restart your editor:
 
 <details open>
 <summary><strong>Claude Code</strong></summary>
 
-Add to `~/.claude.json`:
+```bash
+claude mcp add vibe -- npx -y slashvibe-mcp
+```
+
+Or add to `~/.claude.json`:
 ```json
 {
   "mcpServers": {
@@ -26,11 +39,6 @@ Add to `~/.claude.json`:
     }
   }
 }
-```
-
-Or via CLI:
-```bash
-claude mcp add vibe -- npx -y slashvibe-mcp
 ```
 </details>
 
@@ -64,20 +72,6 @@ Add to `.vscode/mcp.json` in your workspace:
   }
 }
 ```
-
-Or add to your `settings.json`:
-```json
-{
-  "mcp": {
-    "servers": {
-      "vibe": {
-        "command": "npx",
-        "args": ["-y", "slashvibe-mcp"]
-      }
-    }
-  }
-}
-```
 </details>
 
 <details>
@@ -97,79 +91,39 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 </details>
 
 <details>
-<summary><strong>Cline (VS Code)</strong></summary>
+<summary><strong>Cline / Continue.dev / JetBrains</strong></summary>
 
-Open Cline > MCP Servers icon > Configure > Edit JSON, then add:
-```json
-{
-  "mcpServers": {
-    "vibe": {
-      "command": "npx",
-      "args": ["-y", "slashvibe-mcp"]
-    }
-  }
-}
-```
-</details>
+**Cline:** Open MCP Servers > Configure > Edit JSON, add `vibe` server as above.
 
-<details>
-<summary><strong>Continue.dev</strong></summary>
-
-Create `.continue/mcpServers/vibe.json`:
+**Continue.dev:** Create `.continue/mcpServers/vibe.json`:
 ```json
 {
   "command": "npx",
   "args": ["-y", "slashvibe-mcp"]
 }
 ```
-</details>
 
-<details>
-<summary><strong>JetBrains (IntelliJ, WebStorm, etc.)</strong></summary>
-
-Go to **Settings > Tools > AI Assistant > Model Context Protocol (MCP)** and add a new server:
-- **Command:** `npx`
-- **Arguments:** `-y slashvibe-mcp`
-
-Or import from your Claude Code config if you already have one.
+**JetBrains:** Settings > Tools > AI Assistant > MCP, add server with command `npx` and args `-y slashvibe-mcp`.
 </details>
 
 ## Getting Started
 
-Once installed, tell Claude:
+Once installed, tell your AI:
 
 ```
 "let's vibe"
 ```
 
-That's it. Claude will authenticate you via GitHub, show who's online, and check your inbox.
+That's it. It authenticates you via GitHub, shows who's online, and checks your inbox.
 
-If you prefer step-by-step:
+Step-by-step:
 
-1. **Authenticate** — `vibe init` opens GitHub OAuth in your browser. Takes 30 seconds.
+1. **Authenticate** — `vibe init` opens GitHub OAuth. Takes 30 seconds.
 2. **See who's around** — `vibe who` shows online builders and what they're working on.
 3. **Check messages** — `vibe inbox` shows unread DMs.
-4. **Send your first message** — `vibe dm @seth hey, just set up /vibe!`
+4. **Send a message** — `vibe dm @seth hey, just set up /vibe!`
 
-## Tools (39)
-
-### Core — Identity & Session
-
-| Tool | What it does |
-|------|-------------|
-| `vibe_start` | Entry point — authenticates, shows who's online, checks inbox |
-| `vibe_init` | Set up your identity via GitHub OAuth |
-| `vibe_bye` | End your session |
-
-### Core — Messaging
-
-| Tool | What it does |
-|------|-------------|
-| `vibe_dm` | Send a direct message |
-| `vibe_inbox` | Check your unread messages |
-| `vibe_ping` | Send a quick wave to someone |
-| `vibe_react` | React to a message |
-| `vibe_open` | Open a conversation thread with someone |
+## Tools
 
 ### Presence
 
@@ -177,84 +131,71 @@ If you prefer step-by-step:
 |------|-------------|
 | `vibe_who` | See who's online and what they're building |
 | `vibe_status` | Set your mood or what you're working on |
-| `vibe_away` | Set yourself away |
+| `vibe_away` | Set yourself away with a message |
 | `vibe_back` | Return from away |
+| `vibe_presence_agent` | Background presence agent |
 
-### Creative — Ship & Share
+### Messaging
 
 | Tool | What it does |
 |------|-------------|
-| `vibe_ship` | Share with the community: ship (default), idea, or request via `type` param |
-| `vibe_session_save` | Save your coding session — makes it replayable, discoverable, and forkable |
-| `vibe_session_fork` | Fork an existing session to build on it |
-| `vibe_feed` | See what people are shipping and sharing |
+| `vibe_dm` | Send a direct message |
+| `vibe_inbox` | Check your unread messages |
+| `vibe_ping` | Send a quick wave to someone |
+| `vibe_react` | React to a message |
+| `vibe_open` | Open a conversation thread |
+| `vibe_follow` | Follow someone for notifications |
+| `vibe_unfollow` | Unfollow someone |
+
+### Sessions & Context
+
+| Tool | What it does |
+|------|-------------|
+| `vibe_start` | Entry point — authenticates, shows presence, checks inbox |
+| `vibe_bye` | End your session |
 | `vibe_context` | Share what you're working on |
+| `vibe_summarize` | Generate session summary from local journal |
+| `vibe_session_resume` | Resume context from a prior session |
+| `vibe_session_save` | Save your session — replayable, discoverable, forkable |
+| `vibe_session_fork` | Fork an existing session to build on it |
+| `vibe_handoff` | Hand off a task with full context |
 
-### Discovery
+### Discovery & Memory
 
 | Tool | What it does |
 |------|-------------|
-| `vibe_discover` | Find people, skills, and partners. Subcommands: suggest, search, interests, active, skills, partner |
+| `vibe_discover` | Find people, skills, and collaborators |
 | `vibe_invite` | Generate an invite link |
-
-### Memory
-
-| Tool | What it does |
-|------|-------------|
-| `vibe_remember` | Save a note about someone for next time |
+| `vibe_remember` | Save a note about someone |
 | `vibe_recall` | Pull up everything you know about someone |
 | `vibe_forget` | Delete a memory |
 
-### Games — 27 Multiplayer & Solo Games
+### Collaboration
 
 | Tool | What it does |
 |------|-------------|
-| `vibe_game` | All games via one tool. Multiplayer (tictactoe, chess), solo (hangman, rps, memory), party (twotruths, werewolf), AI (tictactoe-ai), collaborative (drawing, crossword, wordassociation, wordchain, storybuilder) |
-
-### Artifacts
-
-| Tool | What it does |
-|------|-------------|
-| `vibe_create_artifact` | Create a shareable guide, workspace, or learning |
-| `vibe_view_artifact` | View shared artifacts |
-
-### File Coordination
-
-| Tool | What it does |
-|------|-------------|
-| `vibe_reserve` | Reserve files for editing |
+| `vibe_ship` | Share what you shipped, an idea, or a request |
+| `vibe_feed` | See what people are shipping |
+| `vibe_reserve` | Reserve files for editing (prevents conflicts) |
 | `vibe_release` | Release file reservations |
-| `vibe_reservations` | List active file reservations |
+| `vibe_reservations` | List active reservations |
+| `vibe_create_artifact` | Create a shareable guide or workspace |
+| `vibe_view_artifact` | View shared artifacts |
 
 ### Infrastructure
 
 | Tool | What it does |
 |------|-------------|
-| `vibe_handoff` | Create an AIRC context handoff for another tool |
-| `vibe_report` | Report issues or inappropriate behavior |
-| `vibe_suggest_tags` | Get tag suggestions for your profile |
-
-### Diagnostics
-
-| Tool | What it does |
-|------|-------------|
+| `vibe_init` | Set up identity via GitHub OAuth |
 | `vibe_help` | Show available commands |
-| `vibe_doctor` | Full health check — API, auth, storage, presence |
+| `vibe_doctor` | Health check — API, auth, storage, presence |
 | `vibe_update` | Check for and apply updates |
-
-### Settings
-
-| Tool | What it does |
-|------|-------------|
 | `vibe_settings` | Configure preferences |
 | `vibe_notifications` | Configure notification channels |
-| `vibe_presence_agent` | Background presence agent |
 | `vibe_mute` | Mute a user |
-| `vibe_summarize` | Summarize session context |
+| `vibe_report` | Report issues or inappropriate behavior |
 
 ## How It Works
-
-/vibe is an MCP server that connects your editor to [slashvibe.dev](https://slashvibe.dev). Messages sync via a Postgres backend with local SQLite persistence for offline-first speed. Everyone using /vibe is on the same network — regardless of which editor they use.
 
 ```
 Your Editor ←→ /vibe MCP (stdio) ←→ slashvibe.dev API ←→ Other users
@@ -263,87 +204,60 @@ Your Editor ←→ /vibe MCP (stdio) ←→ slashvibe.dev API ←→ Other users
                (~/.vibecodings/sessions.db)
 ```
 
-- **Identity** persists via GitHub OAuth — your handle follows you across sessions
-- **Messages** are stored locally first, then synced to the server (optimistic send)
 - **Presence** broadcasts via heartbeat — others see you in real time
-- **Memory** is local — notes you save about people stay on your machine
+- **Messages** are stored locally first, then synced (optimistic send)
+- **Sessions** are journaled to SQLite — durable, resumable, summarizable
+- **Identity** persists via GitHub OAuth — your handle follows you across editors and machines
+- **Memory** is local — notes about people stay on your machine
 
 ## Troubleshooting
 
-**"I installed but don't see /vibe tools in Claude Code"**
-- Make sure you restarted Claude Code after adding the MCP config
-- Check your config file: `~/.claude.json` or `~/.config/claude-code/mcp.json`
-- Run `vibe doctor` to diagnose issues
+**"I installed but don't see /vibe tools"**
+- Restart your editor after adding the MCP config
+- Run `vibe doctor` to diagnose
 
 **"Authentication failed or timed out"**
-- The OAuth flow opens a browser window — if it didn't open, go to [slashvibe.dev/login](https://slashvibe.dev/login) manually
-- The auth callback runs on `localhost:9876` — make sure that port is free
-- You have 2 minutes to complete the GitHub login
+- OAuth opens a browser window — if it didn't, go to [slashvibe.dev/login](https://slashvibe.dev/login)
+- The callback runs on `localhost:9876` — make sure that port is free
 
 **"Messages aren't sending"**
 - Run `vibe doctor` to check API connectivity
-- Check your internet connection
-- Messages are saved locally even if the API is down — they'll sync when you reconnect
-
-**"I see 'Unknown tool' errors"**
-- You may be running an older version. Run `vibe update` or reinstall: `npm install -g slashvibe-mcp`
+- Messages save locally even when offline — they sync on reconnect
 
 ## Configuration
 
-Config lives at `~/.vibecodings/config.json` (primary) or `~/.vibe/config.json` (legacy fallback).
+Config: `~/.vibecodings/config.json` (primary) or `~/.vibe/config.json` (legacy fallback).
 
-Local message database: `~/.vibecodings/sessions.db` (SQLite, shared with Vibe Terminal desktop app).
+Database: `~/.vibecodings/sessions.db` (SQLite, WAL mode).
 
 ## Development
 
-### Multi-Machine Workflow
-
-This project is developed across multiple machines. Always sync before starting work:
-
-```bash
-git pull origin main
-npm install
-npm test
-```
-
-### Codex Integration
-
-Codex worktree configs are in `.codex/`:
-- `CODEX_SETUP.md` — Quick start and test commands
-- `worktree-1-presence.md` — Buddy list/heartbeat hardening
-- `worktree-2-messaging.md` — DM reliability
-- `worktree-3-init.md` — Auth stability
-
-### Local Development
-
 ```bash
 npm install
-npm test              # Run all tests
+npm test              # All tests
 npm run lint          # ESLint
 npm run typecheck     # TypeScript validation
 ```
 
-### Architecture
-
 ```
 vibe-mcp/
-├── index.js          # MCP server entry
-├── config.js         # User identity (~/.vibecodings/config.json)
+├── index.js          # MCP server entry + CLI
+├── config.js         # User identity
 ├── presence.js       # Heartbeat loop (30s)
-├── tools/            # 78 MCP tools
-├── store/            # Data persistence (api.js, sqlite.js)
-├── games/            # Game logic
-├── bridges/          # Platform integrations
-├── intelligence/     # AI features
+├── analytics.js      # Anonymous usage tracking
+├── tools/            # MCP tools
+├── store/            # Persistence (api.js, sqlite.js, sessions.js)
+├── bridges/          # Platform integrations (Discord, Telegram, etc.)
+├── intelligence/     # Ambient signals (serendipity, proactive discovery)
 └── protocol/         # AIRC protocol
 ```
 
 ## Contributing
 
-We welcome contributions. Please read our [Contributor License Agreement](./CLA.md) before submitting pull requests.
+We welcome contributions. See [CLA.md](./CLA.md) before submitting pull requests.
 
-- Report bugs via [GitHub Issues](https://github.com/VibeCodingInc/vibe-mcp/issues)
-- Propose features via [Discussions](https://github.com/VibeCodingInc/vibe-mcp/discussions)
+- [GitHub Issues](https://github.com/VibeCodingInc/vibe-mcp/issues) — Bug reports
+- [Discussions](https://github.com/VibeCodingInc/vibe-mcp/discussions) — Feature proposals
 
 ## License
 
@@ -351,7 +265,7 @@ MIT — see [LICENSE](./LICENSE)
 
 ## Links
 
-- [slashvibe.dev](https://slashvibe.dev) — The platform
+- [slashvibe.dev](https://slashvibe.dev) — Platform
 - [Vibe Terminal](https://github.com/VibeCodingInc/vibe-terminal) — Desktop app
 - [@slashvibe on X](https://twitter.com/slashvibe) — Updates
 

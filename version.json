@@ -1,13 +1,13 @@
 {
-  "version": "0.3.0",
-  "updated": "2026-01-10",
-  "changelog": "Artifacts system - create guides, learnings, workspaces with vibe_create_artifact",
+  "version": "0.3.24",
+  "updated": "2026-02-03",
+  "changelog": "Session journal, session resume, universal installer, MCP registry prep",
   "features": [
-    "vibe_create_artifact - Create social artifacts from conversations",
-    "vibe_view_artifact - View and list artifacts",
-    "Dual-write to KV + Postgres",
-    "HTML rendering at /a/:slug",
-    "Structured blocks: places, schedules, checklists, callouts"
+    "vibe_session_resume - Load prior session context from local journal",
+    "Session journal - durable SQLite-backed activity tracking",
+    "npx slashvibe-mcp install - Universal multi-editor installer",
+    "CLI --version and --help flags",
+    "Smithery marketplace listing"
   ],
   "breaking": false,
   "updateUrl": "https://www.slashvibe.dev/api/version"

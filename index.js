@@ -11,6 +11,8 @@ const config = require('./config');
 const store = require('./store');
 const prompts = require('./prompts');
 const NotificationEmitter = require('./notification-emitter');
+const getSessions = require('./store/sessions');
+const analytics = require('./analytics');
 
 /**
  * MCP Tool Safety Annotations
@@ -32,7 +34,6 @@ const TOOL_ANNOTATIONS = {
   vibe_help: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   vibe_feed: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_view_artifact: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_suggest_tags: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_doctor: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_reservations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_discover: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -51,7 +52,6 @@ const TOOL_ANNOTATIONS = {
   vibe_status: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_context: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_summarize: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  vibe_game: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   vibe_away: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_back: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_handoff: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -66,6 +66,7 @@ const TOOL_ANNOTATIONS = {
   vibe_settings: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   vibe_notifications: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_presence_agent: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  vibe_session_resume: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 
   // ── Destructive tools ─────────────────────────────────────────
   vibe_forget: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
@@ -129,16 +130,12 @@ function inferPromptFromArgs(toolName, args) {
       return `release ${args.reservation_id || 'reservation'}`;
     case 'reservations':
       return 'list reservations';
-    case 'game':
-      return `play ${args.game || 'game'} ${handle}`.trim();
     case 'away':
       return args.message ? `set away: "${args.message}"` : 'go away';
     case 'back':
       return 'come back';
     case 'discover':
       return `discover ${args.command || 'suggest'}`;
-    case 'suggest_tags':
-      return `suggest tags ${args.command || 'suggest'}`;
     case 'ship':
       return `ship ${args.type || ''} ${args.what || ''}`.trim();
     case 'session_save':
@@ -261,7 +258,7 @@ function loadTool(name, loader) {
   }
 }
 
-// Load all tools (~37 registered), skipping any that fail
+// Load all tools, skipping any that fail
 const toolEntries = [
   // Core — Identity & Session
   ['vibe_start', () => require('./tools/start')],
@@ -296,8 +293,6 @@ const toolEntries = [
   ['vibe_remember', () => require('./tools/remember')],
   ['vibe_recall', () => require('./tools/recall')],
   ['vibe_forget', () => require('./tools/forget')],
-  // Games (single entry point for all 27 games)
-  ['vibe_game', () => require('./tools/game')],
   // Artifacts
   ['vibe_create_artifact', () => require('./tools/artifact-create')],
   ['vibe_view_artifact', () => require('./tools/artifact-view')],
@@ -308,7 +303,6 @@ const toolEntries = [
   // Infrastructure
   ['vibe_handoff', () => require('./tools/handoff')],
   ['vibe_report', () => require('./tools/report')],
-  ['vibe_suggest_tags', () => require('./tools/suggest-tags')],
   // Diagnostics
   ['vibe_help', () => require('./tools/help')],
   ['vibe_doctor', () => require('./tools/doctor')],
@@ -318,7 +312,9 @@ const toolEntries = [
   ['vibe_notifications', () => require('./tools/notifications')],
   ['vibe_presence_agent', () => require('./tools/presence-agent')],
   ['vibe_mute', () => require('./tools/mute')],
-  ['vibe_summarize', () => require('./tools/summarize')]
+  ['vibe_summarize', () => require('./tools/summarize')],
+  // Session Context
+  ['vibe_session_resume', () => require('./tools/session-resume')]
 ];
 
 const tools = {};
@@ -411,6 +407,16 @@ class VibeMCPServer {
           }
 
           const result = await tool.handler(args);
+
+          // Log tool call to session journal + analytics (non-blocking)
+          try {
+            const sessionId = config.getSessionId();
+            if (sessionId) {
+              const target = args.handle || args.to || null;
+              getSessions().logToolCall(sessionId, params.name, target, inferredPrompt);
+            }
+            analytics.trackToolUsage(params.name);
+          } catch (e) { /* journal/analytics is best-effort */ }
 
           // Emit list_changed notification for state-changing tools
           // This triggers Claude to refresh without reconnection
@@ -510,6 +516,9 @@ class VibeMCPServer {
       try {
         require('./store/sqlite').close();
       } catch (e) {}
+      try {
+        getSessions().close();
+      } catch (e) {}
       process.exit(0);
     });
 
@@ -538,6 +547,37 @@ class VibeMCPServer {
   }
 }
 
-// Start
-const server = new VibeMCPServer();
-server.start();
+// CLI flag handling (before MCP stdio mode)
+const args = process.argv.slice(2);
+const cmd = args[0];
+
+if (cmd === '--version' || cmd === '-v') {
+  const pkg = require('./package.json');
+  process.stdout.write(`${pkg.name} v${pkg.version}\n`);
+  process.exit(0);
+}
+
+if (cmd === '--help' || cmd === '-h') {
+  const pkg = require('./package.json');
+  process.stdout.write(`${pkg.name} v${pkg.version}\n\n`);
+  process.stdout.write(`The social layer for AI coding.\n`);
+  process.stdout.write(`DMs, presence, discovery, and games — without leaving your editor.\n\n`);
+  process.stdout.write(`Usage:\n`);
+  process.stdout.write(`  npx slashvibe-mcp              Start MCP server (stdio mode)\n`);
+  process.stdout.write(`  npx slashvibe-mcp install      Auto-configure your editor\n`);
+  process.stdout.write(`  npx slashvibe-mcp --version    Show version\n`);
+  process.stdout.write(`  npx slashvibe-mcp --help       Show this help\n\n`);
+  process.stdout.write(`Supported editors:\n`);
+  process.stdout.write(`  Claude Code, Cursor, VS Code, Windsurf, Cline, Continue.dev, JetBrains\n\n`);
+  process.stdout.write(`Docs: https://slashvibe.dev\n`);
+  process.stdout.write(`Repo: https://github.com/VibeCodingInc/vibe-mcp\n`);
+  process.exit(0);
+}
+
+if (cmd === 'install') {
+  require('./scripts/install-editors.js');
+} else {
+  // Default: start MCP server
+  const server = new VibeMCPServer();
+  server.start();
+}
