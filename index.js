@@ -362,6 +362,12 @@ class VibeMCPServer {
   async handleRequest(request) {
     const { method, params, id } = request;
 
+    // Don't respond to notifications (requests without id)
+    // JSON-RPC notifications are fire-and-forget
+    if (id === undefined || id === null) {
+      return null;
+    }
+
     switch (method) {
       case 'initialize': {
         // Detect MCP Apps support from client capabilities
