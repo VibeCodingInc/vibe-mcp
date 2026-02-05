@@ -110,7 +110,9 @@
       "Bash(npm pack:*)",
       "Bash(mcp-publisher:*)",
       "Bash(npm version:*)",
-      "WebFetch(domain:cursor.directory)"
+      "WebFetch(domain:cursor.directory)",
+      "Bash(git restore:*)",
+      "Bash(npm publish:*)"
     ]
   }
 }
