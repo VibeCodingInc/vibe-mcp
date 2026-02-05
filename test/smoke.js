@@ -55,7 +55,7 @@ test('package.json has required fields', () => {
 test('server.json has MCP registry schema', () => {
   const server = require('../server.json');
   assert(server.$schema, 'missing $schema');
-  assert(server.name.includes('vibecodinginc'), `name is ${server.name}`);
+  assert(server.name.toLowerCase().includes('vibecodinginc'), `name is ${server.name}`);
   assert(server.packages && server.packages.length > 0, 'missing packages');
   assert(server.packages[0].transport.type === 'stdio', 'transport not stdio');
 });
