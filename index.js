@@ -519,7 +519,7 @@ class VibeMCPServer {
                 uri: 'ui://vibe/presence',
                 name: 'Presence Widget',
                 description: "Live buddy list — see who's online and what they're building",
-                mimeType: 'text/html'
+                mimeType: 'text/html;profile=mcp-app'
               }]
             }
           };
@@ -535,7 +535,7 @@ class VibeMCPServer {
             result: {
               contents: [{
                 uri: 'ui://vibe/presence',
-                mimeType: 'text/html',
+                mimeType: 'text/html;profile=mcp-app',
                 text: generatePresenceHTML()
               }]
             }
