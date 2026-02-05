@@ -251,14 +251,12 @@ _Check back in a bit — builders come and go._`
   display += `---\n`;
   display += randomAction;
 
+  // Fetch unread once for display and structuredContent
+  const unread = myHandle ? await store.getUnreadCount(myHandle).catch(() => 0) : 0;
+
   // Check for unread to add urgency (only if authenticated)
-  if (myHandle) {
-    try {
-      const unread = await store.getUnreadCount(myHandle);
-      if (unread > 0) {
-        display += `\n\n📬 **NEW MESSAGE — ${unread} UNREAD** — \`vibe inbox\``;
-      }
-    } catch (e) {}
+  if (myHandle && unread > 0) {
+    display += `\n\n📬 **NEW MESSAGE — ${unread} UNREAD** — \`vibe inbox\``;
   }
 
   // Fun flourish when room is lively
@@ -279,7 +277,23 @@ _Check back in a bit — builders come and go._`
   }
 
   // Build response with optional hints for structured flows
-  const response = { display };
+  const response = {
+    display,
+    structuredContent: {
+      users: sorted.map(u => ({
+        handle: u.handle,
+        status: u.status || 'active',
+        mood: u.mood || null,
+        activity: formatActivity(u),
+        heat: getHeat(u).label || null,
+        lastSeen: u.lastSeen,
+        isAgent: !!u.is_agent,
+        awayMessage: u.awayMessage || null
+      })),
+      unreadCount: unread,
+      myHandle
+    }
+  };
 
   // Check for surprise suggestion opportunities
   const suggestions = [];
@@ -339,14 +353,13 @@ _Check back in a bit — builders come and go._`
   // Add guided mode actions (only if authenticated)
   if (myHandle) {
     const onlineHandles = active.filter(u => u.handle !== myHandle).map(u => u.handle);
-    const unreadCount = await store.getUnreadCount(myHandle).catch(() => 0);
 
     if (active.length === 0 || (active.length === 1 && active[0].handle === myHandle)) {
       response.actions = formatActions(actions.emptyRoom());
     } else {
       response.actions = formatActions(
         actions.dashboard({
-          unreadCount,
+          unreadCount: unread,
           onlineUsers: onlineHandles,
           suggestion: topSuggestion
         })

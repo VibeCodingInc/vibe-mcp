@@ -13,6 +13,7 @@ const prompts = require('./prompts');
 const NotificationEmitter = require('./notification-emitter');
 const getSessions = require('./store/sessions');
 const analytics = require('./analytics');
+const { generatePresenceHTML } = require('./apps/presence');
 
 /**
  * MCP Tool Safety Annotations
@@ -67,6 +68,7 @@ const TOOL_ANNOTATIONS = {
   vibe_notifications: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_presence_agent: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   vibe_session_resume: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  vibe_presence_data: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
 
   // ── Destructive tools ─────────────────────────────────────────
   vibe_forget: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
@@ -314,7 +316,9 @@ const toolEntries = [
   ['vibe_mute', () => require('./tools/mute')],
   ['vibe_summarize', () => require('./tools/summarize')],
   // Session Context
-  ['vibe_session_resume', () => require('./tools/session-resume')]
+  ['vibe_session_resume', () => require('./tools/session-resume')],
+  // MCP Apps
+  ['vibe_presence_data', () => require('./tools/presence-data')]
 ];
 
 const tools = {};
@@ -333,6 +337,9 @@ class VibeMCPServer {
 
     // Make notifier globally accessible for tools and store layer
     global.vibeNotifier = this.notifier;
+
+    // MCP Apps capability — set during initialize handshake
+    this.clientSupportsApps = false;
 
     // Start presence heartbeat
     presence.start();
@@ -356,13 +363,23 @@ class VibeMCPServer {
     const { method, params, id } = request;
 
     switch (method) {
-      case 'initialize':
+      case 'initialize': {
+        // Detect MCP Apps support from client capabilities
+        const clientCaps = params?.capabilities || {};
+        const uiExt = clientCaps.extensions?.['io.modelcontextprotocol/ui'];
+        this.clientSupportsApps = !!uiExt;
+
+        const serverCaps = { tools: {} };
+        if (this.clientSupportsApps) {
+          serverCaps.resources = {};
+        }
+
         return {
           jsonrpc: '2.0',
           id,
           result: {
             protocolVersion: '2024-11-05',
-            capabilities: { tools: {} },
+            capabilities: serverCaps,
             serverInfo: {
               name: 'vibe',
               version: '1.0.0',
@@ -370,16 +387,24 @@ class VibeMCPServer {
             }
           }
         };
+      }
 
       case 'tools/list':
         return {
           jsonrpc: '2.0',
           id,
           result: {
-            tools: Object.values(tools).map(t => ({
-              ...t.definition,
-              annotations: TOOL_ANNOTATIONS[t.definition.name] || DEFAULT_ANNOTATIONS
-            }))
+            tools: Object.values(tools).map(t => {
+              const def = {
+                ...t.definition,
+                annotations: TOOL_ANNOTATIONS[t.definition.name] || DEFAULT_ANNOTATIONS
+              };
+              // Link vibe_who to the presence widget when client supports MCP Apps
+              if (this.clientSupportsApps && t.definition.name === 'vibe_who') {
+                def._meta = { ...(def._meta || {}), ui: { resourceUri: 'ui://vibe/presence' } };
+              }
+              return def;
+            })
           }
         };
 
@@ -477,6 +502,45 @@ class VibeMCPServer {
             error: { code: -32000, message: e.message }
           };
         }
+
+      case 'resources/list':
+        if (this.clientSupportsApps) {
+          return {
+            jsonrpc: '2.0',
+            id,
+            result: {
+              resources: [{
+                uri: 'ui://vibe/presence',
+                name: 'Presence Widget',
+                description: "Live buddy list — see who's online and what they're building",
+                mimeType: 'text/html'
+              }]
+            }
+          };
+        }
+        return { jsonrpc: '2.0', id, result: { resources: [] } };
+
+      case 'resources/read': {
+        const uri = params?.uri;
+        if (uri === 'ui://vibe/presence') {
+          return {
+            jsonrpc: '2.0',
+            id,
+            result: {
+              contents: [{
+                uri: 'ui://vibe/presence',
+                mimeType: 'text/html',
+                text: generatePresenceHTML()
+              }]
+            }
+          };
+        }
+        return {
+          jsonrpc: '2.0',
+          id,
+          error: { code: -32602, message: `Unknown resource: ${uri}` }
+        };
+      }
 
       default:
         return {
