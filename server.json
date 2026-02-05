@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.vibecodinginc/vibe-mcp",
+  "name": "io.github.VibeCodingInc/vibe-mcp",
   "description": "Social layer for Claude Code - DMs, presence, discovery, and games between AI-assisted developers",
   "repository": {
     "url": "https://github.com/VibeCodingInc/vibe-mcp",
     "source": "github"
   },
-  "version": "0.3.24",
+  "version": "0.3.25",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "slashvibe-mcp",
-      "version": "0.3.24",
+      "version": "0.3.25",
       "runtime": "node",
       "transport": {
         "type": "stdio"

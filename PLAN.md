@@ -10,7 +10,8 @@ Slack is human-to-human async. GitHub is artifact-centric. /vibe is presence + a
 
 ## Current State (Feb 2026)
 
-- 42 registered tools (stripped from 44 — games and tag suggestions removed)
+- 43 registered tools (42 core + vibe_presence_data for MCP Apps)
+- **MCP Apps presence widget LIVE** — first social UI in MCP ecosystem
 - Presence, messaging, sessions, memory, discovery, artifacts, file coordination
 - SQLite session journal (durable, resumable)
 - 8 bridge integrations (Discord, Telegram, Farcaster, WhatsApp, X)
@@ -18,7 +19,7 @@ Slack is human-to-human async. GitHub is artifact-centric. /vibe is presence + a
 - Published on npm (0.3.24), Glama, Smithery
 - 7-editor support (Claude Code, Cursor, VS Code, Windsurf, Cline, Continue.dev, JetBrains)
 - Universal installer: `npx slashvibe-mcp install`
-- 496 tests passing
+- 531 tests passing
 
 **No direct competitors.** Closest is Slack MCP (workplace, not dev-social). Category is uncontested.
 
@@ -58,23 +59,19 @@ Slack is human-to-human async. GitHub is artifact-centric. /vibe is presence + a
 
 **This is the bet.** MCP Apps (Jan 2026 spec) let servers render interactive UI directly in chat. VS Code Insiders supports it. Nobody has built social UI with it yet.
 
-### B1. Presence Widget (the keystone)
+### B1. Presence Widget (the keystone) ✅ SHIPPED
 
-**Ship this first. If you ship one thing from Phase B, ship this.**
+**Shipped Feb 5, 2026.** First social UI in MCP ecosystem.
 
-A live buddy list that renders inline in chat. Who's online, what they're building, unread count. Updates on every response.
+A live buddy list that renders inline in chat. Who's online, what they're building, unread count. Auto-refreshes every 30s.
 
-Why this matters:
-- Creates ambient awareness (you *see* people, not just query for them)
-- Reframes /vibe from "commands" to "environment"
-- Glanceable — no interaction required to get value
-- If people see other builders while coding, behavior changes immediately
-
-Implementation:
-- MCP Apps resource that returns presence HTML/React component
-- Heartbeat-driven updates (every response refresh)
-- Compact layout: handles + status indicators + unread badge
-- Fall back to text for clients without Apps support
+Implementation (committed):
+- `apps/presence.js` — self-contained HTML widget (dark theme, no build step)
+- `apps/protocol.js` — postMessage JSON-RPC 2.0 transport
+- `tools/presence-data.js` — app-only tool (visibility: ['app'])
+- `ui://vibe/presence` resource with `text/html;profile=mcp-app` MIME type
+- Falls back to text for clients without Apps support
+- 35 new tests (531 total)
 
 ### B2. Presence Widget v2 (polish)
 
@@ -200,17 +197,17 @@ Kept tictactoe as a latent capability in the codebase. The wink stays, but it do
 
 | # | What | Why | When |
 |---|------|-----|------|
+| ✅ | Presence widget (MCP Apps) | Category-defining | **DONE** |
 | 1 | MCP Registry publish | Table stakes | Now |
 | 2 | Cursor directory | 250K devs | Now |
 | 3 | All marketplaces | Legitimacy | This week |
 | 4 | README GIF | Conversion | This week |
-| 5 | Presence widget (MCP Apps) | Category-defining | Next sprint |
-| 6 | Presence widget v2 | Ambient signals | Next sprint |
-| 7 | Shared sessions | Network effect | Next |
-| 8 | Cross-editor notifications | Retention | Next |
-| 9 | Session context card | Retention | Next |
-| 10 | Portfolio pages | Lock-in | Later |
-| 11 | Third-party presence API | Endgame | Later |
+| 5 | Presence widget v2 | Ambient signals | Next sprint |
+| 6 | Shared sessions | Network effect | Next |
+| 7 | Cross-editor notifications | Retention | Next |
+| 8 | Session context card | Retention | Next |
+| 9 | Portfolio pages | Lock-in | Later |
+| 10 | Third-party presence API | Endgame | Later |
 
 ---
 

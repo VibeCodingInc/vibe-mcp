@@ -10,6 +10,8 @@
 
 The presence layer for AI-mediated work. See who's building, message them, share context — without leaving your editor.
 
+**New:** Live buddy list widget renders inline in Claude Desktop and VS Code via [MCP Apps](https://modelcontextprotocol.io/docs/extensions/apps).
+
 Works with Claude Code, Cursor, VS Code, Windsurf, Cline, Continue.dev, JetBrains, and any MCP-compatible client.
 
 ## Install

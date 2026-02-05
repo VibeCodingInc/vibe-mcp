@@ -1,6 +1,6 @@
 {
-  "version": "0.3.24",
-  "updated": "2026-02-03",
+  "version": "0.3.25",
+  "updated": "2026-02-05",
   "changelog": "Session journal, session resume, universal installer, MCP registry prep",
   "features": [
     "vibe_session_resume - Load prior session context from local journal",

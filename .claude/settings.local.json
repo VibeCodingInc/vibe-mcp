@@ -107,7 +107,10 @@
       "Bash(npx vercel ls)",
       "Bash(npx vercel inspect:*)",
       "Bash(lsof:*)",
-      "Bash(npm pack:*)"
+      "Bash(npm pack:*)",
+      "Bash(mcp-publisher:*)",
+      "Bash(npm version:*)",
+      "WebFetch(domain:cursor.directory)"
     ]
   }
 }
