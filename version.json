@@ -1,13 +1,12 @@
 {
-  "version": "0.3.26",
-  "updated": "2026-02-05",
-  "changelog": "Session journal, session resume, universal installer, MCP registry prep",
+  "version": "0.3.29",
+  "updated": "2026-02-06",
+  "changelog": "V2 presence API, source tracking, lib/ included in package",
   "features": [
-    "vibe_session_resume - Load prior session context from local journal",
-    "Session journal - durable SQLite-backed activity tracking",
-    "npx slashvibe-mcp install - Universal multi-editor installer",
-    "CLI --version and --help flags",
-    "Smithery marketplace listing"
+    "Heartbeat now sends source:'mcp' for multi-client presence tracking",
+    "Switched to v2 presence API with flattened context fields",
+    "lib/tech-detection.js included in npm package",
+    "getActiveUsers uses v2 format with handle field"
   ],
   "breaking": false,
   "updateUrl": "https://www.slashvibe.dev/api/version"

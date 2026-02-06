@@ -151,27 +151,24 @@ async function registerSession(sessionId, handle, building = null, publicKey = n
 
 async function heartbeat(handle, one_liner, context = null, source = null) {
   try {
-    // Token-based auth: server extracts handle from token
-    // Only need to send workingOn and context
-    const payload = { workingOn: one_liner };
+    const payload = { workingOn: one_liner, source: source || 'mcp' };
 
     // Fallback: if no token, send username (legacy support)
     if (!config.getAuthToken()) {
       payload.username = handle;
     }
 
-    // Add context (mood, file, etc.) if provided
+    // Add context fields — flatten for v2 API
     if (context) {
-      payload.context = context;
+      if (context.mood) payload.mood = context.mood;
+      if (context.file) payload.file = context.file;
+      if (context.project) payload.project = context.project;
+      if (context.awayMessage) payload.awayMessage = context.awayMessage;
+      if (context.sessionId) payload.sessionId = context.sessionId;
+      if (context.availableFor !== undefined) payload.availableFor = context.availableFor;
     }
 
-    // Phase 1 Presence Bridge: track which surface is reporting
-    // See VIBE_CLAWDBOT_INTEGRATION_SPEC.md
-    if (source) {
-      payload.source = source;
-    }
-
-    await request('POST', '/api/presence', payload);
+    await request('POST', '/api/v2/presence', payload);
   } catch (e) {
     console.error('Heartbeat failed:', e.message);
   }
@@ -204,11 +201,11 @@ async function getTypingUsers(forHandle) {
 
 async function getActiveUsers() {
   try {
-    const result = await request('GET', '/api/presence');
+    const result = await request('GET', '/api/v2/presence');
     // Combine active and away users
     const users = [...(result.active || []), ...(result.away || [])];
     return users.map(u => ({
-      handle: u.username,
+      handle: u.handle || u.username,
       one_liner: u.workingOn,
       lastSeen: new Date(u.lastSeen).getTime(),
       firstSeen: u.firstSeen ? new Date(u.firstSeen).getTime() : null,

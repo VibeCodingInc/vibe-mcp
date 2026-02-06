@@ -1,6 +1,6 @@
 {
   "name": "slashvibe-mcp",
-  "version": "0.3.26",
+  "version": "0.3.29",
   "mcpName": "io.github.VibeCodingInc/vibe-mcp",
   "description": "Social MCP server - DMs, presence, discovery, and games for AI-assisted developers. Works with Claude Code, Cursor, VS Code, Windsurf, and any MCP client.",
   "main": "index.js",
@@ -56,6 +56,7 @@
     "protocol/",
     "intelligence/",
     "bridges/",
+    "lib/",
     "scripts/",
     "README.md"
   ],
