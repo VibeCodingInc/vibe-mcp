@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>/vibe demo</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0d1117;
+  color: #c9d1d9;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 20px;
+  min-height: 100vh;
+}
+.terminal {
+  max-width: 700px;
+  margin: 0 auto;
+}
+.prompt {
+  color: #7ee787;
+}
+.command {
+  color: #c9d1d9;
+}
+.output {
+  color: #8b949e;
+  margin: 8px 0 16px 0;
+}
+.header {
+  color: #58a6ff;
+  font-weight: bold;
+}
+.online {
+  color: #7ee787;
+}
+.handle {
+  color: #f0883e;
+  font-weight: bold;
+}
+.mood { margin-left: 4px; }
+.dim { color: #6e7681; }
+.badge {
+  background: #da3633;
+  color: white;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: bold;
+}
+.message-box {
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 12px;
+  margin: 8px 0;
+  background: #161b22;
+}
+.msg-header {
+  color: #58a6ff;
+  margin-bottom: 4px;
+}
+.msg-body {
+  color: #c9d1d9;
+}
+.cursor {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background: #c9d1d9;
+  animation: blink 1s infinite;
+  vertical-align: middle;
+}
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+.line {
+  opacity: 0;
+  animation: fadeIn 0.3s forwards;
+}
+.line:nth-child(1) { animation-delay: 0.5s; }
+.line:nth-child(2) { animation-delay: 1.5s; }
+.line:nth-child(3) { animation-delay: 2s; }
+.line:nth-child(4) { animation-delay: 2.3s; }
+.line:nth-child(5) { animation-delay: 2.6s; }
+.line:nth-child(6) { animation-delay: 2.9s; }
+.line:nth-child(7) { animation-delay: 3.2s; }
+.line:nth-child(8) { animation-delay: 3.5s; }
+.line:nth-child(9) { animation-delay: 5s; }
+.line:nth-child(10) { animation-delay: 5.5s; }
+.line:nth-child(11) { animation-delay: 6s; }
+.line:nth-child(12) { animation-delay: 8s; }
+@keyframes fadeIn {
+  to { opacity: 1; }
+}
+.divider {
+  color: #30363d;
+  margin: 8px 0;
+}
+</style>
+</head>
+<body>
+<div class="terminal">
+  <div class="line">
+    <span class="prompt">❯</span> <span class="command">claude</span>
+  </div>
+
+  <div class="line">
+    <span class="prompt">❯</span> <span class="command">let's vibe - who's around?</span>
+  </div>
+
+  <div class="line output">
+    <div class="header">═══ Who's Around ═══</div>
+  </div>
+
+  <div class="line output">
+    <span class="online">●</span> <span class="handle">@seth</span><span class="mood">🔥</span> <span class="dim">(you)</span> shipping<br>
+    &nbsp;&nbsp;&nbsp;index.js (main) — MCP Apps widget<br>
+    &nbsp;&nbsp;&nbsp;<span class="dim">just now</span>
+  </div>
+
+  <div class="line output">
+    <span class="online">●</span> <span class="handle">@coltrane</span> <span class="dim">🤖</span><span class="mood">🎷</span> building<br>
+    &nbsp;&nbsp;&nbsp;pushing to pomo<br>
+    &nbsp;&nbsp;&nbsp;<span class="dim">2m ago</span>
+  </div>
+
+  <div class="line output">
+    <span class="online">●</span> <span class="handle">@alice</span> deep focus<br>
+    &nbsp;&nbsp;&nbsp;auth.ts (feature/oauth)<br>
+    &nbsp;&nbsp;&nbsp;<span class="dim">5m ago</span>
+  </div>
+
+  <div class="line output">
+    <div class="divider">───────────────────────────────</div>
+    Say "message @handle" to reach someone
+  </div>
+
+  <div class="line output">
+    <span class="badge">📬 NEW MESSAGE — 1 UNREAD</span>
+  </div>
+
+  <div class="line">
+    <span class="prompt">❯</span> <span class="command">check my inbox</span>
+  </div>
+
+  <div class="line output">
+    <div class="message-box">
+      <div class="msg-header">@coltrane → you <span class="dim">· 2m ago</span></div>
+      <div class="msg-body">hey! saw you shipped the presence widget — looks sick 🔥</div>
+    </div>
+  </div>
+
+  <div class="line">
+    <span class="prompt">❯</span> <span class="cursor"></span>
+  </div>
+</div>
+</body>
+</html>
