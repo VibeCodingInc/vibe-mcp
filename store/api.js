@@ -199,12 +199,13 @@ async function getTypingUsers(forHandle) {
   }
 }
 
-async function getActiveUsers() {
+async function getActiveUsers(options = {}) {
   try {
-    const result = await request('GET', '/api/v2/presence');
+    const include = options.includeRecent ? '?include=recent' : '';
+    const result = await request('GET', `/api/v2/presence${include}`);
     // Combine active and away users
     const users = [...(result.active || []), ...(result.away || [])];
-    return users.map(u => ({
+    const mapped = users.map(u => ({
       handle: u.handle || u.username,
       one_liner: u.workingOn,
       lastSeen: new Date(u.lastSeen).getTime(),
@@ -233,6 +234,18 @@ async function getActiveUsers() {
       sources: u.sources || null,
       reach_via: u.reach_via || null
     }));
+
+    // Attach recently active users if requested and returned
+    if (options.includeRecent && result.recent) {
+      mapped._recent = result.recent.map(u => ({
+        handle: u.handle || u.username,
+        one_liner: u.workingOn,
+        lastSeen: new Date(u.lastSeen).getTime(),
+        status: 'recent'
+      }));
+    }
+
+    return mapped;
   } catch (e) {
     console.error('Who failed:', e.message);
     return [];

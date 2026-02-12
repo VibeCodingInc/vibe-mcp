@@ -95,13 +95,14 @@ async function handler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
 
-  const rawUsers = await store.getActiveUsers();
+  const rawUsers = await store.getActiveUsers({ includeRecent: true });
+  const recentUsers = rawUsers._recent || [];
   const users = enhanceUsersWithInference(rawUsers);
   const myHandle = config.getHandle();
 
   notify.checkAll(store);
 
-  if (users.length === 0) {
+  if (users.length === 0 && recentUsers.length === 0) {
     return { display: `## Who's Around\n\n_No one's here right now. Check back later._` };
   }
 
@@ -133,6 +134,16 @@ async function handler(args) {
       } else {
         display += `💤 **@${u.handle}**${tag} _(auto-away)_\n`;
       }
+      display += `   _${formatTimeAgo(u.lastSeen)}_\n\n`;
+    }
+  }
+
+  // Recently active (2h-24h window) — so the room never feels empty
+  const recentOthers = recentUsers.filter(u => u.handle !== myHandle);
+  if (recentOthers.length > 0) {
+    display += `---\n\n**Recently Active:**\n`;
+    for (const u of recentOthers.slice(0, 5)) {
+      display += `○ **@${u.handle}** — ${u.one_liner || 'Building something'}\n`;
       display += `   _${formatTimeAgo(u.lastSeen)}_\n\n`;
     }
   }

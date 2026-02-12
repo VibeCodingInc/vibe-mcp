@@ -53,8 +53,9 @@ async function handler(args) {
 
   const myHandle = config.getHandle();
 
-  // Get who's around
-  const users = await store.getActiveUsers();
+  // Get who's around (include recently active so room feels alive)
+  const users = await store.getActiveUsers({ includeRecent: true });
+  const recentUsers = users._recent || [];
   const others = users.filter(u => u.handle !== myHandle);
 
   // Check inbox + trigger notifications
@@ -69,11 +70,22 @@ async function handler(args) {
     }
   } catch (e) {}
 
-  const display = generateWelcomeCard({
+  // Build display: welcome card + activity
+  let display = generateWelcomeCard({
     handle: myHandle,
     onlineCount: others.length,
     unreadCount
   });
+
+  // Show recently active when room is sparse (< 3 online)
+  const recentOthers = recentUsers.filter(u => u.handle !== myHandle);
+  if (others.length < 3 && recentOthers.length > 0) {
+    display += `\n\n**Suggested follows:**`;
+    for (const u of recentOthers.slice(0, 3)) {
+      display += `\n  ○ @${u.handle} — ${u.one_liner || 'Building something'}`;
+    }
+    display += `\n  _Say "follow @handle" to add them_`;
+  }
 
   const response = { display };
 
@@ -82,7 +94,14 @@ async function handler(args) {
   const interesting = others.find(u => {
     return u.lastSeen && Date.now() - u.lastSeen < 5 * 60 * 1000;
   });
-  if (interesting) {
+  if (!interesting && recentOthers.length > 0) {
+    // Suggest a recently active user when nobody's online
+    suggestion = {
+      handle: recentOthers[0].handle,
+      reason: 'recently_active',
+      context: recentOthers[0].one_liner || 'Building something'
+    };
+  } else if (interesting) {
     suggestion = {
       handle: interesting.handle,
       reason: 'active_now',

@@ -49,25 +49,36 @@ async function handler(args) {
   let display = '';
 
   try {
-    // Get active users for all commands
-    const users = await store.getActiveUsers();
+    // Get active users + recently active for richer discovery
+    const users = await store.getActiveUsers({ includeRecent: true });
+    const recentUsers = users._recent || [];
     const others = users.filter(u => u.handle !== myHandle);
+    const recentOthers = recentUsers.filter(u => u.handle !== myHandle);
 
     switch (command) {
       case 'suggest':
       case 'active': {
-        if (others.length === 0) {
+        if (others.length === 0 && recentOthers.length === 0) {
           display = `## Discover
 
-_No one's online right now. Check back later!_`;
+_No one's been active recently. Be the first!_`;
         } else {
-          display = `## People Building Right Now\n\n`;
-          for (const u of others) {
-            display += `**@${u.handle}**\n`;
-            display += `${u.note || u.one_liner || 'Building something'}\n`;
-            display += `_${formatTimeAgo(u.lastSeen)}_\n\n`;
+          if (others.length > 0) {
+            display = `## Online Now\n\n`;
+            for (const u of others) {
+              display += `**@${u.handle}**\n`;
+              display += `${u.note || u.one_liner || 'Building something'}\n`;
+              display += `_${formatTimeAgo(u.lastSeen)}_\n\n`;
+            }
           }
-          display += `Say "message @handle" to connect`;
+          if (recentOthers.length > 0) {
+            display += others.length > 0 ? `---\n\n## Recently Active\n\n` : `## Recently Active\n\n`;
+            for (const u of recentOthers.slice(0, 8)) {
+              display += `○ **@${u.handle}** — ${u.one_liner || 'Building something'}\n`;
+              display += `   _${formatTimeAgo(u.lastSeen)}_\n\n`;
+            }
+          }
+          display += `Say "message @handle" to connect · "follow @handle" to add them`;
         }
         break;
       }
