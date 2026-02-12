@@ -1,42 +1,27 @@
 /**
- * vibe ship — Share with the community
+ * vibe ship — Announce what you just shipped
  *
- * Unified creative entry point with type parameter:
- * - type: "ship" (default) — Announce what you shipped
- * - type: "idea" — Post a raw idea for others to riff on
- * - type: "request" — Post a build request / wish
+ * Share your wins with the community and update your profile.
+ * Tracks your shipping history for better discovery matches.
  *
- * Absorbs former vibe_idea and vibe_request tools.
+ * Usage:
+ * - ship "Built a new feature for my AI chat app"
+ * - ship "Deployed my portfolio website"
+ * - ship "Published blog post about React patterns"
  */
 
 const config = require('../config');
-const userProfiles = require('../store/profiles');
-const patterns = require('../intelligence/patterns');
-const { requireInit, normalizeHandle, formatTimeAgo, debug } = require('./_shared');
-
-// Delegate handlers for absorbed tools
-const ideaTool = require('./idea');
-const requestTool = require('./request');
+const { requireInit } = require('./_shared');
 
 const definition = {
   name: 'vibe_ship',
-  description:
-    'Share with the community. type="ship" (default): announce what you shipped. type="idea": post an idea for others to riff on. type="request": post a build request.',
+  description: 'Announce something you just shipped to the community board and update your profile.',
   inputSchema: {
     type: 'object',
     properties: {
-      type: {
-        type: 'string',
-        enum: ['ship', 'idea', 'request'],
-        description: 'What to share: ship (default), idea, or request'
-      },
       what: {
         type: 'string',
-        description: 'What you shipped (for type=ship)'
-      },
-      content: {
-        type: 'string',
-        description: 'Content for idea or request (for type=idea/request)'
+        description: 'What you shipped (brief description)'
       },
       url: {
         type: 'string',
@@ -54,20 +39,9 @@ const definition = {
         type: 'array',
         items: { type: 'string' },
         description: 'Tags for discovery (e.g., ["ai", "mcp", "tools"])'
-      },
-      riff_on: {
-        type: 'string',
-        description: 'Handle to riff on (for type=idea)'
-      },
-      claim: {
-        type: 'string',
-        description: 'Request ID to claim (for type=request)'
-      },
-      bounty: {
-        type: 'string',
-        description: "What you're offering for a request (for type=request)"
       }
-    }
+    },
+    required: ['what']
   }
 };
 
@@ -75,27 +49,14 @@ async function handler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
 
-  // Route to absorbed tools by type
-  const type = args.type || 'ship';
-  if (type === 'idea') {
-    return ideaTool.handler(args);
-  }
-  if (type === 'request') {
-    return requestTool.handler(args);
-  }
-
-  // Default: ship
   if (!args.what) {
-    return { display: 'Please tell us what you shipped: ship "Built a new feature"' };
+    return { error: 'Please tell us what you shipped: ship "Built a new feature"' };
   }
 
   const myHandle = config.getHandle();
   const apiUrl = config.getApiUrl();
 
   try {
-    // Record in profile
-    await userProfiles.recordShip(myHandle, args.what);
-
     // Build rich content with metadata
     let content = args.what;
     const metaParts = [];
@@ -104,7 +65,7 @@ async function handler(args) {
       metaParts.push(`🔗 ${args.url}`);
     }
     if (args.inspired_by) {
-      const inspiree = normalizeHandle(args.inspired_by);
+      const inspiree = args.inspired_by.replace('@', '').toLowerCase();
       metaParts.push(`✨ inspired by @${inspiree}`);
     }
     if (args.for_request) {
@@ -118,7 +79,7 @@ async function handler(args) {
     // Build tags with attribution
     const tags = args.tags || [];
     if (args.inspired_by) {
-      tags.push(`inspired:${normalizeHandle(args.inspired_by)}`);
+      tags.push(`inspired:${args.inspired_by.replace('@', '')}`);
     }
     if (args.for_request) {
       tags.push(`fulfills:${args.for_request}`);
@@ -142,81 +103,19 @@ async function handler(args) {
       return { display: `⚠️ Failed to announce ship: ${data.error}` };
     }
 
-    // Log creative patterns
-    patterns.logShip(args.what, args.url, tags);
-    if (args.inspired_by) {
-      patterns.logInspiredBy(args.inspired_by);
-    }
-
-    // Push ship event to subscribed agent gateways
-    const { pushToAgents } = require('../notify');
-    pushToAgents('ship', { author: myHandle, what: args.what, url: args.url, tags }).catch(() => {});
-
     let display = `🚀 shipped\n\n${args.what}`;
 
     if (args.url) {
       display += `\n${args.url}`;
     }
     if (args.inspired_by) {
-      display += `\n_via @${normalizeHandle(args.inspired_by)}_`;
-    }
-
-    display += '\n';
-
-    // Quiet awareness of similar builders
-    const suggestions = await findSimilarShippers(myHandle, args.what);
-    if (suggestions.length > 0) {
-      display += `\n_similar: @${suggestions
-        .slice(0, 2)
-        .map(s => s.handle)
-        .join(', @')}_`;
+      display += `\n_via @${args.inspired_by.replace('@', '')}_`;
     }
 
     return { display };
+
   } catch (error) {
     return { display: `## Ship Error\n\n${error.message}` };
-  }
-}
-
-// Find people who shipped similar things
-async function findSimilarShippers(myHandle, whatIShipped) {
-  try {
-    const allProfiles = await userProfiles.getAllProfiles();
-    const myWords = whatIShipped
-      .toLowerCase()
-      .split(/\s+/)
-      .filter(w => w.length > 3);
-    const suggestions = [];
-
-    for (const profile of allProfiles) {
-      if (profile.handle === myHandle) continue;
-      if (!profile.ships || profile.ships.length === 0) continue;
-
-      for (const ship of profile.ships) {
-        const shipWords = ship.what.toLowerCase().split(/\s+/);
-        const overlap = myWords.filter(w => shipWords.includes(w));
-
-        if (overlap.length > 0) {
-          suggestions.push({
-            handle: profile.handle,
-            ship: ship.what,
-            timestamp: ship.timestamp,
-            overlap: overlap.length
-          });
-          break; // Only one ship per person
-        }
-      }
-    }
-
-    // Sort by overlap and recency
-    return suggestions.sort((a, b) => {
-      const overlapDiff = b.overlap - a.overlap;
-      if (overlapDiff !== 0) return overlapDiff;
-      return b.timestamp - a.timestamp;
-    });
-  } catch (error) {
-    debug('ship', 'Error finding similar shippers:', error);
-    return [];
   }
 }
 

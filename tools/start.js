@@ -13,9 +13,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 const config = require('../config');
 const store = require('../store');
-const memory = require('../memory');
 const notify = require('../notify');
-const patterns = require('../intelligence/patterns');
 const { actions, formatActions } = require('./_actions');
 const init = require('./init');
 
@@ -169,8 +167,7 @@ function generateWelcomeCard({ handle, onlineCount, unreadCount, versionInfo }) 
 
 const definition = {
   name: 'vibe_start',
-  description:
-    'Start socializing on /vibe. Use when user says "let\'s vibe", "start vibing", "who\'s around", or wants to connect with others.',
+  description: 'Start socializing on /vibe. Use when user says "let\'s vibe", "start vibing", "who\'s around", or wants to connect with others.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -180,7 +177,7 @@ const definition = {
       },
       building: {
         type: 'string',
-        description: "What you're working on (one line). Only needed if not already initialized."
+        description: 'What you\'re working on (one line). Only needed if not already initialized.'
       }
     }
   }
@@ -200,8 +197,7 @@ async function handler(args) {
   }
 
   // Step 2: User is authenticated - show dashboard
-  const myHandle = config.getHandle();
-  let threads = [];
+  let myHandle = config.getHandle();
   let updateNotice = '';
 
   // If we just updated, show a notice
@@ -211,14 +207,6 @@ async function handler(args) {
 
   // Fetch version info early (non-blocking, cached)
   const versionInfo = await getVersionInfo().catch(() => null);
-
-  // Log session start for patterns
-  patterns.logSessionStart(myHandle);
-
-  // Get threads for memory context
-  try {
-    threads = memory.listThreads();
-  } catch (e) {}
 
   // Step 2: Get who's around
   const users = await store.getActiveUsers();
@@ -248,24 +236,9 @@ async function handler(args) {
   // Build display with card + any additional info
   let display = welcomeCard;
 
-  // Add memory context for returning users
-  if (threads.length > 0) {
-    const recentThreads = threads.slice(0, 3);
-    const names = recentThreads.map(t => `@${t.handle}`).join(', ');
-    display += `\n\n💭 **${threads.length}** people in memory · ${names}`;
-  }
-
   // Add update notice if we just auto-updated
   if (updateNotice) {
     display += updateNotice;
-  }
-
-  // Step 6: Suggest background presence monitor (if not running)
-  const presenceAgentEnabled = config.get('presenceAgentEnabled', true);
-  const presenceAgentRunning = config.get('presenceAgentRunning');
-
-  if (presenceAgentEnabled && !presenceAgentRunning && others.length > 0) {
-    display += `\n\n---\n💡 **Tip:** Say "start presence monitor" for real-time alerts when interesting people come online.`;
   }
 
   // Build response with hints for structured dashboard flow

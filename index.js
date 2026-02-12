@@ -11,9 +11,6 @@ const config = require('./config');
 const store = require('./store');
 const prompts = require('./prompts');
 const NotificationEmitter = require('./notification-emitter');
-const getSessions = require('./store/sessions');
-const analytics = require('./analytics');
-const { generatePresenceHTML } = require('./apps/presence');
 
 /**
  * MCP Tool Safety Annotations
@@ -28,61 +25,23 @@ const { generatePresenceHTML } = require('./apps/presence');
  * Spec: https://modelcontextprotocol.io/docs/concepts/tools
  */
 const TOOL_ANNOTATIONS = {
-  // ── Read-only tools ────────────────────────────────────────────
-  vibe_who: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_inbox: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_recall: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  vibe_help: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  vibe_feed: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_view_artifact: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_doctor: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_reservations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_discover: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-
-  // ── Write tools (non-destructive) ─────────────────────────────
-  vibe_start: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_init: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_ping: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_follow: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_unfollow: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_watch: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_live: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_react: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_dm: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_open: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_status: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_context: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_summarize: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  vibe_away: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_back: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_handoff: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_reserve: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_remember: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  vibe_report: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_invite: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_ship: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_session_save: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_session_fork: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_create_artifact: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_settings: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  vibe_notifications: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_presence_agent: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  vibe_session_resume: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  vibe_presence_data: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-
-  // ── Destructive tools ─────────────────────────────────────────
-  vibe_forget: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  vibe_release: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-  vibe_bye: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-  vibe_mute: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
-  vibe_update: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true }
+  // ── GTM: 9 tools (8 core + init) ────────────────────────────
+  vibe_start:    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_init:     { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_who:      { readOnlyHint: true,  destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_dm:       { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_inbox:    { readOnlyHint: true,  destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_status:   { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_ship:     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  vibe_discover: { readOnlyHint: true,  destructiveHint: false, idempotentHint: true,  openWorldHint: true },
+  vibe_help:     { readOnlyHint: true,  destructiveHint: false, idempotentHint: true,  openWorldHint: false },
 };
 
 // Default annotations for any tool not explicitly mapped
 const DEFAULT_ANNOTATIONS = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
 
 // Tools that shouldn't show presence footer (would be redundant/noisy)
-const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_update', 'vibe_settings', 'vibe_notifications'];
+const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_help'];
 
 // Infer user prompt from tool arguments (for pattern logging)
 function inferPromptFromArgs(toolName, args) {
@@ -94,62 +53,45 @@ function inferPromptFromArgs(toolName, args) {
   const reaction = args.reaction || '';
 
   switch (action) {
-    case 'start':
-      return 'start vibing';
-    case 'who':
-      return 'who is online';
-    case 'ping':
-      return `ping ${handle} ${note}`.trim();
-    case 'react':
-      return `react ${reaction} to ${handle}`.trim();
-    case 'dm':
-      return `message ${handle} ${message}`.trim();
-    case 'inbox':
-      return 'check inbox';
-    case 'open':
-      return `open thread with ${handle}`;
-    case 'status':
-      return `set status to ${mood}`;
-    case 'context':
-      return 'share context';
-    case 'summarize':
-      return 'summarize session';
-    case 'bye':
-      return 'end session';
-    case 'remember':
-      return `remember about ${handle}`;
-    case 'recall':
-      return `recall ${handle}`;
-    case 'forget':
-      return `forget ${handle}`;
-    case 'invite':
-      return 'generate invite';
-    case 'handoff':
-      return `handoff task to ${handle}`;
-    case 'reserve':
-      return args.paths ? `reserve ${args.paths.join(', ')}` : 'reserve files';
-    case 'release':
-      return `release ${args.reservation_id || 'reservation'}`;
-    case 'reservations':
-      return 'list reservations';
-    case 'away':
-      return args.message ? `set away: "${args.message}"` : 'go away';
-    case 'back':
-      return 'come back';
-    case 'discover':
-      return `discover ${args.command || 'suggest'}`;
-    case 'ship':
-      return `ship ${args.type || ''} ${args.what || ''}`.trim();
-    case 'session_save':
-      return `save session "${args.title || ''}"`.trim();
-    case 'session_fork':
-      return `fork session ${args.session_id || ''}`.trim();
-    case 'create_artifact':
-      return `create ${args.template || 'artifact'}: ${args.title || 'untitled'}`;
-    case 'view_artifact':
-      return args.slug ? `view artifact ${args.slug}` : `list ${args.list || 'artifacts'}`;
-    default:
-      return `${action} ${handle}`.trim() || null;
+    case 'start': return 'start vibing';
+    case 'who': return 'who is online';
+    case 'ping': return `ping ${handle} ${note}`.trim();
+    case 'react': return `react ${reaction} to ${handle}`.trim();
+    case 'dm': return `message ${handle} ${message}`.trim();
+    case 'inbox': return 'check inbox';
+    case 'open': return `open thread with ${handle}`;
+    case 'status': return `set status to ${mood}`;
+    case 'context': return 'share context';
+    case 'summarize': return 'summarize session';
+    case 'bye': return 'end session';
+    case 'remember': return `remember about ${handle}`;
+    case 'recall': return `recall ${handle}`;
+    case 'forget': return `forget ${handle}`;
+    case 'board': return args.content ? 'post to board' : 'view board';
+    case 'observe': return args.content ? 'record observation' : 'view observations';
+    case 'invite': return 'generate invite';
+    case 'echo': return 'send feedback';
+    case 'x_mentions': return 'check x mentions';
+    case 'x_reply': return 'reply on x';
+    case 'handoff': return `handoff task to ${handle}`;
+    case 'reserve': return args.paths ? `reserve ${args.paths.join(', ')}` : 'reserve files';
+    case 'release': return `release ${args.reservation_id || 'reservation'}`;
+    case 'reservations': return 'list reservations';
+    case 'solo_game': return `play ${args.game || 'game'}`;
+    case 'tictactoe': return `play tic-tac-toe ${args.difficulty || ''}`.trim();
+    case 'wordassociation': return args.word ? `word association: ${args.word}` : 'play word association';
+    case 'multiplayer_game': return `multiplayer ${args.game || 'game'}`;
+    case 'drawing': return args.action ? `drawing ${args.action}` : 'collaborative drawing';
+    case 'crossword': return `crossword ${args.action || 'daily'}`;
+    case 'away': return args.message ? `set away: "${args.message}"` : 'go away';
+    case 'back': return 'come back';
+    case 'discover': return `discover ${args.command || 'suggest'}`;
+    case 'suggest_tags': return `suggest tags ${args.command || 'suggest'}`;
+    case 'skills_exchange': return `skills exchange ${args.command || 'browse'}`;
+    case 'workshop_buddy': return `workshop buddy ${args.command || 'find'}`;
+    case 'create_artifact': return `create ${args.template || 'artifact'}: ${args.title || 'untitled'}`;
+    case 'view_artifact': return args.slug ? `view artifact ${args.slug}` : `list ${args.list || 'artifacts'}`;
+    default: return `${action} ${handle}`.trim() || null;
   }
 }
 
@@ -250,82 +192,18 @@ async function getPresenceFooter() {
   }
 }
 
-// Safe tool loader — one bad import doesn't crash the server
-function loadTool(name, loader) {
-  try {
-    return loader();
-  } catch (e) {
-    process.stderr.write(`[vibe] Failed to load ${name}: ${e.message}\n`);
-    return null;
-  }
-}
-
-// Load all tools, skipping any that fail
-const toolEntries = [
-  // Core — Identity & Session
-  ['vibe_start', () => require('./tools/start')],
-  ['vibe_init', () => require('./tools/init')],
-  ['vibe_bye', () => require('./tools/bye')],
-  // Core — Messaging
-  ['vibe_dm', () => require('./tools/dm')],
-  ['vibe_inbox', () => require('./tools/inbox')],
-  ['vibe_ping', () => require('./tools/ping')],
-  ['vibe_follow', () => require('./tools/follow').follow],
-  ['vibe_unfollow', () => require('./tools/follow').unfollow],
-  // Watch / Live
-  ['vibe_watch', () => require('./tools/watch').watch],
-  ['vibe_live', () => require('./tools/watch').live],
-  ['vibe_react', () => require('./tools/react')],
-  ['vibe_open', () => require('./tools/open')],
-  // Presence
-  ['vibe_who', () => require('./tools/who')],
-  ['vibe_status', () => require('./tools/status')],
-  ['vibe_away', () => require('./tools/away')],
-  ['vibe_back', () => require('./tools/back')],
-  // Creative
-  ['vibe_ship', () => require('./tools/ship')],
-  ['vibe_session_save', () => require('./tools/session-save')],
-  ['vibe_session_fork', () => require('./tools/session-fork')],
-  ['vibe_feed', () => require('./tools/feed')],
-  ['vibe_context', () => require('./tools/context')],
-  // Discovery
-  ['vibe_discover', () => require('./tools/discover')],
-  ['vibe_invite', () => require('./tools/invite')],
-  // Memory
-  ['vibe_remember', () => require('./tools/remember')],
-  ['vibe_recall', () => require('./tools/recall')],
-  ['vibe_forget', () => require('./tools/forget')],
-  // Artifacts
-  ['vibe_create_artifact', () => require('./tools/artifact-create')],
-  ['vibe_view_artifact', () => require('./tools/artifact-view')],
-  // File Coordination
-  ['vibe_reserve', () => require('./tools/reserve')],
-  ['vibe_release', () => require('./tools/release')],
-  ['vibe_reservations', () => require('./tools/reservations')],
-  // Infrastructure
-  ['vibe_handoff', () => require('./tools/handoff')],
-  ['vibe_report', () => require('./tools/report')],
-  // Diagnostics
-  ['vibe_help', () => require('./tools/help')],
-  ['vibe_doctor', () => require('./tools/doctor')],
-  ['vibe_update', () => require('./tools/update')],
-  // Settings
-  ['vibe_settings', () => require('./tools/settings')],
-  ['vibe_notifications', () => require('./tools/notifications')],
-  ['vibe_presence_agent', () => require('./tools/presence-agent')],
-  ['vibe_mute', () => require('./tools/mute')],
-  ['vibe_summarize', () => require('./tools/summarize')],
-  // Session Context
-  ['vibe_session_resume', () => require('./tools/session-resume')],
-  // MCP Apps
-  ['vibe_presence_data', () => require('./tools/presence-data')]
-];
-
-const tools = {};
-for (const [name, loader] of toolEntries) {
-  const tool = loadTool(name, loader);
-  if (tool) tools[name] = tool;
-}
+// Load GTM tools (8 core + init)
+const tools = {
+  vibe_start: require('./tools/start'),
+  vibe_init: require('./tools/init'),
+  vibe_who: require('./tools/who'),
+  vibe_dm: require('./tools/dm'),
+  vibe_inbox: require('./tools/inbox'),
+  vibe_status: require('./tools/status'),
+  vibe_ship: require('./tools/ship'),
+  vibe_discover: require('./tools/discover'),
+  vibe_help: require('./tools/help'),
+};
 
 /**
  * MCP Protocol Handler
@@ -337,9 +215,6 @@ class VibeMCPServer {
 
     // Make notifier globally accessible for tools and store layer
     global.vibeNotifier = this.notifier;
-
-    // MCP Apps capability — set during initialize handshake
-    this.clientSupportsApps = false;
 
     // Start presence heartbeat
     presence.start();
@@ -362,30 +237,14 @@ class VibeMCPServer {
   async handleRequest(request) {
     const { method, params, id } = request;
 
-    // Don't respond to notifications (requests without id)
-    // JSON-RPC notifications are fire-and-forget
-    if (id === undefined || id === null) {
-      return null;
-    }
-
     switch (method) {
-      case 'initialize': {
-        // Detect MCP Apps support from client capabilities
-        const clientCaps = params?.capabilities || {};
-        const uiExt = clientCaps.extensions?.['io.modelcontextprotocol/ui'];
-        this.clientSupportsApps = !!uiExt;
-
-        const serverCaps = { tools: {} };
-        if (this.clientSupportsApps) {
-          serverCaps.resources = {};
-        }
-
+      case 'initialize':
         return {
           jsonrpc: '2.0',
           id,
           result: {
             protocolVersion: '2024-11-05',
-            capabilities: serverCaps,
+            capabilities: { tools: {} },
             serverInfo: {
               name: 'vibe',
               version: '1.0.0',
@@ -393,24 +252,16 @@ class VibeMCPServer {
             }
           }
         };
-      }
 
       case 'tools/list':
         return {
           jsonrpc: '2.0',
           id,
           result: {
-            tools: Object.values(tools).map(t => {
-              const def = {
-                ...t.definition,
-                annotations: TOOL_ANNOTATIONS[t.definition.name] || DEFAULT_ANNOTATIONS
-              };
-              // Link vibe_who to the presence widget when client supports MCP Apps
-              if (this.clientSupportsApps && t.definition.name === 'vibe_who') {
-                def._meta = { ...(def._meta || {}), ui: { resourceUri: 'ui://vibe/presence' } };
-              }
-              return def;
-            })
+            tools: Object.values(tools).map(t => ({
+              ...t.definition,
+              annotations: TOOL_ANNOTATIONS[t.definition.name] || DEFAULT_ANNOTATIONS
+            }))
           }
         };
 
@@ -439,28 +290,10 @@ class VibeMCPServer {
 
           const result = await tool.handler(args);
 
-          // Log tool call to session journal + analytics (non-blocking)
-          try {
-            const sessionId = config.getSessionId();
-            if (sessionId) {
-              const target = args.handle || args.to || null;
-              getSessions().logToolCall(sessionId, params.name, target, inferredPrompt);
-            }
-            analytics.trackToolUsage(params.name);
-          } catch (e) { /* journal/analytics is best-effort */ }
-
           // Emit list_changed notification for state-changing tools
           // This triggers Claude to refresh without reconnection
           const stateChangingTools = [
-            'vibe_dm',
-            'vibe_ping',
-            'vibe_react',
-            'vibe_remember',
-            'vibe_status',
-            'vibe_context',
-            'vibe_handoff',
-            'vibe_reserve',
-            'vibe_release'
+            'vibe_dm', 'vibe_status', 'vibe_ship'
           ];
           if (stateChangingTools.includes(params.name)) {
             // Debounced notification (prevents spam)
@@ -482,7 +315,7 @@ class VibeMCPServer {
             const count = result.unread_count || '';
 
             // Build minimal hint string
-            const hintParts = [hint];
+            let hintParts = [hint];
             if (handle) hintParts.push(`@${handle.replace('@', '')}`);
             if (count) hintParts.push(`(${count})`);
 
@@ -493,12 +326,10 @@ class VibeMCPServer {
             jsonrpc: '2.0',
             id,
             result: {
-              content: [
-                {
-                  type: 'text',
-                  text: (result.display || JSON.stringify(result, null, 2)) + hintIndicator + footer
-                }
-              ]
+              content: [{
+                type: 'text',
+                text: (result.display || JSON.stringify(result, null, 2)) + hintIndicator + footer
+              }]
             }
           };
         } catch (e) {
@@ -508,45 +339,6 @@ class VibeMCPServer {
             error: { code: -32000, message: e.message }
           };
         }
-
-      case 'resources/list':
-        if (this.clientSupportsApps) {
-          return {
-            jsonrpc: '2.0',
-            id,
-            result: {
-              resources: [{
-                uri: 'ui://vibe/presence',
-                name: 'Presence Widget',
-                description: "Live buddy list — see who's online and what they're building",
-                mimeType: 'text/html;profile=mcp-app'
-              }]
-            }
-          };
-        }
-        return { jsonrpc: '2.0', id, result: { resources: [] } };
-
-      case 'resources/read': {
-        const uri = params?.uri;
-        if (uri === 'ui://vibe/presence') {
-          return {
-            jsonrpc: '2.0',
-            id,
-            result: {
-              contents: [{
-                uri: 'ui://vibe/presence',
-                mimeType: 'text/html;profile=mcp-app',
-                text: generatePresenceHTML()
-              }]
-            }
-          };
-        }
-        return {
-          jsonrpc: '2.0',
-          id,
-          error: { code: -32602, message: `Unknown resource: ${uri}` }
-        };
-      }
 
       default:
         return {
@@ -561,7 +353,7 @@ class VibeMCPServer {
     process.stdin.setEncoding('utf8');
     let buffer = '';
 
-    process.stdin.on('data', async chunk => {
+    process.stdin.on('data', async (chunk) => {
       buffer += chunk;
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -583,19 +375,14 @@ class VibeMCPServer {
     process.stdin.on('end', () => {
       presence.stop();
       // Close SQLite to flush WAL and prevent corruption
-      try {
-        require('./store/sqlite').close();
-      } catch (e) {}
-      try {
-        getSessions().close();
-      } catch (e) {}
+      try { require('./store/sqlite').close(); } catch (e) {}
       process.exit(0);
     });
 
     // Welcome message
     process.stderr.write('\n/vibe ready.\n');
     process.stderr.write('vibe init → set identity\n');
-    process.stderr.write("vibe who  → see who's around\n");
+    process.stderr.write('vibe who  → see who\'s around\n');
     process.stderr.write('vibe dm   → send a message\n\n');
 
     // Check for updates (non-blocking)
@@ -617,37 +404,6 @@ class VibeMCPServer {
   }
 }
 
-// CLI flag handling (before MCP stdio mode)
-const args = process.argv.slice(2);
-const cmd = args[0];
-
-if (cmd === '--version' || cmd === '-v') {
-  const pkg = require('./package.json');
-  process.stdout.write(`${pkg.name} v${pkg.version}\n`);
-  process.exit(0);
-}
-
-if (cmd === '--help' || cmd === '-h') {
-  const pkg = require('./package.json');
-  process.stdout.write(`${pkg.name} v${pkg.version}\n\n`);
-  process.stdout.write(`The social layer for AI coding.\n`);
-  process.stdout.write(`DMs, presence, discovery, and games — without leaving your editor.\n\n`);
-  process.stdout.write(`Usage:\n`);
-  process.stdout.write(`  npx slashvibe-mcp              Start MCP server (stdio mode)\n`);
-  process.stdout.write(`  npx slashvibe-mcp install      Auto-configure your editor\n`);
-  process.stdout.write(`  npx slashvibe-mcp --version    Show version\n`);
-  process.stdout.write(`  npx slashvibe-mcp --help       Show this help\n\n`);
-  process.stdout.write(`Supported editors:\n`);
-  process.stdout.write(`  Claude Code, Cursor, VS Code, Windsurf, Cline, Continue.dev, JetBrains\n\n`);
-  process.stdout.write(`Docs: https://slashvibe.dev\n`);
-  process.stdout.write(`Repo: https://github.com/VibeCodingInc/vibe-mcp\n`);
-  process.exit(0);
-}
-
-if (cmd === 'install') {
-  require('./scripts/install-editors.js');
-} else {
-  // Default: start MCP server
-  const server = new VibeMCPServer();
-  server.start();
-}
+// Start
+const server = new VibeMCPServer();
+server.start();

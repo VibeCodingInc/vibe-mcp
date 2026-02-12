@@ -13,11 +13,11 @@ const notify = require('../notify');
 const { formatTimeAgo, requireInit } = require('./_shared');
 const { actions, formatActions } = require('./_actions');
 const { enhanceUsersWithInference } = require('../intelligence/infer');
-const { getTopSerendipity } = require('../intelligence/serendipity');
+const { getTopSerendipity, getAllSerendipity } = require('../intelligence/serendipity');
 
 const definition = {
   name: 'vibe_who',
-  description: "See who's online and what they're building.",
+  description: 'See who\'s online and what they\'re building.',
   inputSchema: {
     type: 'object',
     properties: {}
@@ -50,7 +50,9 @@ function getHeat(user) {
 
   // Check for inferred state from smart detection
   if (user.mood_inferred && user.mood) {
-    const inferredLabel = user.inferred_state ? `${user.inferred_state.replace('-', ' ')}` : 'active';
+    const inferredLabel = user.inferred_state
+      ? `${user.inferred_state.replace('-', ' ')}`
+      : 'active';
     return {
       icon: user.mood,
       label: inferredLabel,
@@ -132,7 +134,7 @@ function formatActivity(user) {
   // GitHub active repos (if no other context and GitHub connected)
   if (user.github?.active_repos?.length > 0) {
     const repos = user.github.active_repos.slice(0, 2);
-    const repoNames = repos.map(r => r.split('/').pop()); // Get just repo name
+    const repoNames = repos.map(r => r.split('/').pop());  // Get just repo name
     return `pushing to ${repoNames.join(', ')}`;
   }
 
@@ -141,14 +143,13 @@ function formatActivity(user) {
 }
 
 async function handler(args) {
-  // Allow unauthenticated users to see who's online (read-only)
-  // This powers the "10 seconds after install" requirement
-  const isAuthed = config.isInitialized();
+  const initCheck = requireInit();
+  if (initCheck) return initCheck;
 
   const rawUsers = await store.getActiveUsers();
   // Apply smart detection — infer states from context signals
   const users = enhanceUsersWithInference(rawUsers);
-  const myHandle = isAuthed ? config.getHandle() : null;
+  const myHandle = config.getHandle();
 
   // Check for notifications (presence + messages)
   notify.checkAll(store);
@@ -157,13 +158,7 @@ async function handler(args) {
     return {
       display: `## Who's Around
 
-_You're the only one here right now..._
-
-🎮 **Challenge someone later**: "play tictactoe with @friend"
-💬 **Message @vibe**: Say hello to the platform!
-🔗 **Invite a friend**: Share \`slashvibe.dev\`
-
-_Check back in a bit — builders come and go._`
+_No one's here right now. Check back later — builders come and go._`
     };
   }
 
@@ -189,20 +184,11 @@ _Check back in a bit — builders come and go._`
       const activity = formatActivity(u);
       const timeAgo = formatTimeAgo(u.lastSeen);
 
-      // Phase 1 Presence Bridge: source badges + reach channels
-      const sourceBadge = u.sources && u.sources.length > 0
-        ? ` _(via ${u.sources.join(', ')})_`
-        : '';
-      const reachTag = u.reach_via && u.reach_via.length > 0
-        ? `   reach: ${u.reach_via.join(', ')}\n`
-        : '';
-
-      display += `${heat.icon} **@${u.handle}**${agentBadge}${tag}${heatLabel}${sourceBadge}\n`;
+      display += `${heat.icon} **@${u.handle}**${agentBadge}${tag}${heatLabel}\n`;
       if (operatorTag) {
         display += `   ${operatorTag}\n`;
       }
       display += `   ${activity}\n`;
-      if (reachTag) display += reachTag;
       display += `   _${timeAgo}_\n\n`;
     });
   }
@@ -239,61 +225,24 @@ _Check back in a bit — builders come and go._`
     }
   }
 
-  // Fun quick actions - randomize suggestions
-  const quickActions = [
-    `Say "message @handle" to reach someone`,
-    `Try "react 🔥 to @handle" for a quick high-five`,
-    `"ping @handle" sends a friendly wave 👋`,
-    `"play tictactoe with @handle" to challenge someone`
-  ];
-  const randomAction = quickActions[Math.floor(Math.random() * quickActions.length)];
-
   display += `---\n`;
-  display += randomAction;
+  display += `Say "message @handle" to reach someone`;
 
-  // Fetch unread once for display and structuredContent
-  const unread = myHandle ? await store.getUnreadCount(myHandle).catch(() => 0) : 0;
-
-  // Check for unread to add urgency (only if authenticated)
-  if (myHandle && unread > 0) {
-    display += `\n\n📬 **NEW MESSAGE — ${unread} UNREAD** — \`vibe inbox\``;
-  }
+  // Check for unread to add urgency
+  try {
+    const unread = await store.getUnreadCount(myHandle);
+    if (unread > 0) {
+      display += `\n\n📬 **NEW MESSAGE — ${unread} UNREAD** — \`vibe inbox\``;
+    }
+  } catch (e) {}
 
   // Fun flourish when room is lively
   if (active.length >= 3) {
     display += `\n\n_The room is lively today!_ ⚡`;
   }
 
-  // Genesis spots remaining
-  try {
-    const stats = await store.getStats();
-    if (stats.genesis && stats.genesis.genesis_remaining > 0) {
-      display += `\n\n🌱 **${stats.genesis.genesis_remaining} genesis spots left** of ${stats.genesis.genesis_cap}`;
-    } else if (stats.genesis && stats.genesis.genesis_remaining === 0) {
-      display += `\n\n_Genesis is full — ${stats.genesis.total} builders strong_`;
-    }
-  } catch (e) {
-    // Silent fail — genesis display is nice-to-have
-  }
-
   // Build response with optional hints for structured flows
-  const response = {
-    display,
-    structuredContent: {
-      users: sorted.map(u => ({
-        handle: u.handle,
-        status: u.status || 'active',
-        mood: u.mood || null,
-        activity: formatActivity(u),
-        heat: getHeat(u).label || null,
-        lastSeen: u.lastSeen,
-        isAgent: !!u.is_agent,
-        awayMessage: u.awayMessage || null
-      })),
-      unreadCount: unread,
-      myHandle
-    }
-  };
+  const response = { display };
 
   // Check for surprise suggestion opportunities
   const suggestions = [];
@@ -350,24 +299,20 @@ _Check back in a bit — builders come and go._`
     }
   }
 
-  // Add guided mode actions (only if authenticated)
-  if (myHandle) {
-    const onlineHandles = active.filter(u => u.handle !== myHandle).map(u => u.handle);
+  // Add guided mode actions
+  const onlineHandles = active.filter(u => u.handle !== myHandle).map(u => u.handle);
+  const unreadCount = await store.getUnreadCount(myHandle).catch(() => 0);
 
-    if (active.length === 0 || (active.length === 1 && active[0].handle === myHandle)) {
-      response.actions = formatActions(actions.emptyRoom());
-    } else {
-      response.actions = formatActions(
-        actions.dashboard({
-          unreadCount: unread,
-          onlineUsers: onlineHandles,
-          suggestion: topSuggestion
-        })
-      );
-    }
+  if (active.length === 0 || (active.length === 1 && active[0].handle === myHandle)) {
+    // Empty room
+    response.actions = formatActions(actions.emptyRoom());
   } else {
-    // Not authenticated — nudge to join
-    response.display += `\n\n---\n**Join the room:** \`vibe init\` — sign in with GitHub in 10 seconds`;
+    // People are here
+    response.actions = formatActions(actions.dashboard({
+      unreadCount,
+      onlineUsers: onlineHandles,
+      suggestion: topSuggestion
+    }));
   }
 
   return response;

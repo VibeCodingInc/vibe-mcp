@@ -15,11 +15,9 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const store = require('../store');
-const discord = require('../discord');
-const { debug } = require('./_shared');
 
 const CALLBACK_PORT = 9876;
-const API_BASE = config.getApiUrl();
+const API_BASE = 'https://www.slashvibe.dev';
 
 /**
  * Fetch online count from presence API
@@ -104,20 +102,20 @@ function detectTechStack() {
 
       // Map common packages to tech names
       const techMap = {
-        react: 'React',
-        next: 'Next.js',
-        vue: 'Vue',
-        svelte: 'Svelte',
-        express: 'Express',
-        fastify: 'Fastify',
-        typescript: 'TypeScript',
+        'react': 'React',
+        'next': 'Next.js',
+        'vue': 'Vue',
+        'svelte': 'Svelte',
+        'express': 'Express',
+        'fastify': 'Fastify',
+        'typescript': 'TypeScript',
         '@anthropic-ai/sdk': 'Claude API',
-        openai: 'OpenAI',
-        langchain: 'LangChain',
-        prisma: 'Prisma',
+        'openai': 'OpenAI',
+        'langchain': 'LangChain',
+        'prisma': 'Prisma',
         '@vercel/kv': 'Vercel KV',
-        tailwindcss: 'Tailwind',
-        electron: 'Electron',
+        'tailwindcss': 'Tailwind',
+        'electron': 'Electron',
         '@tauri-apps/api': 'Tauri'
       };
 
@@ -127,7 +125,7 @@ function detectTechStack() {
     }
 
     // Detect by file extensions in cwd
-    const files = fs.readdirSync(cwd).slice(0, 50); // Limit scan
+    const files = fs.readdirSync(cwd).slice(0, 50);  // Limit scan
     for (const f of files) {
       if (f.endsWith('.ts') || f.endsWith('.tsx')) techStack.add('TypeScript');
       if (f.endsWith('.py')) techStack.add('Python');
@@ -135,11 +133,12 @@ function detectTechStack() {
       if (f.endsWith('.go')) techStack.add('Go');
       if (f.endsWith('.sol')) techStack.add('Solidity');
     }
+
   } catch (e) {
     // Non-fatal - continue without tech detection
   }
 
-  return Array.from(techStack).slice(0, 8); // Limit to 8 techs
+  return Array.from(techStack).slice(0, 8);  // Limit to 8 techs
 }
 
 /**
@@ -159,19 +158,19 @@ async function sendPersonalizedWelcome(handle, oneLiner) {
         oneLiner,
         repoName,
         techStack,
-        githubProfile: null // Could be passed from callback if available
+        githubProfile: null  // Could be passed from callback if available
       })
     }).catch(e => {
-      debug('init', 'Personalized welcome failed:', e.message);
+      console.error('[vibe_init] Personalized welcome failed:', e.message);
     });
   } catch (e) {
     // Non-fatal - continue without personalized welcome
-    debug('init', 'Context detection failed:', e.message);
+    console.error('[vibe_init] Context detection failed:', e.message);
   }
 }
 
 const LOGIN_URL = 'https://www.slashvibe.dev/login';
-const API_URL = config.getApiUrl();
+const API_URL = process.env.VIBE_API_URL || 'https://www.slashvibe.dev';
 const AUTH_TIMEOUT_MS = 120000; // 2 minutes
 
 /**
@@ -187,15 +186,14 @@ async function sendWelcomeMessage(handle, one_liner) {
     const result = await response.json();
     return result.success;
   } catch (e) {
-    debug('init', 'Welcome message failed:', e.message);
+    console.error('[vibe_init] Welcome message failed:', e.message);
     return false;
   }
 }
 
 const definition = {
   name: 'vibe_init',
-  description:
-    'Set your identity for /vibe. Opens browser for GitHub auth and waits for completion. Returns when auth is done.',
+  description: 'Set your identity for /vibe. Opens browser for GitHub auth and waits for completion. Returns when auth is done.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -227,9 +225,9 @@ function openBrowser(url) {
     command = `xdg-open "${url}"`;
   }
 
-  exec(command, err => {
+  exec(command, (err) => {
     if (err) {
-      debug('init', 'Failed to open browser:', err.message);
+      console.error('[vibe_init] Failed to open browser:', err.message);
     }
   });
 }
@@ -272,8 +270,7 @@ function waitForCallback(requestedHandle, one_liner) {
           // Send initial heartbeat
           await store.heartbeat(finalHandle, one_liner);
 
-          // Post to Discord
-          discord.postJoin(finalHandle, one_liner);
+          // Future: webhook notifications
 
           // Send personalized welcome from @vibe (non-blocking)
           sendPersonalizedWelcome(finalHandle, one_liner);
@@ -524,7 +521,7 @@ function waitForCallback(requestedHandle, one_liner) {
       }
     });
 
-    server.on('error', err => {
+    server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
         reject(new Error('AUTH_IN_PROGRESS'));
       } else {
@@ -552,10 +549,7 @@ async function handler(args) {
 
   // Normalize handle if provided
   const h = handle
-    ? handle
-        .toLowerCase()
-        .replace('@', '')
-        .replace(/[^a-z0-9_-]/g, '')
+    ? handle.toLowerCase().replace('@', '').replace(/[^a-z0-9_-]/g, '')
     : null;
 
   // Validate if custom handle provided
@@ -610,13 +604,16 @@ To check messages: \`vibe inbox\``
       const result = await waitForCallback(h, one_liner);
 
       // Check for unread messages
-      let unreadCount = 0;
+      let unreadNotice = '';
       try {
-        unreadCount = await store.getUnreadCount(result.handle);
+        const unreadCount = await store.getUnreadCount(result.handle);
+        if (unreadCount > 0) {
+          unreadNotice = `\n\n📬 **${unreadCount} unread messages** — say "check my messages"`;
+        }
       } catch (e) {}
 
       // Generate authenticated banner with handle + unread (3 lines only - won't collapse)
-      const authBanner = generateAuthBanner(result.handle, unreadCount, onlineCount);
+      const authBanner = generateAuthBanner(result.handle, 1, onlineCount);
 
       return {
         display: authBanner,
@@ -626,6 +623,7 @@ To check messages: \`vibe inbox\``
           hint: 'show_onboarding_options'
         }
       };
+
     } catch (err) {
       if (err.message === 'AUTH_IN_PROGRESS') {
         return {
@@ -695,9 +693,6 @@ Local config saved. Heartbeats will use username fallback.`
 
   // Send initial heartbeat
   await store.heartbeat(h, one_liner);
-
-  // Post to Discord
-  discord.postJoin(h, one_liner);
 
   // Send personalized welcome from @vibe (non-blocking)
   sendPersonalizedWelcome(h, one_liner);
