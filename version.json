@@ -1,5 +1,5 @@
 {
-  "version": "0.4.3",
+  "version": "0.4.4",
   "updated": "2026-02-12",
   "changelog": "Trim npm package: 132→34 files, 816KB→195KB",
   "features": [
