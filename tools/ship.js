@@ -11,9 +11,7 @@
  */
 
 const config = require('../config');
-const userProfiles = require('../store/profiles');
-const patterns = require('../intelligence/patterns');
-const { requireInit, formatTimeAgo } = require('./_shared');
+const { requireInit } = require('./_shared');
 
 const definition = {
   name: 'vibe_ship',
@@ -59,9 +57,6 @@ async function handler(args) {
   const apiUrl = config.getApiUrl();
 
   try {
-    // Record in profile
-    await userProfiles.recordShip(myHandle, args.what);
-
     // Build rich content with metadata
     let content = args.what;
     const metaParts = [];
@@ -108,12 +103,6 @@ async function handler(args) {
       return { display: `⚠️ Failed to announce ship: ${data.error}` };
     }
 
-    // Log creative patterns
-    patterns.logShip(args.what, args.url, tags);
-    if (args.inspired_by) {
-      patterns.logInspiredBy(args.inspired_by);
-    }
-
     let display = `🚀 shipped\n\n${args.what}`;
 
     if (args.url) {
@@ -123,59 +112,10 @@ async function handler(args) {
       display += `\n_via @${args.inspired_by.replace('@', '')}_`;
     }
 
-    display += '\n';
-    
-    // Quiet awareness of similar builders
-    const suggestions = await findSimilarShippers(myHandle, args.what);
-    if (suggestions.length > 0) {
-      display += `\n_similar: @${suggestions.slice(0, 2).map(s => s.handle).join(', @')}_`;
-    }
-
     return { display };
 
   } catch (error) {
     return { display: `## Ship Error\n\n${error.message}` };
-  }
-}
-
-// Find people who shipped similar things
-async function findSimilarShippers(myHandle, whatIShipped) {
-  try {
-    const allProfiles = await userProfiles.getAllProfiles();
-    const myWords = whatIShipped.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-    const suggestions = [];
-
-    for (const profile of allProfiles) {
-      if (profile.handle === myHandle) continue;
-      if (!profile.ships || profile.ships.length === 0) continue;
-
-      for (const ship of profile.ships) {
-        const shipWords = ship.what.toLowerCase().split(/\s+/);
-        const overlap = myWords.filter(w => shipWords.includes(w));
-        
-        if (overlap.length > 0) {
-          suggestions.push({
-            handle: profile.handle,
-            ship: ship.what,
-            timestamp: ship.timestamp,
-            overlap: overlap.length
-          });
-          break; // Only one ship per person
-        }
-      }
-    }
-
-    // Sort by overlap and recency
-    return suggestions
-      .sort((a, b) => {
-        const overlapDiff = b.overlap - a.overlap;
-        if (overlapDiff !== 0) return overlapDiff;
-        return b.timestamp - a.timestamp;
-      });
-
-  } catch (error) {
-    console.warn('Error finding similar shippers:', error);
-    return [];
   }
 }
 

@@ -158,13 +158,7 @@ async function handler(args) {
     return {
       display: `## Who's Around
 
-_You're the only one here right now..._
-
-🎮 **Challenge someone later**: "play tictactoe with @friend"
-💬 **Message @vibe**: Say hello to the platform!
-🔗 **Invite a friend**: Share \`slashvibe.dev\`
-
-_Check back in a bit — builders come and go._`
+_No one's here right now. Check back later — builders come and go._`
     };
   }
 
@@ -231,17 +225,8 @@ _Check back in a bit — builders come and go._`
     }
   }
 
-  // Fun quick actions - randomize suggestions
-  const quickActions = [
-    `Say "message @handle" to reach someone`,
-    `Try "react 🔥 to @handle" for a quick high-five`,
-    `"ping @handle" sends a friendly wave 👋`,
-    `"play tictactoe with @handle" to challenge someone`,
-  ];
-  const randomAction = quickActions[Math.floor(Math.random() * quickActions.length)];
-
   display += `---\n`;
-  display += randomAction;
+  display += `Say "message @handle" to reach someone`;
 
   // Check for unread to add urgency
   try {
@@ -254,18 +239,6 @@ _Check back in a bit — builders come and go._`
   // Fun flourish when room is lively
   if (active.length >= 3) {
     display += `\n\n_The room is lively today!_ ⚡`;
-  }
-
-  // Genesis spots remaining
-  try {
-    const stats = await store.getStats();
-    if (stats.genesis && stats.genesis.genesis_remaining > 0) {
-      display += `\n\n🌱 **${stats.genesis.genesis_remaining} genesis spots left** of ${stats.genesis.genesis_cap}`;
-    } else if (stats.genesis && stats.genesis.genesis_remaining === 0) {
-      display += `\n\n_Genesis is full — ${stats.genesis.total} builders strong_`;
-    }
-  } catch (e) {
-    // Silent fail — genesis display is nice-to-have
   }
 
   // Build response with optional hints for structured flows

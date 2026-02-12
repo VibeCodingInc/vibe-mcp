@@ -15,7 +15,6 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const store = require('../store');
-const discord = require('../discord');
 
 const CALLBACK_PORT = 9876;
 const API_BASE = 'https://www.slashvibe.dev';
@@ -271,8 +270,7 @@ function waitForCallback(requestedHandle, one_liner) {
           // Send initial heartbeat
           await store.heartbeat(finalHandle, one_liner);
 
-          // Post to Discord
-          discord.postJoin(finalHandle, one_liner);
+          // Future: webhook notifications
 
           // Send personalized welcome from @vibe (non-blocking)
           sendPersonalizedWelcome(finalHandle, one_liner);
@@ -695,9 +693,6 @@ Local config saved. Heartbeats will use username fallback.`
 
   // Send initial heartbeat
   await store.heartbeat(h, one_liner);
-
-  // Post to Discord
-  discord.postJoin(h, one_liner);
 
   // Send personalized welcome from @vibe (non-blocking)
   sendPersonalizedWelcome(h, one_liner);
