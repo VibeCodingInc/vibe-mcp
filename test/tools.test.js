@@ -23,8 +23,8 @@ while ((match = directRegex.exec(indexContent)) !== null) {
 }
 
 describe('tool registry', () => {
-  it('has at least 30 registered tools', () => {
-    assert.ok(toolEntries.length >= 30, `Expected >= 30 tools, found ${toolEntries.length}`);
+  it('has 9 GTM tools registered', () => {
+    assert.ok(toolEntries.length >= 8 && toolEntries.length <= 12, `Expected 8-12 tools, found ${toolEntries.length}`);
   });
 
   it('all tool names start with vibe_', () => {

@@ -62,19 +62,18 @@ test('server.json has MCP registry schema', () => {
 
 // ── Tool files ──
 
-test('tools/ directory has tool files', () => {
+test('tools/ directory has GTM tool files', () => {
   const toolsDir = path.join(__dirname, '..', 'tools');
   assert(fs.existsSync(toolsDir), 'tools/ directory not found');
   const files = fs.readdirSync(toolsDir).filter(f => f.endsWith('.js') && !f.startsWith('_'));
-  assert(files.length >= 10, `only ${files.length} tool files found`);
+  assert(files.length >= 8, `only ${files.length} tool files found`);
 });
 
-test('index.js registers ~37 tools (pruned from 68)', () => {
+test('index.js registers 9 GTM tools', () => {
   const content = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf-8');
-  // Count tool registrations (lazy: ['vibe_xxx', () => require(...)] or direct: vibe_xxx: require)
-  const toolLines = content.match(/\['vibe_\w+',\s*\(\)\s*=>/g) || content.match(/vibe_\w+:\s*require/g) || [];
+  const toolLines = content.match(/vibe_\w+:\s*require/g) || [];
   const count = toolLines.length;
-  assert(count >= 30 && count <= 50, `expected 30-50 tools, found ${count}`);
+  assert(count >= 8 && count <= 12, `expected 8-12 tools, found ${count}`);
 });
 
 test('store/sqlite.js exists', () => {

@@ -122,7 +122,8 @@ describe('tools/presence-data', () => {
 
 // ── index.js capability detection ─────────────────────────────────
 
-describe('MCP Apps capability detection in index.js', () => {
+// Phase 2: MCP Apps features stripped for GTM
+describe.skip('MCP Apps capability detection in index.js', () => {
   const fs = require('fs');
   const path = require('path');
   const indexContent = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf-8');
@@ -164,7 +165,8 @@ describe('MCP Apps capability detection in index.js', () => {
 
 // ── tools/who.js structuredContent ────────────────────────────────
 
-describe('who.js structuredContent', () => {
+// Phase 2: structuredContent stripped for GTM
+describe.skip('who.js structuredContent', () => {
   const fs = require('fs');
   const path = require('path');
   const whoContent = fs.readFileSync(path.join(__dirname, '..', 'tools', 'who.js'), 'utf-8');
