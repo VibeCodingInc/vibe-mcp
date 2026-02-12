@@ -1,12 +1,14 @@
 {
-  "version": "0.4.0",
-  "updated": "2026-02-11",
-  "changelog": "GTM release: stripped to 8 core tools + init",
+  "version": "0.4.2",
+  "updated": "2026-02-12",
+  "changelog": "Slim start/who/actions, archive dead tools, rewrite README",
   "features": [
-    "8 GTM tools: start, who, dm, inbox, status, ship, discover, help",
-    "Removed 120+ Phase 2 tools (games, bridges, skills, etc.)",
-    "Cleaner install, faster startup, smaller surface area"
+    "start.js: 297→105 lines (removed auto-update, version check)",
+    "who.js: 321→175 lines (kept intelligence, removed bloat)",
+    "_actions.js: 486→88 lines (stripped dead generators)",
+    "README.md: reflects 8-tool reality",
+    "Archived 6 unregistered tool files"
   ],
-  "breaking": true,
+  "breaking": false,
   "updateUrl": "https://www.slashvibe.dev/api/version"
 }

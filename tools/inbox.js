@@ -4,6 +4,7 @@
 
 const config = require('../config');
 const store = require('../store');
+const notify = require('../notify');
 const { requireInit, truncate } = require('./_shared');
 
 const definition = {

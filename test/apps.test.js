@@ -94,30 +94,9 @@ describe('apps/presence', () => {
   });
 });
 
-// ── tools/presence-data.js ────────────────────────────────────────
-
-describe('tools/presence-data', () => {
-  const mod = require('../tools/presence-data');
-
-  it('exports definition and handler', () => {
-    assert.ok(mod.definition, 'Missing definition');
-    assert.equal(typeof mod.handler, 'function', 'Missing handler');
-  });
-
-  it('definition name is vibe_presence_data', () => {
-    assert.equal(mod.definition.name, 'vibe_presence_data');
-  });
-
-  it('definition has _meta.ui with visibility [app]', () => {
-    assert.ok(mod.definition._meta, 'Missing _meta');
-    assert.ok(mod.definition._meta.ui, 'Missing _meta.ui');
-    assert.deepEqual(mod.definition._meta.ui.visibility, ['app']);
-  });
-
-  it('definition has inputSchema with type=object', () => {
-    assert.ok(mod.definition.inputSchema);
-    assert.equal(mod.definition.inputSchema.type, 'object');
-  });
+// Phase 2: presence-data tool stripped for GTM
+describe.skip('tools/presence-data', () => {
+  it('skipped — tool archived for GTM', () => {});
 });
 
 // ── index.js capability detection ─────────────────────────────────
