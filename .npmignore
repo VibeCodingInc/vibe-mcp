@@ -1,0 +1,43 @@
+# Archived and experimental tools (not registered)
+tools/_archive/
+tools/_experimental/
+
+# Bridges — not used by GTM tools (lazy-loaded, fails silently)
+bridges/
+protocol/
+
+# Dead root modules
+analytics.js
+auto-update.js
+discord.js
+twitter.js
+memory.js
+migrate-v2.js
+test-v2-integration.js
+test-skills-bootstrap.js
+webhook-runner.js
+post-install.js
+
+# Dead store modules
+store/profiles.js
+store/skills.js
+store/reservations.js
+
+# Dead intelligence modules
+intelligence/patterns.js
+intelligence/proactive.js
+
+# Dev files
+eslint.config.js
+scripts/publish-registry.sh
+test/
+assets/
+.github/
+.eslintrc*
+.prettier*
+tsconfig*
+CLA.md
+SECURITY.md
+CHANGELOG.md
+smithery.yaml
+glama.json

@@ -1,13 +1,10 @@
 {
-  "version": "0.4.2",
+  "version": "0.4.3",
   "updated": "2026-02-12",
-  "changelog": "Slim start/who/actions, archive dead tools, rewrite README",
+  "changelog": "Trim npm package: 132→34 files, 816KB→195KB",
   "features": [
-    "start.js: 297→105 lines (removed auto-update, version check)",
-    "who.js: 321→175 lines (kept intelligence, removed bloat)",
-    "_actions.js: 486→88 lines (stripped dead generators)",
-    "README.md: reflects 8-tool reality",
-    "Archived 6 unregistered tool files"
+    "Explicit files whitelist — only ships what GTM tools need",
+    "Package size: 213KB→54KB compressed"
   ],
   "breaking": false,
   "updateUrl": "https://www.slashvibe.dev/api/version"
