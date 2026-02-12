@@ -112,6 +112,14 @@ async function handler(args) {
       display += `\n_via @${args.inspired_by.replace('@', '')}_`;
     }
 
+    // Generate share-ready tweet
+    const tweetParts = [`Just shipped: ${args.what} 🚀`];
+    if (args.url) tweetParts.push(args.url);
+    tweetParts.push('#vibecoding');
+    const tweet = tweetParts.join(' ');
+
+    display += `\n\n---\n📋 **Share it:**\n\`${tweet}\``;
+
     return { display };
 
   } catch (error) {

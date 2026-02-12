@@ -737,6 +737,17 @@ async function verifyPrivyToken(token) {
   }
 }
 
+// ============ BOARD / SHIPS ============
+
+async function getRecentShips(limit = 5) {
+  try {
+    const result = await request('GET', `/api/board?limit=${limit}&category=shipped`, null, { auth: false });
+    return result.entries || [];
+  } catch (e) {
+    return [];
+  }
+}
+
 // ============ HELPERS ============
 
 function formatTimeAgo(timestamp) {
@@ -1053,6 +1064,9 @@ module.exports = {
 
   // Stats
   getStats,
+
+  // Board / Ships
+  getRecentShips,
 
   // Invites
   generateInviteCode,

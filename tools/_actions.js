@@ -26,7 +26,8 @@ const actions = {
         just_joined: 'just joined',
         shipping: 'is shipping',
         needs_help: 'might need help',
-        active_now: 'is active'
+        active_now: 'is active',
+        recently_active: 'was recently active'
       }[suggestion.reason] || 'is around';
 
       result.push({

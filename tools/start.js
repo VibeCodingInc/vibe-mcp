@@ -60,6 +60,7 @@ async function handler(args) {
 
   // Check inbox + trigger notifications
   let unreadCount = 0;
+  let recentShips = [];
   try {
     unreadCount = await store.getUnreadCount(myHandle);
     if (unreadCount > 0) {
@@ -68,6 +69,8 @@ async function handler(args) {
         notify.checkAndNotify(rawInbox);
       }
     }
+    // Fetch recent ships for display
+    recentShips = await store.getRecentShips(5).catch(() => []);
   } catch (e) {}
 
   // Build display: welcome card + activity
@@ -85,6 +88,15 @@ async function handler(args) {
       display += `\n  ○ @${u.handle} — ${u.one_liner || 'Building something'}`;
     }
     display += `\n  _Say "follow @handle" to add them_`;
+  }
+
+  // Show recent ships from the community
+  if (recentShips.length > 0) {
+    display += `\n\n**Recently shipped:**`;
+    for (const ship of recentShips.slice(0, 3)) {
+      const what = ship.content?.slice(0, 60) || 'something new';
+      display += `\n  🚀 @${ship.author} — ${what}`;
+    }
   }
 
   const response = { display };

@@ -405,8 +405,14 @@ To check messages: \`vibe inbox\``
       // Generate authenticated banner with handle + unread (3 lines only - won't collapse)
       const authBanner = generateAuthBanner(result.handle, 1, onlineCount);
 
+      let display = authBanner;
+
+      // Step 3: Prompt Buddy download (completes the 1-2-3 funnel)
+      display += `\n\n**Get Vibe Buddy** — menu bar presence + desktop notifications`;
+      display += `\n→ slashvibe.dev/downloads`;
+
       return {
-        display: authBanner,
+        display,
         onboarding: {
           isNewUser: true,
           handle: result.handle,
