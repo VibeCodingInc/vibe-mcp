@@ -1,13 +1,12 @@
 {
-  "version": "0.3.29",
-  "updated": "2026-02-06",
-  "changelog": "V2 presence API, source tracking, lib/ included in package",
+  "version": "0.4.0",
+  "updated": "2026-02-11",
+  "changelog": "GTM release: stripped to 8 core tools + init",
   "features": [
-    "Heartbeat now sends source:'mcp' for multi-client presence tracking",
-    "Switched to v2 presence API with flattened context fields",
-    "lib/tech-detection.js included in npm package",
-    "getActiveUsers uses v2 format with handle field"
+    "8 GTM tools: start, who, dm, inbox, status, ship, discover, help",
+    "Removed 120+ Phase 2 tools (games, bridges, skills, etc.)",
+    "Cleaner install, faster startup, smaller surface area"
   ],
-  "breaking": false,
+  "breaking": true,
   "updateUrl": "https://www.slashvibe.dev/api/version"
 }
