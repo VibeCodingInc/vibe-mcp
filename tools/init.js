@@ -275,237 +275,27 @@ function waitForCallback(requestedHandle, one_liner) {
           // Send personalized welcome from @vibe (non-blocking)
           sendPersonalizedWelcome(finalHandle, one_liner);
 
-          // Send success response to browser - lightweight, no infinite animations
+          // Send success response to browser
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
           res.end(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Welcome to /vibe!</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    :root {
-      --neon-green: #00FF88;
-      --neon-cyan: #00FFFF;
-      --deep-black: #0A0A0A;
-      --glow-green: 0 0 15px #00FF88;
-    }
-
-    body {
-      font-family: 'VT323', monospace;
-      background: var(--deep-black);
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #fff;
-      overflow: hidden;
-      position: relative;
-    }
-
-    /* Static CRT Scanline Effect - no animation */
-    body::before {
-      content: '';
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      background: repeating-linear-gradient(
-        0deg,
-        rgba(0, 0, 0, 0.1),
-        rgba(0, 0, 0, 0.1) 1px,
-        transparent 1px,
-        transparent 2px
-      );
-      pointer-events: none;
-      z-index: 1000;
-    }
-
-    /* Static vignette */
-    body::after {
-      content: '';
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      background: radial-gradient(ellipse at center, transparent 0%, rgba(0, 0, 0, 0.3) 100%);
-      pointer-events: none;
-      z-index: 999;
-    }
-
-    /* Static decorative symbols - NO animation */
-    .particles {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      pointer-events: none;
-      z-index: 1;
-      opacity: 0.15;
-    }
-
-    .particle {
-      position: absolute;
-      font-size: 20px;
-      color: var(--neon-green);
-    }
-
-    .container {
-      background: rgba(0, 255, 136, 0.03);
-      border: 2px solid var(--neon-green);
-      padding: 48px 64px;
-      max-width: 480px;
-      width: 90%;
-      text-align: center;
-      position: relative;
-      z-index: 10;
-      box-shadow: var(--glow-green);
-      animation: fadeIn 0.4s ease-out forwards;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: scale(0.95); }
-      to { opacity: 1; transform: scale(1); }
-    }
-
-    /* Corner decorations */
-    .container::before, .container::after {
-      content: '+';
-      position: absolute;
-      font-family: 'VT323', monospace;
-      font-size: 24px;
-      color: var(--neon-green);
-    }
-    .container::before { top: 8px; left: 12px; }
-    .container::after { bottom: 8px; right: 12px; }
-
-    .logo {
-      font-family: 'Press Start 2P', cursive;
-      font-size: 28px;
-      color: var(--neon-green);
-      text-shadow: var(--glow-green);
-      margin-bottom: 24px;
-    }
-
-    .checkmark {
-      width: 80px;
-      height: 80px;
-      margin: 0 auto 24px;
-    }
-
-    .checkmark svg {
-      width: 100%;
-      height: 100%;
-      fill: none;
-      stroke: var(--neon-green);
-      stroke-width: 4;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-      filter: drop-shadow(0 0 8px var(--neon-green));
-      animation: drawCheck 0.5s ease-out forwards;
-    }
-
-    @keyframes drawCheck {
-      0% { stroke-dasharray: 100; stroke-dashoffset: 100; }
-      100% { stroke-dasharray: 100; stroke-dashoffset: 0; }
-    }
-
-    .welcome {
-      font-size: 28px;
-      color: rgba(255, 255, 255, 0.9);
-      margin-bottom: 8px;
-    }
-
-    .handle {
-      color: var(--neon-green);
-      text-shadow: 0 0 10px var(--neon-green);
-    }
-
-    .status {
-      font-size: 20px;
-      color: var(--neon-cyan);
-      margin: 20px 0;
-    }
-
-    .close-msg {
-      font-size: 18px;
-      color: rgba(255, 255, 255, 0.6);
-      margin-top: 24px;
-      padding: 12px 20px;
-      border: 1px dashed rgba(255, 255, 255, 0.3);
-    }
-
-    .ascii {
-      font-size: 14px;
-      color: rgba(0, 255, 136, 0.3);
-      margin-top: 20px;
-    }
-
-    /* Respect reduced motion preference */
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
-        animation: none !important;
-        transition: none !important;
-      }
-    }
-
-    /* Stop all animations after load */
-    .animations-stopped *,
-    .animations-stopped *::before,
-    .animations-stopped *::after {
-      animation: none !important;
-    }
-  </style>
-</head>
-<body>
-  <div class="particles" id="particles"></div>
-
-  <div class="container">
-    <div class="logo">/vibe</div>
-
-    <div class="checkmark">
-      <svg viewBox="0 0 52 52">
-        <circle cx="26" cy="26" r="22" stroke-opacity="0.3"/>
-        <path d="M14 27l8 8 16-16"/>
-      </svg>
-    </div>
-
-    <p class="welcome">Welcome, <span class="handle">@${finalHandle}</span></p>
-    <p class="status">Authentication successful</p>
-
-    <p class="close-msg">You can now close this window</p>
-
-    <div class="ascii">═══════════════════════════════</div>
-  </div>
-
-  <script>
-    // Create STATIC decorative symbols (no animation)
-    (function() {
-      var container = document.getElementById('particles');
-      var symbols = ['>', '<', '/', '*', '#', '@', '~'];
-      var positions = [
-        {x: 10, y: 15}, {x: 85, y: 20}, {x: 20, y: 75}, {x: 75, y: 80},
-        {x: 50, y: 10}, {x: 15, y: 45}, {x: 88, y: 55}, {x: 45, y: 85}
-      ];
-      positions.forEach(function(pos, i) {
-        var particle = document.createElement('div');
-        particle.className = 'particle';
-        particle.textContent = symbols[i % symbols.length];
-        particle.style.left = pos.x + '%';
-        particle.style.top = pos.y + '%';
-        container.appendChild(particle);
-      });
-    })();
-
-    // Stop any remaining animations after 2 seconds (safety net)
-    setTimeout(function() {
-      document.body.classList.add('animations-stopped');
-    }, 2000);
-  </script>
-</body>
-</html>`);
+<html><head><meta charset="UTF-8"><title>/vibe</title>
+<style>
+  body { background: #0A0A0A; color: #00FF88; font-family: monospace;
+         display: flex; align-items: center; justify-content: center;
+         min-height: 100vh; margin: 0; }
+  .box { border: 2px solid #00FF88; padding: 48px; text-align: center;
+         max-width: 400px; box-shadow: 0 0 15px #00FF88; }
+  h1 { font-size: 32px; margin: 0 0 16px; }
+  p { color: #ccc; font-size: 18px; margin: 8px 0; }
+  .handle { color: #00FF88; }
+  .close { color: #666; margin-top: 24px; border-top: 1px dashed #333; padding-top: 16px; }
+</style></head>
+<body><div class="box">
+  <h1>/vibe</h1>
+  <p>Welcome, <span class="handle">@${finalHandle}</span></p>
+  <p>Authentication successful</p>
+  <p class="close">You can close this window</p>
+</div></body></html>`);
 
           // Close server and resolve
           resolved = true;
@@ -651,81 +441,12 @@ Try again or use legacy auth: \`vibe init --auth_method=legacy\``
     }
   }
 
-  // ===========================================
-  // LEGACY AUTH: Local Ed25519 keypairs
-  // ===========================================
-  const crypto = require('../crypto');
-
-  // Generate Ed25519 keypair if not already present
-  let keypair = config.getKeypair();
-  let keypairNote = '';
-  if (!keypair) {
-    keypair = crypto.generateKeypair();
-    config.saveKeypair(keypair);
-    keypairNote = '\n🔐 _AIRC keypair generated for message signing_';
-  }
-
-  // Save identity
-  config.setSessionIdentity(h, one_liner || '', keypair);
-
-  const cfg = config.load();
-  cfg.handle = h;
-  cfg.one_liner = one_liner || '';
-  cfg.visible = true;
-  cfg.authMethod = 'legacy';
-  config.save(cfg);
-
-  // Register session with API
-  const sessionId = config.getSessionId();
-  const registration = await store.registerSession(sessionId, h, one_liner, keypair.publicKey);
-
-  if (!registration.success) {
-    return {
-      display: `## Identity Set (Local Only)
-
-**@${h}**
-_${one_liner}_
-
-⚠️ Session registration failed: ${registration.error}
-Local config saved. Heartbeats will use username fallback.`
-    };
-  }
-
-  // Send initial heartbeat
-  await store.heartbeat(h, one_liner);
-
-  // Send personalized welcome from @vibe (non-blocking)
-  sendPersonalizedWelcome(h, one_liner);
-
-  // Check for unread messages
-  let unreadNotice = '';
-  try {
-    const unreadCount = await store.getUnreadCount(h);
-    if (unreadCount > 0) {
-      unreadNotice = `\n\n📬 **NEW MESSAGE — ${unreadCount} UNREAD** — say "check my messages"`;
-    }
-  } catch (e) {}
-
+  // Legacy auth removed — GitHub OAuth only
   return {
-    display: `${welcomeBanner}
-## Welcome to /vibe! (Legacy Auth)
+    display: `## Authentication Required
 
-**@${h}**
-_${one_liner}_${unreadNotice}${keypairNote}
-
-📨 **Check your messages** — @vibe sent you a personalized welcome!
-
-⚠️ **Using local keys** — consider upgrading to GitHub auth:
-\`vibe init\` — Sign in with GitHub for verified identity
-
-### Onboarding Checklist
-[ ] Read your welcome message from @vibe
-[ ] Reply to @vibe
-[ ] Message one recommended builder
-[ ] Post your first ship
-[ ] Leave some feedback
-
-_Say "vibe onboarding" anytime to check your progress_`
+Sign in with GitHub to join /vibe:
+\`vibe init\``
   };
 }
 
