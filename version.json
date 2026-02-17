@@ -1,6 +1,6 @@
 {
-  "version": "0.4.4",
-  "updated": "2026-02-12",
+  "version": "0.4.9",
+  "updated": "2026-02-17",
   "changelog": "Trim npm package: 132→34 files, 816KB→195KB",
   "features": [
     "Explicit files whitelist — only ships what GTM tools need",

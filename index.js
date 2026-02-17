@@ -222,6 +222,13 @@ class VibeMCPServer {
           }
         };
 
+      case 'notifications/initialized':
+        // Client confirms it's ready — no response needed for notifications
+        return null;
+
+      case 'ping':
+        return { jsonrpc: '2.0', id, result: {} };
+
       case 'tools/list':
         return {
           jsonrpc: '2.0',
@@ -329,24 +336,45 @@ class VibeMCPServer {
 
       for (const line of lines) {
         if (!line.trim()) continue;
+        let request;
         try {
-          const request = JSON.parse(line);
+          request = JSON.parse(line);
+        } catch (e) {
+          // Malformed JSON — return proper JSON-RPC parse error
+          const parseError = {
+            jsonrpc: '2.0',
+            id: null,
+            error: { code: -32700, message: 'Parse error' }
+          };
+          process.stdout.write(JSON.stringify(parseError) + '\n');
+          continue;
+        }
+        try {
           const response = await this.handleRequest(request);
           if (response) {
             process.stdout.write(JSON.stringify(response) + '\n');
           }
         } catch (e) {
-          process.stderr.write(`Error: ${e.message}\n`);
+          const rpcError = {
+            jsonrpc: '2.0',
+            id: request.id || null,
+            error: { code: -32603, message: e.message }
+          };
+          process.stdout.write(JSON.stringify(rpcError) + '\n');
         }
       }
     });
 
-    process.stdin.on('end', () => {
+    const shutdown = () => {
       presence.stop();
-      // Close SQLite to flush WAL and prevent corruption
+      if (global.vibeNotifier) global.vibeNotifier.cancelAll();
       try { require('./store/sqlite').close(); } catch (e) {}
       process.exit(0);
-    });
+    };
+
+    process.stdin.on('end', shutdown);
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
 
     // Welcome message
     process.stderr.write('\n/vibe ready.\n');
@@ -373,6 +401,27 @@ class VibeMCPServer {
   }
 }
 
-// Start
-const server = new VibeMCPServer();
-server.start();
+// CLI flags — intercept before MCP server starts
+const args = process.argv.slice(2);
+if (args[0] === '--version' || args[0] === '-v') {
+  const { version } = require('./version.json');
+  console.log(version);
+  process.exit(0);
+}
+if (args[0] === '--help' || args[0] === '-h') {
+  console.log('Usage: slashvibe-mcp [command]\n');
+  console.log('Commands:');
+  console.log('  install     Configure /vibe in your editors');
+  console.log('  --version   Show version');
+  console.log('  --help      Show this help\n');
+  console.log('When run without arguments, starts the MCP server (stdio).');
+  process.exit(0);
+}
+if (args[0] === 'install') {
+  require('./scripts/install-editors');
+  // install-editors handles its own exit
+} else {
+  // Start MCP server
+  const server = new VibeMCPServer();
+  server.start();
+}

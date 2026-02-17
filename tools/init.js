@@ -321,7 +321,7 @@ function waitForCallback(requestedHandle, one_liner) {
 
     // Start server
     server.listen(CALLBACK_PORT, '127.0.0.1', () => {
-      console.log(`[vibe_init] Callback server listening on port ${CALLBACK_PORT}`);
+      process.stderr.write(`[vibe_init] Callback server listening on port ${CALLBACK_PORT}\n`);
     });
 
     // Timeout after 2 minutes

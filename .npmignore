@@ -7,8 +7,6 @@ bridges/
 protocol/
 
 # Dead root modules
-analytics.js
-auto-update.js
 discord.js
 twitter.js
 memory.js

@@ -57,6 +57,7 @@ That's it. Authenticates via GitHub, shows who's online, checks your inbox.
 | Tool | What it does |
 |------|-------------|
 | `vibe_start` | Entry point — authenticates, shows presence, checks inbox |
+| `vibe_init` | Set up your identity (GitHub OAuth) |
 | `vibe_who` | See who's online and what they're building |
 | `vibe_dm` | Send a direct message |
 | `vibe_inbox` | Check your unread messages |
