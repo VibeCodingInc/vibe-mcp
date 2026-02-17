@@ -1,11 +1,11 @@
 {
   "name": "slashvibe-mcp",
-  "version": "0.4.9",
+  "version": "0.4.10",
   "mcpName": "io.github.VibeCodingInc/vibe-mcp",
   "description": "Social MCP server — DMs, presence, and discovery for AI-assisted developers. Works with Claude Code, Cursor, VS Code, Windsurf, and any MCP client.",
   "main": "index.js",
   "bin": {
-    "slashvibe-mcp": "./index.js"
+    "slashvibe-mcp": "index.js"
   },
   "scripts": {
     "start": "node index.js",
