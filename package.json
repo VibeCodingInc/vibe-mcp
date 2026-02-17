@@ -78,6 +78,7 @@
     "intelligence/infer.js",
     "intelligence/serendipity.js",
     "lib/",
+    "auto-update.js",
     "scripts/sync-version.js",
     "scripts/install-editors.js",
     "README.md"

@@ -48,49 +48,18 @@ function inferPromptFromArgs(toolName, args) {
   const action = toolName.replace('vibe_', '');
   const handle = args.handle ? `@${args.handle.replace('@', '')}` : '';
   const message = args.message ? `"${args.message.slice(0, 50)}..."` : '';
-  const note = args.note || '';
   const mood = args.mood || '';
-  const reaction = args.reaction || '';
 
   switch (action) {
     case 'start': return 'start vibing';
     case 'who': return 'who is online';
-    case 'ping': return `ping ${handle} ${note}`.trim();
-    case 'react': return `react ${reaction} to ${handle}`.trim();
     case 'dm': return `message ${handle} ${message}`.trim();
     case 'inbox': return 'check inbox';
-    case 'open': return `open thread with ${handle}`;
     case 'status': return `set status to ${mood}`;
-    case 'context': return 'share context';
-    case 'summarize': return 'summarize session';
-    case 'bye': return 'end session';
-    case 'remember': return `remember about ${handle}`;
-    case 'recall': return `recall ${handle}`;
-    case 'forget': return `forget ${handle}`;
-    case 'board': return args.content ? 'post to board' : 'view board';
-    case 'observe': return args.content ? 'record observation' : 'view observations';
-    case 'invite': return 'generate invite';
-    case 'echo': return 'send feedback';
-    case 'x_mentions': return 'check x mentions';
-    case 'x_reply': return 'reply on x';
-    case 'handoff': return `handoff task to ${handle}`;
-    case 'reserve': return args.paths ? `reserve ${args.paths.join(', ')}` : 'reserve files';
-    case 'release': return `release ${args.reservation_id || 'reservation'}`;
-    case 'reservations': return 'list reservations';
-    case 'solo_game': return `play ${args.game || 'game'}`;
-    case 'tictactoe': return `play tic-tac-toe ${args.difficulty || ''}`.trim();
-    case 'wordassociation': return args.word ? `word association: ${args.word}` : 'play word association';
-    case 'multiplayer_game': return `multiplayer ${args.game || 'game'}`;
-    case 'drawing': return args.action ? `drawing ${args.action}` : 'collaborative drawing';
-    case 'crossword': return `crossword ${args.action || 'daily'}`;
-    case 'away': return args.message ? `set away: "${args.message}"` : 'go away';
-    case 'back': return 'come back';
+    case 'ship': return args.title ? `ship: ${args.title}` : 'ship';
     case 'discover': return `discover ${args.command || 'suggest'}`;
-    case 'suggest_tags': return `suggest tags ${args.command || 'suggest'}`;
-    case 'skills_exchange': return `skills exchange ${args.command || 'browse'}`;
-    case 'workshop_buddy': return `workshop buddy ${args.command || 'find'}`;
-    case 'create_artifact': return `create ${args.template || 'artifact'}: ${args.title || 'untitled'}`;
-    case 'view_artifact': return args.slug ? `view artifact ${args.slug}` : `list ${args.list || 'artifacts'}`;
+    case 'help': return 'help';
+    case 'init': return 'init identity';
     default: return `${action} ${handle}`.trim() || null;
   }
 }
