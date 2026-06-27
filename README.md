@@ -1,3 +1,12 @@
+> # ⚠️ DEPRECATED — this repo is no longer the source of `slashvibe-mcp`
+>
+> As of **Jun 27, 2026**, the canonical `slashvibe-mcp` is built from
+> **[`VibeCodingInc/vibe-platform` → `mcp-server/`](https://github.com/VibeCodingInc/vibe-platform/tree/main/mcp-server)**
+> (v0.5.0+), which is a strict superset of this code (adds AIRC/Matrix rooms and more).
+> The published npm package and the `npx -y slashvibe-mcp` command are unchanged —
+> only the source moved. Do not build or publish from this repo. See
+> `mcp-server/CANONICALIZATION.md` in vibe-platform for the migration.
+
 # /vibe MCP Server
 
 [![npm version](https://img.shields.io/npm/v/slashvibe-mcp.svg)](https://www.npmjs.com/package/slashvibe-mcp)

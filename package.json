@@ -1,8 +1,9 @@
 {
   "name": "slashvibe-mcp",
   "version": "0.4.10",
+  "deprecated": "DEPRECATED as a source repo (Jun 27 2026). Canonical slashvibe-mcp is now built from VibeCodingInc/vibe-platform (mcp-server/), v0.5.0+ — a superset of this code. The npm package and `npx -y slashvibe-mcp` command are unchanged. Do not publish from this repo.",
   "mcpName": "io.github.VibeCodingInc/vibe-mcp",
-  "description": "Social MCP server — DMs, presence, and discovery for AI-assisted developers. Works with Claude Code, Cursor, VS Code, Windsurf, and any MCP client.",
+  "description": "[DEPRECATED — see VibeCodingInc/vibe-platform mcp-server] Social MCP server — DMs, presence, and discovery for AI-assisted developers.",
   "main": "index.js",
   "bin": {
     "slashvibe-mcp": "index.js"
