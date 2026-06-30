@@ -1,8 +1,23 @@
-name: Publish to npm
+# RETIRED — this repo is no longer the source of `slashvibe-mcp`.
+#
+# The canonical package now publishes from VibeCodingInc/vibe-platform at
+# `mcp-server/` (see that repo's .github/workflows/npm-publish.yml, which fires
+# on `v*` tags). This workflow used to publish on every GitHub Release; left
+# enabled it would republish the stale 0.4.10 source OVER the canonical 0.5.x
+# and clobber the live package.
+#
+# Neutralized two ways:
+#   1. Trigger is `workflow_dispatch` only — it can no longer auto-fire on a
+#      release/tag/push.
+#   2. A guard step fails the run immediately, so even a manual dispatch can't
+#      publish without someone deliberately removing the guard.
+#
+# Do NOT re-enable. If this repo is ever revived as the source, restore the
+# `release`/tag trigger and delete the guard in the same change.
+name: Publish to npm (RETIRED)
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -11,13 +26,8 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
-      - run: npm install
-      - run: npm test
-      - run: npm publish --provenance --access public
-        env:
-          NODE_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Refuse to publish from the retired repo
+        run: |
+          echo "::error::vibe-mcp is retired. slashvibe-mcp publishes from vibe-platform/mcp-server."
+          echo "See VibeCodingInc/vibe-platform .github/workflows/npm-publish.yml"
+          exit 1

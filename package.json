@@ -1,6 +1,7 @@
 {
   "name": "slashvibe-mcp",
   "version": "0.4.10",
+  "private": true,
   "deprecated": "DEPRECATED as a source repo (Jun 27 2026). Canonical slashvibe-mcp is now built from VibeCodingInc/vibe-platform (mcp-server/), v0.5.0+ — a superset of this code. The npm package and `npx -y slashvibe-mcp` command are unchanged. Do not publish from this repo.",
   "mcpName": "io.github.VibeCodingInc/vibe-mcp",
   "description": "[DEPRECATED — see VibeCodingInc/vibe-platform mcp-server] Social MCP server — DMs, presence, and discovery for AI-assisted developers.",
