@@ -10,7 +10,7 @@
  * This is escalation, not baseline.
  */
 
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
@@ -56,16 +56,18 @@ function showNotification(title, message, sound = false, bell = true) {
     ringBell();
   }
 
-  // Escape quotes for osascript
-  const safeTitle = title.replace(/"/g, '\\"');
-  const safeMessage = message.replace(/"/g, '\\"');
+  // Escape double quotes so title/message stay inside their AppleScript
+  // string literals. Passed to osascript via execFile (no shell), so
+  // sender-controlled single quotes can no longer break out into a command.
+  const safeTitle = String(title).replace(/"/g, '\\"');
+  const safeMessage = String(message).replace(/"/g, '\\"');
 
   let script = `display notification "${safeMessage}" with title "${safeTitle}"`;
   if (sound) {
     script += ` sound name "Ping"`;
   }
 
-  exec(`osascript -e '${script}'`, err => {
+  execFile('osascript', ['-e', script], err => {
     if (err) {
       // Silently fail - notifications are best-effort
     }
