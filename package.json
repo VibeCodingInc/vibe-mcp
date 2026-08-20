@@ -10,8 +10,8 @@
   },
   "scripts": {
     "start": "node index.js",
-    "test": "node --test tools/*.test.js",
-    "test:context": "node --test tools/_work-context.test.js",
+    "test": "VIBE_SETUP_NO_AUTORUN=1 VIBE_HOME=\"$(mktemp -d)\" node --test tools/*.test.js",
+    "test:context": "VIBE_SETUP_NO_AUTORUN=1 VIBE_HOME=\"$(mktemp -d)\" node --test tools/_work-context.test.js",
     "tokens:sync": "node scripts/sync-room-tone-tokens.js",
     "pack:check": "node scripts/check-pack-closure.js",
     "prepack": "node scripts/sync-versions.js && node scripts/sync-room-tone-tokens.js && node scripts/check-pack-closure.js",

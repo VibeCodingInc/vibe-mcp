@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need main to prove the tag is on a reviewed commit
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -32,6 +34,16 @@ jobs:
             echo "package.json ($PKG) != tag ($TAG)"; exit 1
           fi
           echo "version verified: $PKG"
+
+      - name: Verify tag points at reviewed main
+        run: |
+          # A release may only be cut from a commit that landed on main (i.e.
+          # passed review). A tag on an unmerged branch cannot publish.
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "tag commit $GITHUB_SHA is not on origin/main — refusing to publish"; exit 1
+          fi
+          echo "tag is on main: $GITHUB_SHA"
 
       - name: Install
         run: npm install

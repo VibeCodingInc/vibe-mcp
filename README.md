@@ -15,8 +15,12 @@ npx slashvibe-mcp
 That's the whole thing: it configures Claude Code, Codex, and Cursor in one run, opens
 GitHub to sign you in, and your GitHub username becomes your @handle. About 30 seconds.
 
-Invited by someone? After setup, say `vibe inbox` — their message is waiting. Reply and
-you're done; that's the whole onboarding.
+**Then restart your coding agent** so it loads the /vibe MCP server. (Setup writes the
+config; the agent only picks up a new MCP server on start.) After the restart, run
+`vibe init` if you weren't signed in during setup.
+
+Invited by someone? After setup and restart, say `vibe inbox` — their message is waiting.
+Reply and you're done; that's the whole onboarding.
 
 ## Put waiting messages at the top of your next Claude session
 
@@ -63,7 +67,7 @@ The default surface is deliberately small — 10 tools:
 - **dm / inbox / reply** — messages that survive restarts on both sides. The optional
   read-only Claude hook can put a waiting reply at the top of your next session
 - **status** — what you're working on, in words (`shipping`, `debugging`)
-- **help**, plus setup plumbing (`init`, `token`, `bye`, `email`)
+- **help**, plus setup plumbing (`start`, `init`, `token`, `bye`)
 
 The culture layer (games, poems, exquisite corpse, the weave) still ships but is opt-in:
 set `VIBE_EXTRAS=1` to register all 20 tools.

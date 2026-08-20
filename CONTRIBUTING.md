@@ -23,11 +23,11 @@ Thanks for your interest in contributing to /vibe! This is the social layer for 
 
 ```
 index.js          — MCP server entry point and protocol handler
-config.js         — Configuration management
+config.js         — Identity/config at ~/.vibe (VIBE_HOME-aware)
 presence.js       — Presence heartbeat system
 memory.js         — Local memory/notes storage
 tools/            — Individual tool implementations
-store/            — SQLite persistence layer
+store/            — REST client for the slashvibe.dev API
 protocol/         — MCP protocol helpers
 intelligence/     — AI-assisted features
 ```

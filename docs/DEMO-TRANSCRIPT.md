@@ -39,6 +39,7 @@ say "dm @handle" to reach someone
 
 ```text
 Sent to **@rune**
+_receipt: m_synthetic_
 _@rune is away — it'll be waiting on their next turn._
 ```
 
@@ -83,6 +84,7 @@ Just type your reply to send it
 
 ```text
 ✓ Replied to **@ada**
+_receipt: m_synthetic_
 
 _1 message marked as read_
 ```
