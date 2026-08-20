@@ -12,22 +12,29 @@
 
 const fs = require('fs');
 const path = require('path');
+const { vibeHome } = require('../vibe-home');
 
-const PATTERNS_FILE = path.join(process.env.HOME, '.vibe', 'work-patterns.json');
+// Behavioral memory lives inside the identity directory (VIBE_HOME-aware), so an
+// isolated identity keeps its own patterns and never writes into the shared
+// ~/.vibe. Resolved lazily from the ONE vibeHome() definition on each use.
+function patternsFile() {
+  return path.join(vibeHome(), 'work-patterns.json');
+}
 
-// Ensure directory exists
+// Ensure directory exists (0700 — it is the identity directory)
 function ensureDir() {
-  const dir = path.dirname(PATTERNS_FILE);
+  const dir = path.dirname(patternsFile());
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
 }
 
 // Load patterns from disk
 function load() {
   try {
-    if (fs.existsSync(PATTERNS_FILE)) {
-      return JSON.parse(fs.readFileSync(PATTERNS_FILE, 'utf8'));
+    const file = patternsFile();
+    if (fs.existsSync(file)) {
+      return JSON.parse(fs.readFileSync(file, 'utf8'));
     }
   } catch (e) {
     console.error('[patterns] Load error:', e.message);
@@ -39,7 +46,7 @@ function load() {
 function save(patterns) {
   ensureDir();
   try {
-    fs.writeFileSync(PATTERNS_FILE, JSON.stringify(patterns, null, 2));
+    fs.writeFileSync(patternsFile(), JSON.stringify(patterns, null, 2));
   } catch (e) {
     console.error('[patterns] Save error:', e.message);
   }

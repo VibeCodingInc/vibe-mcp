@@ -142,6 +142,28 @@ test('setup.saveAuthConfig writes inside VIBE_HOME (0700/0600) and never touches
   });
 });
 
+// ── behavioral memory (intelligence/patterns) honors isolation ────────────
+
+test('patterns write under an isolated VIBE_HOME and leave the shared ~/.vibe untouched', () => {
+  withEnv({ VIBE_HOME: (h) => path.join(h, '.vibe-vibetester1') }, (home) => {
+    // A pre-existing shared profile with its OWN patterns file.
+    fs.mkdirSync(path.join(home, '.vibe'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.vibe', 'work-patterns.json'), '{"marker":"shared-untouched"}');
+    const isolated = path.join(home, '.vibe-vibetester1');
+
+    const patterns = freshRequire('../intelligence/patterns');
+    patterns.logMessageSent('qa_peer'); // triggers a save()
+
+    // The isolated identity wrote its own patterns...
+    assert.ok(fs.existsSync(path.join(isolated, 'work-patterns.json')), 'isolated patterns file exists');
+    // ...and the shared ~/.vibe patterns are byte-for-byte untouched.
+    assert.equal(
+      fs.readFileSync(path.join(home, '.vibe', 'work-patterns.json'), 'utf8'),
+      '{"marker":"shared-untouched"}',
+    );
+  });
+});
+
 // ── actor-session paths honor the one definition ──────────────────────────
 
 test('actorPaths uses VIBE_HOME and refuses an empty one', () => {

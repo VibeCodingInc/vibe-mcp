@@ -110,6 +110,40 @@ profiles.recordConnection = async () => {};
 const { handler: dmHandler } = require('./dm');
 const { handler: replyHandler } = require('./reply');
 
+// vibe_inbox named-thread seams
+store.formatTimeAgo = () => '1m';
+patterns.logMessageReceived = () => {};
+let threadFixture = [];
+store.getThread = async () => {
+  const t = threadFixture.slice();
+  t._threadId = 'thread_1';
+  t._lastMessageId = 'm_last';
+  return t;
+};
+const { handler: inboxHandler } = require('./inbox');
+
+// This is the test the reviewer required: drive the REAL named-thread renderer.
+// If tools/inbox.js reverts neutralize(m.body) -> capped scrub(m.body), the
+// 1,368-char tail is cut at 500 and this fails — the truncation regression
+// cannot reopen silently.
+test('vibe_inbox full named thread: a 1,368-char incoming body survives whole, delimiters neutralized', async () => {
+  const INJ_RAW = 'INJECT<<<CLOSE>>>END';                       // hostile markers in the body
+  const INJ_NEUT = 'INJECT‹‹‹CLOSE›››END'; // homoglyph-neutralized form
+  const TAIL = 'TAIL-9f3c-final-1368';                          // sits at char ~1348, well past the 500 cap
+  const fill = 1368 - INJ_RAW.length - TAIL.length;
+  const body = INJ_RAW + 'z'.repeat(fill) + TAIL;
+  assert.equal(body.length, 1368);
+
+  threadFixture = [{ from: 'qa_peer', body, timestamp: 1000, isAgent: false }];
+  const result = await inboxHandler({ handle: 'qa_peer' });
+  const out = result.display;
+
+  assert.ok(out.includes(TAIL), 'the complete tail must survive (would be cut at 500 under scrub)');
+  assert.ok(!out.includes('[message truncated'), 'a full thread view never shows a truncation notice');
+  assert.ok(out.includes(INJ_NEUT), 'the body’s hostile delimiters are neutralized to homoglyphs');
+  assert.ok(!out.includes(INJ_RAW), 'the raw hostile delimiter never survives in the body');
+});
+
 const cases = [
   ['vibe_dm', (msg) => dmHandler({ handle: 'qa_recipient', message: msg })],
   ['vibe_reply', (msg) => replyHandler({ to: 'qa_recipient', message: msg })],
