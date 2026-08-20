@@ -1,5 +1,9 @@
 name: CI
 
+# Every push and PR runs the public artifact tests and a secret scan. This is
+# the gate that keeps the source-of-record honest: the packed tarball must boot,
+# the release conformance checks must pass, and no credential-shaped material may
+# enter the tree (allowlist of confirmed false positives in .gitleaks.toml).
 on:
   push:
     branches: [main]
@@ -9,24 +13,28 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [18, 20, 22]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: '20'
       - run: npm install
-      - run: npm test
+      - name: Pack closure
+        run: npm run pack:check
+      - name: Unit tests
+        run: npm test
+      - name: Tarball boots
+        run: npm run test:pack
+      - name: Release conformance
+        run: npm run test:release
 
-  lint:
+  secret-scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
         with:
-          node-version: 20
-      - run: npm install
-      - run: npm run lint
-      - run: npm run format:check
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml

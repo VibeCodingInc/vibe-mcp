@@ -60,7 +60,7 @@ async function post(content, options = {}) {
  */
 async function postJoin(handle, oneLiner) {
   const embed = {
-    color: 0x6b8fff, // Spirit blue
+    color: 0x6B8FFF, // Spirit blue
     title: `@${handle} joined /vibe`,
     description: oneLiner || 'Building something',
     footer: { text: 'slashvibe.dev' },
@@ -74,7 +74,7 @@ async function postJoin(handle, oneLiner) {
  */
 async function postActivity(handle, action) {
   const embed = {
-    color: 0x2ecc71, // Green
+    color: 0x2ECC71, // Green
     description: `**@${handle}** ${action}`,
     timestamp: new Date().toISOString()
   };
@@ -86,17 +86,17 @@ async function postActivity(handle, action) {
  */
 async function postStatus(handle, mood, note) {
   const moodEmoji = {
-    shipping: '🔥',
-    debugging: '🐛',
-    deep: '🧠',
-    afk: '☕',
-    celebrating: '🎉',
-    pairing: '👯'
+    'shipping': '🔥',
+    'debugging': '🐛',
+    'deep': '🧠',
+    'afk': '☕',
+    'celebrating': '🎉',
+    'pairing': '👯'
   };
 
   const emoji = moodEmoji[mood] || '●';
   const embed = {
-    color: 0x9b59b6, // Purple
+    color: 0x9B59B6, // Purple
     description: `${emoji} **@${handle}** is ${mood}${note ? `: "${note}"` : ''}`,
     timestamp: new Date().toISOString()
   };
@@ -108,7 +108,7 @@ async function postStatus(handle, mood, note) {
  */
 async function postAnnouncement(message) {
   const embed = {
-    color: 0x6b8fff,
+    color: 0x6B8FFF,
     title: '/vibe',
     description: message,
     timestamp: new Date().toISOString()
@@ -120,10 +120,12 @@ async function postAnnouncement(message) {
  * Post a conversation highlight
  */
 async function postHighlight(handle, title, summary, threads = []) {
-  const threadList = threads.length > 0 ? '\n\n**Open threads:**\n' + threads.map(t => `• ${t}`).join('\n') : '';
+  const threadList = threads.length > 0
+    ? '\n\n**Open threads:**\n' + threads.map(t => `• ${t}`).join('\n')
+    : '';
 
   const embed = {
-    color: 0xf39c12, // Gold/amber for highlights
+    color: 0xF39C12, // Gold/amber for highlights
     title: `💬 ${title}`,
     description: summary + threadList,
     footer: { text: `shared by @${handle} · slashvibe.dev` },
@@ -140,15 +142,13 @@ async function postOnlineList(users) {
     return post('_Room is quiet..._');
   }
 
-  const list = users
-    .map(u => {
-      const mood = u.mood ? ` ${u.mood}` : '';
-      return `• **@${u.handle}**${mood} — ${u.one_liner || 'building'}`;
-    })
-    .join('\n');
+  const list = users.map(u => {
+    const mood = u.mood ? ` ${u.mood}` : '';
+    return `• **@${u.handle}**${mood} — ${u.one_liner || 'building'}`;
+  }).join('\n');
 
   const embed = {
-    color: 0x6b8fff,
+    color: 0x6B8FFF,
     title: `${users.length} online in /vibe`,
     description: list,
     footer: { text: 'slashvibe.dev' },
