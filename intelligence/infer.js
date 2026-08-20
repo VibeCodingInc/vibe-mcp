@@ -16,7 +16,7 @@ const STATES = {
   'github-shipping': {
     emoji: '🔥',
     label: 'shipping code',
-    priority: 0, // Highest priority — real GitHub commits
+    priority: 0,  // Highest priority — real GitHub commits
     description: 'Active GitHub commits detected'
   },
   'deep-focus': {
@@ -25,31 +25,31 @@ const STATES = {
     priority: 1,
     description: 'Long session, minimal messaging'
   },
-  shipping: {
+  'shipping': {
     emoji: '🚀',
     label: 'shipping',
     priority: 2,
     description: 'Active commits, on main/master branch'
   },
-  debugging: {
+  'debugging': {
     emoji: '🐛',
     label: 'debugging',
     priority: 3,
     description: 'Errors present or fix- branch'
   },
-  exploring: {
+  'exploring': {
     emoji: '🔍',
     label: 'exploring',
     priority: 4,
     description: 'Many file switches, few edits'
   },
-  stuck: {
+  'stuck': {
     emoji: '🤔',
     label: 'might be stuck',
     priority: 5,
     description: 'Same file for a while, no commits'
   },
-  pairing: {
+  'pairing': {
     emoji: '👥',
     label: 'pairing',
     priority: 6,
@@ -93,8 +93,10 @@ function inferState(context = {}) {
   if (signals.githubShippingMode === 'hot') {
     candidates.push({
       state: 'github-shipping',
-      confidence: 0.95, // Very high - based on actual commits
-      reason: signals.githubCommits > 0 ? `${signals.githubCommits} commits recently` : 'active on GitHub'
+      confidence: 0.95,  // Very high - based on actual commits
+      reason: signals.githubCommits > 0
+        ? `${signals.githubCommits} commits recently`
+        : 'active on GitHub'
     });
   } else if (signals.githubShippingMode === 'active') {
     candidates.push({
@@ -118,7 +120,9 @@ function inferState(context = {}) {
   // Has error OR on a fix/debug/bug branch
   if (signals.hasError || signals.isDebugBranch) {
     const confidence = signals.hasError ? 0.85 : 0.7;
-    const reason = signals.hasError ? 'working through an error' : `on ${context.branch}`;
+    const reason = signals.hasError
+      ? 'working through an error'
+      : `on ${context.branch}`;
     candidates.push({
       state: 'debugging',
       confidence,
@@ -210,7 +214,9 @@ function analyzeSignals(context) {
   const recentCommit = minutesSinceCommit < 30;
 
   // File stickiness (how long on same file)
-  const sameFileDuration = context.sameFileSince ? (now - context.sameFileSince) / (1000 * 60) : 0;
+  const sameFileDuration = context.sameFileSince
+    ? (now - context.sameFileSince) / (1000 * 60)
+    : 0;
 
   // Message activity
   const messageCount = context.messageCount || 0;

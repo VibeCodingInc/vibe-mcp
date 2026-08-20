@@ -1,0 +1,8 @@
+# Deprecated tools (archived, not in use)
+tools/_deprecated/
+
+# Node modules
+node_modules/
+
+# Build output
+dist/

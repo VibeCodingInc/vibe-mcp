@@ -1,0 +1,14 @@
+# gitleaks config for the public slashvibe-mcp client.
+# Extends the default ruleset; allowlists two confirmed false positives
+# documented in SECRET-SCAN.md. A real credential must never be allowlisted here.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Confirmed false positives — see SECRET-SCAN.md"
+regexes = [
+  # JSDoc example idempotency key (protocol/index.js:56)
+  '''handoff_abc123''',
+  # Fabricated OpenAI-shaped key used as redaction-test input (tools/_work-context.test.js:78)
+  '''sk-1234567890abcdefghij1234567890''',
+]

@@ -4,16 +4,21 @@
  * Sends heartbeat every 30 seconds while MCP server is running.
  * Uses session tokens for per-session identity.
  * Users become "idle" after 5 minutes of no heartbeat.
+ *
+ * Also runs a guest message poll every 15 seconds. When guest messages
+ * are detected, emits a tools/list_changed notification to force Claude
+ * to re-query vibe tools (which triggers getPresenceFooter and injects
+ * the messages into context). This ensures Use Case 2 (user testing/QA)
+ * works even when the developer is deep in non-vibe tool calls.
  */
 
 const config = require('./config');
+const authStore = require('./auth-store');
 const store = require('./store');
-const notify = require('./notify');
-const analytics = require('./analytics');
-const os = require('os');
-const { execSync } = require('child_process');
+const { apiHeaders } = require('./api-auth');
 
 let heartbeatInterval = null;
+let guestPollInterval = null;
 let sessionInitialized = false;
 
 function start() {
@@ -24,6 +29,12 @@ function start() {
 
   // Then every 30 seconds
   heartbeatInterval = setInterval(sendHeartbeat, 30 * 1000);
+
+  // Guest message poll: every 15 seconds, check for incoming session messages
+  // and emit tools/list_changed to force Claude to pick them up via getPresenceFooter
+  if (!guestPollInterval) {
+    guestPollInterval = setInterval(pollGuestMessages, 15 * 1000);
+  }
 }
 
 function stop() {
@@ -31,17 +42,10 @@ function stop() {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
-
-  // End local session journal + analytics
-  try {
-    const sessionId = config.getSessionId();
-    if (sessionId) {
-      const getSessions = require('./store/sessions');
-      getSessions().endSession(sessionId);
-    }
-    analytics.trackSession('ended');
-  } catch (e) { /* journal/analytics is best-effort */ }
-
+  if (guestPollInterval) {
+    clearInterval(guestPollInterval);
+    guestPollInterval = null;
+  }
   // Clean up session file
   config.clearSession();
 }
@@ -49,8 +53,10 @@ function stop() {
 async function initSession() {
   if (!config.isInitialized()) return;
 
-  // Use session-aware getters (prefer session identity over shared config)
-  const handle = config.getHandle();
+  // The handle we broadcast is the one our CREDENTIAL names — not the one written in
+  // a config file. Reading config here is what made "presence follows the credential"
+  // untrue after #107: the gate moved, the heartbeat did not (codex #4).
+  const handle = authStore.getHandle();
   if (!handle) return;
 
   // Get or create session ID
@@ -63,29 +69,6 @@ async function initSession() {
     sessionInitialized = result.success;
   }
 
-  // Track session start (anonymous analytics)
-  analytics.trackSession('started', {
-    machine: os.hostname(),
-    platform: process.platform,
-    node: process.version
-  });
-
-  // Start local session journal
-  try {
-    const getSessions = require('./store/sessions');
-    let repo = null;
-    let branch = null;
-    try {
-      repo = execSync('git rev-parse --show-toplevel', { encoding: 'utf8', timeout: 2000 }).trim();
-      branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8', timeout: 2000 }).trim();
-    } catch (e) { /* not in a git repo */ }
-    getSessions().startSession(sessionId, handle, {
-      repo,
-      branch,
-      machineId: os.hostname()
-    });
-  } catch (e) { /* journal is best-effort */ }
-
   // Send initial heartbeat
   sendHeartbeat();
 }
@@ -93,14 +76,56 @@ async function initSession() {
 async function sendHeartbeat() {
   if (!config.isInitialized()) return;
 
-  // Use session-aware getters (prefer session identity over shared config)
-  const handle = config.getHandle();
+  // Same rule as initSession: presence names whoever holds the credential.
+  const handle = authStore.getHandle();
   const one_liner = config.getOneLiner();
   if (handle) {
-    store.heartbeat(handle, one_liner || '', null, 'mcp');
+    store.heartbeat(handle, one_liner || '');
+  }
+}
 
-    // Check for notifications (runs in background, non-blocking)
-    notify.checkAll(store).catch(() => {});
+/**
+ * Poll for guest session messages (from paired users) AND new ordinary DMs.
+ * When either exists, emit tools/list_changed to trigger Claude to refresh,
+ * which calls getPresenceFooter() and injects the messages into context.
+ * Does NOT ack/read the messages — guest ack happens in getPresenceFooter;
+ * DM read-cursors advance only when the user opens/replies to the thread.
+ */
+let lastSeenUnread = null;
+
+async function pollGuestMessages() {
+  try {
+    const handle = config.getHandle();
+    if (!handle) return;
+
+    const apiUrl = config.getApiUrl?.() || 'https://www.slashvibe.dev';
+    const resp = await fetch(`${apiUrl}/api/session/guest?handle=${encodeURIComponent(handle)}`, {
+      headers: apiHeaders(),
+    });
+    if (!resp.ok) return;
+
+    const data = await resp.json();
+    if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
+      // Guest messages waiting — emit list_changed to force Claude to refresh
+      // getPresenceFooter() will pick them up and inject into context (with ack)
+      if (global.vibeNotifier) {
+        global.vibeNotifier.emitImmediate();
+      }
+    }
+
+    // Ordinary DMs: nudge the session when the unread count RISES, so a DM
+    // sent from any surface reaches the live session within one poll cycle
+    // (getPresenceFooter injects the new bodies, once each). A drop just
+    // rebaselines — reading elsewhere shouldn't trigger a refresh here.
+    const unread = await store.getUnreadCount(handle).catch(() => null);
+    if (typeof unread === 'number') {
+      if (lastSeenUnread !== null && unread > lastSeenUnread && global.vibeNotifier) {
+        global.vibeNotifier.emitImmediate();
+      }
+      lastSeenUnread = unread;
+    }
+  } catch {
+    // Silent fail — guest polling is best-effort
   }
 }
 
@@ -121,9 +146,28 @@ async function forceHeartbeat() {
 
   // Send heartbeat
   const one_liner = config.getOneLiner();
-  await store.heartbeat(handle, one_liner || '', null, 'mcp');
+  await store.heartbeat(handle, one_liner || '');
 
   return { success: true, handle };
 }
 
-module.exports = { start, stop, forceHeartbeat };
+/**
+ * Explicit offline beacon — flips presence off now instead of waiting out the
+ * last_seen TTL. Used by vibe_bye so "signed off" is true immediately.
+ */
+async function goOffline() {
+  const handle = config.getHandle();
+  if (!handle) return;
+  const apiUrl = config.getApiUrl?.() || 'https://www.slashvibe.dev';
+  try {
+    await fetch(`${apiUrl}/api/v2/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...apiHeaders() },
+      body: JSON.stringify({ action: 'offline' }),
+    });
+  } catch {
+    // Best-effort: the TTL still expires us if this doesn't land.
+  }
+}
+
+module.exports = { start, stop, forceHeartbeat, goOffline };

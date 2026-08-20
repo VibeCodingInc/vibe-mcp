@@ -1,23 +1,66 @@
 name: Publish to npm
 
+# Publishes slashvibe-mcp from the PUBLIC source-of-record only, on a version
+# tag (e.g. v0.8.17). The artifact tests run and must pass before publish; a
+# failed pack/boot/conformance check stops the release before it reaches npm.
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      id-token: write # npm provenance
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          node-version: 20
-          registry-url: https://registry.npmjs.org
-      - run: npm install
-      - run: npm test
-      - run: npm publish --provenance --access public
+          fetch-depth: 0 # need main to prove the tag is on a reviewed commit
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify tag matches package version
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          TAG="${GITHUB_REF#refs/tags/v}"
+          if [ "$PKG" != "$TAG" ]; then
+            echo "package.json ($PKG) != tag ($TAG)"; exit 1
+          fi
+          echo "version verified: $PKG"
+
+      - name: Verify tag points at reviewed main
+        run: |
+          # A release may only be cut from a commit that landed on main (i.e.
+          # passed review). A tag on an unmerged branch cannot publish.
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "tag commit $GITHUB_SHA is not on origin/main — refusing to publish"; exit 1
+          fi
+          echo "tag is on main: $GITHUB_SHA"
+
+      - name: Install
+        run: npm install
+
+      - name: Pack closure
+        run: npm run pack:check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Tarball boots
+        run: npm run test:pack
+
+      - name: Release conformance
+        run: npm run test:release
+
+      - name: Publish to npm (provenance)
+        run: npm publish --provenance --access public
         env:
-          NODE_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -34,7 +34,7 @@ const PROTOCOL_VERSION = '0.1.0';
 const GAME_SCHEMA = {
   type: 'game',
   required: ['game', 'state'],
-  validate: payload => {
+  validate: (payload) => {
     if (!payload.game || typeof payload.game !== 'string') {
       return { valid: false, error: 'Missing or invalid game name' };
     }
@@ -65,7 +65,7 @@ const GAME_SCHEMA = {
 const HANDOFF_SCHEMA = {
   type: 'handoff',
   required: ['task', 'context'],
-  validate: payload => {
+  validate: (payload) => {
     if (!payload.task || typeof payload.task !== 'string') {
       return { valid: false, error: 'Missing or invalid task type' };
     }
@@ -90,7 +90,7 @@ const HANDOFF_SCHEMA = {
 const ACK_SCHEMA = {
   type: 'ack',
   required: ['replyTo', 'status'],
-  validate: payload => {
+  validate: (payload) => {
     if (!payload.replyTo || typeof payload.replyTo !== 'string') {
       return { valid: false, error: 'Missing or invalid replyTo' };
     }
@@ -119,7 +119,7 @@ const ACK_SCHEMA = {
 const ARTIFACT_SCHEMA = {
   type: 'artifact',
   required: ['artifactId', 'slug', 'title', 'template', 'url'],
-  validate: payload => {
+  validate: (payload) => {
     if (!payload.artifactId || typeof payload.artifactId !== 'string') {
       return { valid: false, error: 'Missing or invalid artifactId' };
     }
@@ -139,56 +139,11 @@ const ARTIFACT_SCHEMA = {
   }
 };
 
-/**
- * Agent wire schema — For agent-to-agent communication on the wire
- *
- * Used when external agents (Clawdbot, @seth) communicate via /vibe.
- * AIRC-signed for identity verification.
- *
- * Example:
- * {
- *   type: 'agent',
- *   version: '0.1.0',
- *   action: 'session_sync',
- *   idempotencyKey: 'agent_seth_session_abc',
- *   source: { platform: 'telegram', gateway: 'clawdbot' },
- *   context: {
- *     session: 'NODE logistics',
- *     mood: 'shipping',
- *     file: 'node365/submit/page.tsx'
- *   }
- * }
- */
-const AGENT_SCHEMA = {
-  type: 'agent',
-  required: ['action'],
-  validate: payload => {
-    if (!payload.action || typeof payload.action !== 'string') {
-      return { valid: false, error: 'Missing or invalid action' };
-    }
-    const validActions = [
-      'session_sync',   // Sync session state to /vibe presence
-      'event_subscribe', // Subscribe to event pushes
-      'memory_query',   // Query local memory
-      'memory_store',   // Store observation
-      'identity_verify', // AIRC identity verification
-      'heartbeat',      // Agent heartbeat
-      'capability_announce' // Announce agent capabilities
-    ];
-    // Allow unknown actions for forward compat
-    if (!validActions.includes(payload.action)) {
-      return { valid: true, unknown_action: true };
-    }
-    return { valid: true };
-  }
-};
-
 const SCHEMAS = {
   game: GAME_SCHEMA,
   handoff: HANDOFF_SCHEMA,
   ack: ACK_SCHEMA,
-  artifact: ARTIFACT_SCHEMA,
-  agent: AGENT_SCHEMA
+  artifact: ARTIFACT_SCHEMA
 };
 
 // ============ PROTOCOL FUNCTIONS ============
@@ -275,14 +230,10 @@ function generateIdempotencyKey(prefix, context = '') {
  * @returns {Object} - Game payload
  */
 function createGamePayload(game, state, options = {}) {
-  return createPayload(
-    'game',
-    { game, state },
-    {
-      idempotencyKey: options.idempotencyKey || generateIdempotencyKey('game', game),
-      ...options
-    }
-  );
+  return createPayload('game', { game, state }, {
+    idempotencyKey: options.idempotencyKey || generateIdempotencyKey('game', game),
+    ...options
+  });
 }
 
 /**
@@ -312,14 +263,10 @@ function createTicTacToePayload(board, turn, moves, winner = null) {
  * @returns {Object} - Handoff payload
  */
 function createHandoffPayload(task, context, options = {}) {
-  return createPayload(
-    'handoff',
-    { task, context },
-    {
-      idempotencyKey: options.idempotencyKey || generateIdempotencyKey('handoff', task),
-      ...options
-    }
-  );
+  return createPayload('handoff', { task, context }, {
+    idempotencyKey: options.idempotencyKey || generateIdempotencyKey('handoff', task),
+    ...options
+  });
 }
 
 // ============ ACK HELPERS ============
@@ -360,8 +307,8 @@ function formatPayload(payload) {
       return formatAckPayload(payload);
     case 'artifact':
       return formatArtifactPayload(payload);
-    case 'agent':
-      return formatAgentPayload(payload);
+    case 'code':
+      return formatCodePayload(payload);
     default:
       return `📦 _${payload.type} payload_`;
   }
@@ -373,7 +320,7 @@ function formatGamePayload(payload) {
 
   if (game === 'tictactoe' && state.board) {
     const b = state.board;
-    const cell = i => b[i] || '·';
+    const cell = (i) => b[i] || '·';
     return `🎮 **Tic-Tac-Toe** (move ${state.moves || '?'})
 \`\`\`
  ${cell(0)} │ ${cell(1)} │ ${cell(2)}
@@ -412,10 +359,77 @@ function formatAckPayload(payload) {
   return `${icon} Acknowledged: ${payload.replyTo} (${status})`;
 }
 
+/**
+ * Format a code snippet payload for display
+ */
+function formatCodePayload(payload) {
+  const lang = payload.language || '';
+  const filename = payload.filename || null;
+  const code = payload.code || '';
+  const description = payload.description || null;
+
+  let display = '📝 **Code Snippet**';
+  if (filename) {
+    display += ` — \`${filename}\``;
+  }
+  if (lang) {
+    display += ` (${lang})`;
+  }
+  display += '\n';
+
+  if (description) {
+    display += `> ${description}\n`;
+  }
+
+  display += `\`\`\`${lang}\n${code}\n\`\`\``;
+
+  return display;
+}
+
+/**
+ * Create a code snippet payload
+ * @param {string} code - The code content
+ * @param {object} options - Options
+ * @param {string} [options.language] - Programming language
+ * @param {string} [options.filename] - Original filename
+ * @param {string} [options.description] - Brief description
+ */
+function createCodePayload(code, options = {}) {
+  return {
+    type: 'code',
+    version: PROTOCOL_VERSION,
+    code,
+    language: options.language || detectLanguage(code),
+    filename: options.filename || null,
+    description: options.description || null,
+  };
+}
+
+/**
+ * Simple language detection based on content patterns
+ */
+function detectLanguage(code) {
+  if (!code) return '';
+
+  // Check for common patterns
+  if (code.includes('import React') || code.includes('useState') || code.includes('useEffect')) return 'jsx';
+  if (code.includes('import ') && code.includes(' from ')) return 'javascript';
+  if (code.includes('async function') || code.includes('await ')) return 'javascript';
+  if (code.includes('def ') && code.includes(':')) return 'python';
+  if (code.includes('func ') && code.includes('()')) return 'go';
+  if (code.includes('fn ') && code.includes('->')) return 'rust';
+  if (code.includes('SELECT ') || code.includes('INSERT INTO')) return 'sql';
+  if (code.includes('<!DOCTYPE') || code.includes('<html')) return 'html';
+  if (code.includes('{') && code.includes(':') && code.includes(';')) return 'css';
+  if (code.startsWith('{') && code.endsWith('}')) return 'json';
+  if (code.startsWith('#!') && code.includes('/bin/')) return 'bash';
+
+  return '';
+}
+
 function formatArtifactPayload(payload) {
   const template = payload.template || 'artifact';
-  const templateIcon =
-    template === 'guide' ? '📘' : template === 'learning' ? '💡' : template === 'workspace' ? '🗂️' : '📦';
+  const templateIcon = template === 'guide' ? '📘' : template === 'learning' ? '💡' : template === 'workspace' ? '🗂️' : '📦';
 
   let display = `${templateIcon} **${payload.title}**\n`;
 
@@ -456,56 +470,6 @@ function createArtifactPayload(artifact) {
   });
 }
 
-// ============ AGENT HELPERS ============
-
-/**
- * Create an agent wire payload
- * @param {string} action - Agent action (session_sync, event_subscribe, etc.)
- * @param {object} data - Action-specific data
- * @param {object} [options] - Options (idempotencyKey, source)
- * @returns {object} - Agent payload
- */
-function createAgentPayload(action, data = {}, options = {}) {
-  const payload = {
-    action,
-    ...data
-  };
-
-  if (options.source) {
-    payload.source = options.source;
-  }
-
-  return createPayload('agent', payload, {
-    idempotencyKey: options.idempotencyKey || generateIdempotencyKey('agent', action),
-    ...options
-  });
-}
-
-/**
- * Format agent payload for display
- */
-function formatAgentPayload(payload) {
-  const action = payload.action || 'unknown';
-  const source = payload.source
-    ? ` (via ${payload.source.platform || payload.source.gateway || 'unknown'})`
-    : '';
-
-  switch (action) {
-    case 'session_sync':
-      return `🤖 **Session sync**${source}\n> ${payload.context?.session || 'active'}`;
-    case 'event_subscribe':
-      return `🔔 **Event subscription**${source}\n> ${(payload.events || []).join(', ')}`;
-    case 'heartbeat':
-      return `💓 **Agent heartbeat**${source}`;
-    case 'identity_verify':
-      return `🔑 **Identity verification**${source}`;
-    case 'capability_announce':
-      return `📡 **Capabilities**${source}\n> ${(payload.capabilities || []).join(', ')}`;
-    default:
-      return `🤖 **Agent: ${action}**${source}`;
-  }
-}
-
 module.exports = {
   PROTOCOL_VERSION,
 
@@ -528,8 +492,8 @@ module.exports = {
   // Artifact helpers
   createArtifactPayload,
 
-  // Agent helpers
-  createAgentPayload,
+  // Code helpers
+  createCodePayload,
 
   // Schemas (for extension)
   SCHEMAS

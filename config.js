@@ -1,23 +1,50 @@
 /**
  * Config — User identity and paths
  *
- * UNIFIED: Uses ~/.vibecodings/config.json as primary source
- * Falls back to ~/.vibe/config.json for backward compat
+ * Canonical location: ~/.vibe/config.json
+ * Falls back to ~/.vibecodings/config.json for backward compat
  */
 
 const fs = require('fs');
 const path = require('path');
 
-const VIBE_DIR = path.join(process.env.HOME, '.vibe');
+// Identity is normally HOME-locked to ~/.vibe. VIBE_HOME overrides the base dir
+// so a SECOND session on the same machine can be a DIFFERENT being — required to
+// run the live weave (a fable needs two distinct beings). Set it to an isolated
+// dir and `vibe init` there mints/loads a separate identity, e.g.
+//   VIBE_HOME=~/.vibe-b claude   (that session signs in as being B)
+// Unset → identical behavior to before (base = ~/.vibe). Set-but-empty → throws
+// (vibe-home.js): guessing would silently merge two identities.
+const { vibeHome, isIsolated } = require('./vibe-home');
+const VIBE_DIR = vibeHome();
 const VIBECODINGS_DIR = path.join(process.env.HOME, '.vibecodings');
-const PRIMARY_CONFIG = path.join(VIBECODINGS_DIR, 'config.json'); // Primary
-const FALLBACK_CONFIG = path.join(VIBE_DIR, 'config.json'); // Fallback
+const PRIMARY_CONFIG = path.join(VIBE_DIR, 'config.json');          // Primary
+const FALLBACK_CONFIG = path.join(VIBECODINGS_DIR, 'config.json');  // Fallback
+const TERMINAL_AUTH_FILE = path.join(VIBE_DIR, 'auth.json');        // Cross-client (Buddy/Terminal)
 const CONFIG_FILE = PRIMARY_CONFIG;
 
 function ensureDir() {
-  if (!fs.existsSync(VIBECODINGS_DIR)) {
-    fs.mkdirSync(VIBECODINGS_DIR, { recursive: true });
+  // 0700 is ENFORCED, not requested: mkdir's mode is umask-masked and does
+  // nothing for a pre-existing directory, so chmod runs either way. This
+  // directory holds credentials (config.json carries the auth token).
+  if (!fs.existsSync(VIBE_DIR)) {
+    fs.mkdirSync(VIBE_DIR, { recursive: true, mode: 0o700 });
   }
+  fs.chmodSync(VIBE_DIR, 0o700);
+}
+
+/**
+ * Load terminal/buddy auth file (~/.vibe/auth.json)
+ * Cross-client: if user authenticated via Buddy app, MCP server can pick it up
+ * Format: { token, handle, provider, authenticated_at }
+ */
+function loadTerminalAuth() {
+  try {
+    if (fs.existsSync(TERMINAL_AUTH_FILE)) {
+      return JSON.parse(fs.readFileSync(TERMINAL_AUTH_FILE, 'utf8'));
+    }
+  } catch (e) {}
+  return null;
 }
 
 function load() {
@@ -38,12 +65,18 @@ function load() {
       };
     }
   } catch (e) {}
-  // Fallback to legacy config (returns full object)
-  try {
-    if (fs.existsSync(FALLBACK_CONFIG)) {
-      return JSON.parse(fs.readFileSync(FALLBACK_CONFIG, 'utf8'));
-    }
-  } catch (e) {}
+  // Fallback to legacy config (returns full object) — but NEVER for an isolated
+  // session. ~/.vibecodings/config.json is the machine's shared legacy identity;
+  // reading it under VIBE_HOME means an isolated session silently becomes the
+  // shared being (the Stage-0 identity-leak incident). An isolated dir with no
+  // config is simply signed out.
+  if (!isIsolated()) {
+    try {
+      if (fs.existsSync(FALLBACK_CONFIG)) {
+        return JSON.parse(fs.readFileSync(FALLBACK_CONFIG, 'utf8'));
+      }
+    } catch (e) {}
+  }
   return { handle: null, one_liner: null, visible: true, publicKey: null, privateKey: null };
 }
 
@@ -57,7 +90,7 @@ function save(config) {
     }
   } catch (e) {}
 
-  // Save to primary config in vibecodings format
+  // Save to primary config (~/.vibe/config.json)
   const data = {
     username: config.handle || config.username || existing.username,
     workingOn: config.one_liner || config.workingOn || existing.workingOn,
@@ -67,30 +100,64 @@ function save(config) {
     privateKey: config.privateKey || existing.privateKey || null,
     // Guided mode (AskUserQuestion menus)
     guided_mode: config.guided_mode !== undefined ? config.guided_mode : existing.guided_mode,
-    // Notification level
-    notifications: config.notifications || existing.notifications || null,
     // GitHub Activity settings
-    github_activity_enabled:
-      config.github_activity_enabled !== undefined ? config.github_activity_enabled : existing.github_activity_enabled,
+    github_activity_enabled: config.github_activity_enabled !== undefined ? config.github_activity_enabled : existing.github_activity_enabled,
     github_activity_privacy: config.github_activity_privacy || existing.github_activity_privacy || null,
-    // Privy OAuth token (persisted across MCP process restarts)
-    privyToken: config.privyToken || existing.privyToken || null,
+    // OAuth token (persisted across MCP process restarts)
+    authToken: config.authToken || config.privyToken || existing.authToken || existing.privyToken || null,
     authMethod: config.authMethod || existing.authMethod || null
   };
-  fs.writeFileSync(PRIMARY_CONFIG, JSON.stringify(data, null, 2));
+  // 0600: this file carries the auth token — it is a credential, not a preference.
+  fs.writeFileSync(PRIMARY_CONFIG, JSON.stringify(data, null, 2), { mode: 0o600 });
 }
 
-/** @returns {string|null} Current user handle */
 function getHandle() {
+  // THE CREDENTIAL NAMES US — the files below are only what we knew before one loaded.
+  //
+  // Twenty-eight call sites across the tools read this function, and it answered from
+  // disk independently of the token those same tools authenticate with. That is the
+  // split identity reproduced in review: a token for account A while display and
+  // self-checks said account B, so a tool could route a message to "you" that the
+  // server had authored as someone else. Fixing it at each call site would have been
+  // twenty-eight chances to miss one; fixing it here makes every reader correct at
+  // once, and leaves exactly one place that decides.
+  //
+  // Required lazily: auth-store loads config during hydration, and a top-level import
+  // here would close that circle.
+  //
+  // We hydrate here rather than assuming someone already did. The store answers from
+  // memory, so before hydration it answers null — and this function would quietly fall
+  // through to the file, which is the exact bug above. That made the fix depend on an
+  // ordering nothing enforced: correct inside the MCP server (which hydrates in its
+  // constructor) and wrong in any script, CLI path or test that reads identity first.
+  // A guarantee that holds only when called in the right order is not a guarantee.
+  // hydrate() is idempotent and reads two files it has usually already read.
+  try {
+    const authStore = require('./auth-store');
+    authStore.hydrate();
+    const fromCredential = authStore.getHandle();
+    if (fromCredential) return fromCredential;
+
+    // A credential was present and could not be attributed. The remembered name below
+    // must NOT step in: it would put a handle on screen that nothing backs, which is
+    // this bug wearing the file's clothes. No credential at all is a different and
+    // honest state, and falls through.
+    if (authStore.hasRejectedCredential()) return null;
+  } catch (e) {
+    // auth-store unavailable (early boot) — fall through to what is on disk.
+  }
+
   // Prefer session-specific handle over shared config
   const sessionHandle = getSessionHandle();
   if (sessionHandle) return sessionHandle;
   // Fall back to shared config
-  const config = load();
-  return config.handle || null;
+  const cfg = load();
+  if (cfg.handle) return cfg.handle;
+  // Cross-client: check terminal/buddy auth file
+  const terminalAuth = loadTerminalAuth();
+  return terminalAuth?.handle || null;
 }
 
-/** @returns {string|null} Current user one-liner */
 function getOneLiner() {
   // Prefer session-specific one_liner over shared config
   const sessionOneLiner = getSessionOneLiner();
@@ -100,20 +167,33 @@ function getOneLiner() {
   return config.one_liner || null;
 }
 
-/** @returns {boolean} Whether user identity is set */
 function isInitialized() {
-  // Check session first, then shared config
+  // A VALID CREDENTIAL IS INITIALISATION. Asking the file was the bug.
+  //
+  // This checked only for a stored handle, so a config that held a perfectly good token
+  // and no `username` reported "not initialized" forever. Tools behind requireInit()
+  // refused with "Run `vibe init` first" while presence — which resolves identity from
+  // the credential — worked in the same response. One reply, two answers about whether
+  // you are signed in.
+  //
+  // It is reachable by accident: save() writes `username: config.handle ||
+  // config.username || existing.username`, and when all three are absent that value is
+  // `undefined`, which JSON.stringify DROPS. So the key does not go null, it disappears,
+  // and nothing puts it back. Observed on this machine 2026-08-01.
+  //
+  // The credential is the identity (#107). If one names us, we are initialised — and if
+  // one does not, no remembered string should pretend otherwise.
+  if (getHandle()) return true;
   const sessionHandle = getSessionHandle();
   if (sessionHandle) return true;
   const config = load();
-  return config.handle && config.handle.length > 0;
+  return !!(config.handle && config.handle.length > 0);
 }
 
 // Session management - unique ID per Claude Code instance
 // Now stores full identity (handle + one_liner), not just sessionId
-const SESSION_FILE = path.join(VIBECODINGS_DIR, `.session_${process.pid}`);
+const SESSION_FILE = path.join(VIBE_DIR, `.session_${process.pid}`);
 
-/** @returns {string} New session ID (sess_*) */
 function generateSessionId() {
   return 'sess_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 10);
 }
@@ -222,43 +302,75 @@ function getAuthToken() {
 
   // Fall back to shared config (persisted across MCP process restarts)
   const cfg = load();
-  return cfg?.privyToken || null;
+  if (cfg?.authToken || cfg?.privyToken) return cfg.authToken || cfg.privyToken;
+
+  // Cross-client: check terminal/buddy auth file (~/.vibe/auth.json)
+  const terminalAuth = loadTerminalAuth();
+  if (terminalAuth?.token) return terminalAuth.token;
+
+  return null;
 }
 
 /**
- * Save Privy JWT token (used after browser OAuth flow)
- * @param {string} token - Privy access token
+ * Save auth token (used after browser OAuth flow)
+ * @param {string} token - JWT access token from GitHub OAuth
  */
-function savePrivyToken(token) {
+function saveAuthToken(token) {
   // Save to session data
   const data = getSessionData() || {};
   saveSessionData({
     ...data,
     sessionId: data.sessionId || generateSessionId(),
     token,
-    authMethod: 'privy' // Track that this is a Privy token
+    authMethod: 'github'  // Track that this is GitHub OAuth
   });
 
-  // Also save to shared config for persistence across MCP restarts
+  // Also save to shared config for persistence across MCP restarts.
+  //
+  // The handle rides WITH the token. Persisting a credential and no identity is how a
+  // config comes to hold a valid token under no name — and save() cannot repair it,
+  // because it writes `username: undefined` in that case and JSON.stringify drops the
+  // key rather than storing null. The state is invisible and permanent.
   const cfg = load();
-  cfg.privyToken = token;
-  cfg.authMethod = 'privy';
+  cfg.authToken = token;
+  cfg.authMethod = 'github';
+  if (!cfg.handle) {
+    // Derive it from the credential itself rather than leaving the file anonymous.
+    try {
+      cfg.handle = require('./auth-store').inspectToken(token).handle || cfg.handle;
+    } catch (e) { /* auth-store unavailable at early boot — the token still saves */ }
+  }
   save(cfg);
 }
 
+// Backwards compatibility alias
+const savePrivyToken = saveAuthToken;
+
 /**
- * Check if user has Privy auth (vs legacy keypair)
+ * Check if user has OAuth auth (vs legacy keypair)
+ * Accepts 'github', 'privy', and 'browser' as valid auth methods (backwards compat)
  */
-function hasPrivyAuth() {
+function hasOAuth() {
+  const validAuthMethods = ['github', 'privy', 'browser'];
+
   const data = getSessionData();
-  if (data?.authMethod === 'privy' && data?.token) return true;
+  if (validAuthMethods.includes(data?.authMethod) && data?.token) return true;
 
   const cfg = load();
-  return cfg?.authMethod === 'privy' && cfg?.privyToken;
+  if (validAuthMethods.includes(cfg?.authMethod) && (cfg?.authToken || cfg?.privyToken)) return true;
+
+  // Cross-client: check terminal/buddy auth file
+  const terminalAuth = loadTerminalAuth();
+  if (terminalAuth?.token && validAuthMethods.includes(terminalAuth?.provider)) return true;
+
+  return false;
 }
 
+// Backwards compatibility alias
+const hasPrivyAuth = hasOAuth;
+
 /**
- * Remove keypair after migration to Privy
+ * Remove keypair after migration to GitHub OAuth
  * Clears private key from config (security improvement)
  */
 function removeKeypair() {
@@ -310,26 +422,6 @@ function setGuidedMode(enabled) {
   save(config);
 }
 
-// Notification settings
-// Levels: "all" | "mentions" | "off"
-// - all: desktop + bell for unread, mentions, presence (default)
-// - mentions: only @mentions trigger notifications
-// - off: no notifications
-function getNotifications() {
-  const config = load();
-  return config.notifications || 'all';
-}
-
-function setNotifications(level) {
-  const validLevels = ['all', 'mentions', 'off'];
-  if (!validLevels.includes(level)) {
-    throw new Error(`Invalid notification level. Use: ${validLevels.join(', ')}`);
-  }
-  const config = load();
-  config.notifications = level;
-  save(config);
-}
-
 // GitHub Activity settings
 // Shows shipping status based on GitHub commit activity
 // Default: false (opt-in for privacy)
@@ -364,7 +456,7 @@ function setGithubActivityPrivacy(level) {
   save(config);
 }
 
-/** @returns {string} API base URL */
+// API URL — central endpoint for all API calls
 function getApiUrl() {
   return process.env.VIBE_API_URL || 'https://www.slashvibe.dev';
 }
@@ -376,22 +468,10 @@ function getApiUrl() {
 // ─────────────────────────────────────────────────────────────
 const sessionState = {};
 
-/**
- * Get ephemeral session state value
- * @param {string} key - State key
- * @param {*} [defaultValue=null] - Default if not set
- * @returns {*} Stored value or default
- */
 function get(key, defaultValue = null) {
   return sessionState[key] !== undefined ? sessionState[key] : defaultValue;
 }
 
-/**
- * Set ephemeral session state value
- * @param {string} key - State key
- * @param {*} value - Value to store
- * @returns {*} The stored value
- */
 function set(key, value) {
   sessionState[key] = value;
   return value;
@@ -402,6 +482,7 @@ module.exports = {
   CONFIG_FILE,
   load,
   save,
+  loadTerminalAuth,
   getHandle,
   getOneLiner,
   isInitialized,
@@ -418,15 +499,16 @@ module.exports = {
   generateSessionId,
   getGuidedMode,
   setGuidedMode,
-  getNotifications,
-  setNotifications,
   // GitHub Activity settings
   getGithubActivityEnabled,
   setGithubActivityEnabled,
   getGithubActivityPrivacy,
   setGithubActivityPrivacy,
   getApiUrl,
-  // Privy OAuth helpers
+  // OAuth helpers
+  saveAuthToken,
+  hasOAuth,
+  // Backwards compatibility aliases
   savePrivyToken,
   hasPrivyAuth,
   removeKeypair,

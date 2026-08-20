@@ -6,63 +6,118 @@
  * Identity, presence, DM. That's it.
  */
 
+// CLI routing is now handled by cli.js (the bin entry point).
+// If this file is required directly (e.g., by Claude Code MCP config),
+// it runs the MCP server immediately.
+
 const presence = require('./presence');
 const config = require('./config');
 const store = require('./store');
 const prompts = require('./prompts');
 const NotificationEmitter = require('./notification-emitter');
+const authStore = require('./auth-store');
+const actorSession = require('./actor-session');
+const { apiHeaders } = require('./api-auth');
+const presenceBoard = require('./resources/presence-board');
+const { resolveFooter } = require('./footer');
+const pkg = require('./package.json');
 
-/**
- * MCP Tool Safety Annotations
- *
- * Required by Anthropic's MCP Directory for Plugin/Connectors review.
- * Each tool must declare behavioral hints:
- *   readOnlyHint    — tool only reads data, never modifies state
- *   destructiveHint — tool may delete data or perform irreversible actions
- *   idempotentHint  — repeated calls with same args have no additional effect
- *   openWorldHint   — tool interacts with external services (API, network)
- *
- * Spec: https://modelcontextprotocol.io/docs/concepts/tools
- */
-const TOOL_ANNOTATIONS = {
-  // ── GTM: 9 tools (8 core + init) ────────────────────────────
-  vibe_start:    { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_init:     { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_who:      { readOnlyHint: true,  destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_dm:       { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_inbox:    { readOnlyHint: true,  destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_status:   { readOnlyHint: false, destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_ship:     { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  vibe_discover: { readOnlyHint: true,  destructiveHint: false, idempotentHint: true,  openWorldHint: true },
-  vibe_help:     { readOnlyHint: true,  destructiveHint: false, idempotentHint: true,  openWorldHint: false },
+// ─── MCP protocol identity (spec 2026-07-28, dual-era) ──────────────────
+// Modern clients (2026-07-28+) declare io.modelcontextprotocol/protocolVersion
+// in each request's _meta and get stateless semantics: server/discover,
+// resultType on results, serverInfo echoed in result _meta. Legacy clients
+// (2025-11-25 and earlier) still open with `initialize`; both eras are served
+// from this one process. Known gap: list_changed notifications are pushed
+// unsolicited (legacy style) — modern subscriptions/listen is not implemented.
+const MODERN_PROTOCOL_VERSION = '2026-07-28';
+const LEGACY_PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
+const META_PROTOCOL_VERSION = 'io.modelcontextprotocol/protocolVersion';
+const META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo';
+const SERVER_INFO = {
+  name: 'vibe',
+  version: pkg.version,
+  description: 'Presence + messaging for terminal coding agents'
+};
+const SERVER_CAPABILITIES = {
+  tools: { listChanged: true },
+  resources: {},
+  // MCP Apps: ui:// resources the host renders in-conversation.
+  // See resources/presence-board.js (declared on vibe_who).
+  extensions: { 'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] } }
 };
 
-// Default annotations for any tool not explicitly mapped
-const DEFAULT_ANNOTATIONS = { readOnlyHint: false, destructiveHint: false, openWorldHint: true };
-
 // Tools that shouldn't show presence footer (would be redundant/noisy)
-const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_help'];
+const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_test', 'vibe_update'];
 
-// Infer user prompt from tool arguments (for pattern logging)
+// Progressive disclosure: only these tools are visible before authentication
+// After auth, the full toolset is revealed via tools/list_changed notification
+const PRE_AUTH_TOOLS = new Set([
+  'vibe_start',   // Entry point (auto-redirects to init)
+  'vibe_init',    // GitHub OAuth flow
+  'vibe_token',   // Manual token entry
+  'vibe_who',     // Peek at who's online (no auth required)
+  'vibe_dm',      // Shown so users can try — triggers auth gate
+  'vibe_inbox',   // Shown so users can try — triggers auth gate
+  'vibe_status',  // Shown so users can try — triggers auth gate
+  'vibe_help'     // Always accessible
+]);
+
+// Tools that genuinely work without authentication
+const NO_AUTH_REQUIRED = new Set([
+  'vibe_start', 'vibe_init', 'vibe_token', 'vibe_who', 'vibe_help'
+]);
+
+// "Is this session signed in" — the credential answers, not the filesystem.
+//
+// This used to OR in config.hasOAuth(), which asks a FILE. That made disk a second
+// authority: a leftover config could unlock the authenticated tool surface for a
+// session holding no usable credential. authStore already consults disk during
+// hydration and refuses anything it cannot attribute, so it is the one place that
+// should decide.
+//
+// Deliberately NOT gated on isVerified(): verification needs the network, and a
+// person on a plane should still see their tools and get a clear error from the
+// server rather than a surface that silently empties. Verification gates the things
+// that must never be a guess — the green dot and any claim about who you are.
+const isAuthed = () => authStore.isAuthenticated();
+
+// Infer user prompt from tool arguments (for pattern logging).
+// Cases exist only for registered tools whose args improve on the default.
 function inferPromptFromArgs(toolName, args) {
   const action = toolName.replace('vibe_', '');
   const handle = args.handle ? `@${args.handle.replace('@', '')}` : '';
   const message = args.message ? `"${args.message.slice(0, 50)}..."` : '';
-  const mood = args.mood || '';
 
   switch (action) {
     case 'start': return 'start vibing';
     case 'who': return 'who is online';
     case 'dm': return `message ${handle} ${message}`.trim();
     case 'inbox': return 'check inbox';
-    case 'status': return `set status to ${mood}`;
-    case 'ship': return args.title ? `ship: ${args.title}` : 'ship';
-    case 'discover': return `discover ${args.command || 'suggest'}`;
-    case 'help': return 'help';
-    case 'init': return 'init identity';
+    case 'status': return `set status to ${args.mood || ''}`.trim();
+    case 'game': return `play ${args.game || 'game'} with ${handle}`.trim();
+    case 'poem': return args.line ? `add a line to poem with ${handle}` : `emoji poem with ${handle}`;
+    case 'bye': return 'end session';
     default: return `${action} ${handle}`.trim() || null;
   }
 }
+
+// TERMINAL ESCAPES ARE OPT-IN, and default to OFF.
+//
+// An MCP server CANNOT know what renders its output. These OSC sequences assume an
+// iTerm-like terminal; every other client shows them as literal junk on the end of every
+// tool result:
+//
+//     ]0;vibe: 2 online · @pastelle]1337;SetBadgeFormat=4peL
+//
+// The comment that used to sit here claimed they were "invisible in the transcript".
+// They are not — they were visible throughout a full working session in Claude Code, on
+// every single vibe tool call. That is a claim about a state nobody verified, which is
+// the exact defect class this codebase keeps paying for (canon law 2), and it is worse
+// than usual here because the claim is what stopped anyone looking.
+//
+// Client-agnostic payloads are the rule. Someone on iTerm who wants a live title and
+// badge can ask for it; nobody else should pay for it.
+const TERM_ESCAPES = ['1', 'true'].includes(String(process.env.VIBE_TERM_ESCAPES || '').toLowerCase());
 
 // Generate terminal title escape sequence (OSC 0)
 function getTerminalTitle(onlineCount, unreadCount, lastActivity) {
@@ -86,74 +141,155 @@ function getBadgeSequence(onlineCount, unreadCount) {
   return `\x1b]1337;SetBadgeFormat=${encoded}\x07`;
 }
 
+// Fetch and acknowledge guest messages from the session API
+async function fetchGuestMessages(handle) {
+  if (!handle) return [];
+  const apiUrl = config.getApiUrl?.() || 'https://www.slashvibe.dev';
+  try {
+    // Fetch with ack=true to clear after reading (prevents re-injection)
+    const resp = await fetch(`${apiUrl}/api/session/guest?handle=${encodeURIComponent(handle)}&ack=true`, {
+      headers: apiHeaders(),
+    });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
+      return data.messages;
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+// New unread DMs already surfaced in this session (by last-message id), so each
+// message body is injected into context exactly ONCE. Read state is NOT touched
+// here — the cursor advances only when the user actually opens/replies to the
+// thread (vibe_inbox / vibe_reply), so badges on other devices stay
+// honest about what the human has engaged with.
+const injectedDmIds = new Set();
+const INJECTED_DM_CAP = 500; // session-lifetime backstop
+
+// Pull unread DM threads worth injecting: unread, not muted, latest message is
+// from the other side, and not already injected this session.
+async function fetchNewUnreadDms(handle) {
+  if (!handle) return [];
+  try {
+    const inbox = await store.getInbox(handle);
+    const fresh = (inbox || []).filter(t =>
+      t.unread > 0 &&
+      !t.muted &&
+      t.lastMessageId &&
+      t.lastFrom &&
+      t.lastFrom.toLowerCase() !== handle.toLowerCase() &&
+      !injectedDmIds.has(t.lastMessageId)
+    ).slice(0, 3);
+    for (const t of fresh) {
+      injectedDmIds.add(t.lastMessageId);
+      if (injectedDmIds.size > INJECTED_DM_CAP) {
+        injectedDmIds.delete(injectedDmIds.values().next().value);
+      }
+    }
+    return fresh;
+  } catch {
+    return [];
+  }
+}
+
+// Ambient presence data cache. getPresenceFooter runs after EVERY tool call,
+// and presence/unread/live counts don't change sub-10s — so three of its five
+// network calls can ride a short TTL. The guest-message and DM injection
+// fetches are deliberately NOT cached: each delivers content at most once
+// (ack=true / injectedDmIds), so caching would replay or delay injections.
+const AMBIENT_CACHE_TTL_MS = 10000;
+let ambientCache = { at: 0, handle: null, data: null };
+const bustAmbientCache = () => { ambientCache = { at: 0, handle: null, data: null }; };
+
+// Tools whose effects change what the ambient footer shows (unread counts,
+// presence, own status, session identity) — they get a fresh fetch instead of
+// the cache. vibe_token is here because it can swap the signed-in account.
+const AMBIENT_CACHE_BUSTERS = new Set([
+  'vibe_start', 'vibe_init', 'vibe_token', 'vibe_dm', 'vibe_reply', 'vibe_inbox',
+  'vibe_status', 'vibe_ship', 'vibe_play', 'vibe_game', 'vibe_bye'
+]);
+
+async function getAmbientPresence(handle) {
+  const now = Date.now();
+  // Keyed by handle: an in-process identity switch must never serve the
+  // previous account's counts, even if the buster list misses a path.
+  if (ambientCache.data && ambientCache.handle === handle &&
+      now - ambientCache.at < AMBIENT_CACHE_TTL_MS) {
+    return ambientCache.data;
+  }
+  const [users, unreadCount, liveCount] = await Promise.all([
+    store.getActiveUsers().catch(() => []),
+    store.getUnreadCount(handle).catch(() => 0),
+    store.getLiveBroadcastCount().catch(() => 0)
+  ]);
+  ambientCache = { at: now, handle, data: { users, unreadCount, liveCount } };
+  return ambientCache.data;
+}
+
 // Generate ambient presence footer - the room leaks into every response
+const { renderIncoming } = require('./incoming');
+
+// The ambient footer, appended to every tool response.
+//
+// Deliberately quiet: one status line, and nothing else unless something
+// actually happened. It used to carry live-room links, three users' inferred
+// moods, and two different "nothing is happening" nudges on EVERY call —
+// which trained people to skip past the one place we surface real messages.
 async function getPresenceFooter() {
   try {
     const handle = config.getHandle();
     if (!handle) return '';
 
-    // Fetch presence and unread in parallel
-    const [users, unreadCount] = await Promise.all([
-      store.getActiveUsers().catch(() => []),
-      store.getUnreadCount(handle).catch(() => 0)
+    // Ambient data (cached) + injection channels (always fresh) in parallel
+    const [{ users, unreadCount, liveCount }, guestMessages, newDms] = await Promise.all([
+      getAmbientPresence(handle),
+      fetchGuestMessages(handle).catch(() => []),
+      fetchNewUnreadDms(handle).catch(() => [])
     ]);
 
-    // Filter out self
     const others = users.filter(u => u.handle !== handle);
     const onlineCount = others.length;
 
-    // Determine last activity
-    let lastActivity = null;
-    if (others.length > 0) {
-      const recent = others[0];
-      const mood = recent.mood ? ` ${recent.mood}` : '';
-      lastActivity = `@${recent.handle}${mood}`;
-    }
+    // Terminal title + badge: ambient by nature, invisible in the transcript.
+    const lastActivity = others.length > 0 ? `@${others[0].handle}` : null;
+    const escapes = TERM_ESCAPES
+      ? getTerminalTitle(onlineCount, unreadCount, lastActivity) +
+        getBadgeSequence(onlineCount, unreadCount)
+      : '';
 
-    // Terminal escape sequences (update title + badge)
-    let escapes = '';
-    escapes += getTerminalTitle(onlineCount, unreadCount, lastActivity);
-    escapes += getBadgeSequence(onlineCount, unreadCount);
-
-    // Build the visible footer
-    let footer = '\n\n────────────────────────────────────────\n';
-
-    // Line 1: vibe · X online · Y unread
+    // The status line. Counts only — no mood inference, no nudges.
     const parts = ['vibe'];
-    if (onlineCount > 0) {
-      parts.push(`${onlineCount} online`);
-    }
-    if (unreadCount > 0) {
-      parts.push(`**${unreadCount} unread**`);
-    }
-    footer += parts.join(' · ');
+    // "2 online" under a board showing three rows — one of them you — reads as a
+    // contradiction, even though both numbers are right. The footer counts the room
+    // AROUND you, so it should say so.
+    if (onlineCount > 0) parts.push(`${onlineCount} other${onlineCount === 1 ? '' : 's'}`);
+    if (unreadCount > 0) parts.push(`**${unreadCount} unread**`);
+    if (liveCount > 0) parts.push(`${liveCount} live`);
+    let footer = `\n\n────────────────────────\n${parts.join(' · ')}`;
 
-    // Line 2: Activity hints (if anyone is online)
-    if (others.length > 0) {
-      footer += '\n';
-      const hints = others.slice(0, 3).map(u => {
-        const name = `@${u.handle}`;
-        // Determine activity from mood/status
-        if (u.mood === '🔥' || u.builderMode === 'shipping') {
-          return `${name} shipping`;
-        } else if (u.mood === '🧠' || u.builderMode === 'deep-focus') {
-          return `${name} deep focus`;
-        } else if (u.mood === '🐛') {
-          return `${name} debugging`;
-        } else if (u.note) {
-          return `${name}: "${u.note.slice(0, 20)}${u.note.length > 20 ? '...' : ''}"`;
-        } else {
-          return `${name} here`;
-        }
-      });
-      footer += hints.join(' · ');
-    } else if (unreadCount === 0) {
-      footer += '\n_room is quiet_';
+    // Someone going live is an event worth one line — where, so it's joinable.
+    const liveRoom = others.find(u => u.isLive && u.broadcastRoom);
+    if (liveRoom) {
+      const base = (process.env.VIBE_ROOM_URL_BASE || 'https://vibeconferencing.com/room/').replace(/\/$/, '');
+      footer += `\n🟢 @${liveRoom.handle} is live → ${base}/${liveRoom.broadcastRoom}`;
     }
 
-    footer += '\n────────────────────────────────────────';
+    // Messages: the whole reason this footer exists.
+    footer += renderIncoming(
+      guestMessages.map(m => ({ from: m.from, text: m.message })),
+      { replyTo: guestMessages[0]?.from, threadHint: false }
+    );
+    footer += renderIncoming(
+      newDms.map(t => ({
+        from: t.handle,
+        text: t.lastMessage + (t.unread > 1 ? ` (+${t.unread - 1} more unread)` : ''),
+      })),
+      { replyTo: newDms[0]?.handle, threadHint: true }
+    );
 
-    // Prepend escape sequences (invisible to user, interpreted by terminal)
     return escapes + footer;
   } catch (e) {
     // Silently fail - presence is best-effort
@@ -161,24 +297,104 @@ async function getPresenceFooter() {
   }
 }
 
-// Load GTM tools (8 core + init)
-const tools = {
+// ─── Core tools ─────────────────────────────────────────────────────────
+// Minimal set: auth + presence + messaging + status + ship.
+// Less is more. 95 tools → 15. Claude gets confused with too many options.
+// Removed tools still exist in ./tools/ and can be re-added if needed.
+// ─── Kernel ──────────────────────────────────────────────────────────────
+// The minimum viable social surface (0.8 "core mode"): identity + presence +
+// messaging, plus auth plumbing, help, and the sign-off. An agent that sees a
+// handful of tools uses them correctly; one that sees twenty wanders.
+const kernelTools = {
+  // Auth & onboarding
   vibe_start: require('./tools/start'),
   vibe_init: require('./tools/init'),
+  vibe_token: require('./tools/token'),
+
+  // Presence — who's here, what are they building
   vibe_who: require('./tools/who'),
+  vibe_status: require('./tools/status'),
+
+  // Messaging — the core social loop
   vibe_dm: require('./tools/dm'),
   vibe_inbox: require('./tools/inbox'),
-  vibe_status: require('./tools/status'),
-  vibe_ship: require('./tools/ship'),
-  vibe_discover: require('./tools/discover'),
+  vibe_reply: require('./tools/reply'),
+
+  // Utility
   vibe_help: require('./tools/help'),
+  vibe_bye: require('./tools/bye'),
 };
+
+// ─── Extras ──────────────────────────────────────────────────────────────
+// The culture layer. Real /vibe, but not kernel — opt in with VIBE_EXTRAS=1
+// in the MCP server env. Handlers (and their files) ship regardless; only the
+// default registration shrinks.
+const EXTRAS_ENABLED = ['1', 'true'].includes(String(process.env.VIBE_EXTRAS || '').toLowerCase());
+const extraTools = {
+  // Received collaboration — land the newcomer mid-conversation with a topical match
+  vibe_intro: require('./tools/intro'),
+
+  // The Weave — attach this session's strand so Fable can bring moments INTO the
+  // terminal (Spec 1); "Fable holds your half" surfaces via action:'held' + vibe_start.
+  vibe_weave: require('./tools/weave'),
+
+  // The Weave, deepest form (Spec 4) — co-author a living shared artifact with
+  // another viber; Fable merges edits + flags conflicts with judgment across
+  // both terminals. Built on the vibe_play/vibe_corpse shared-state-over-DM lineage.
+  vibe_fable: require('./tools/fable'),
+
+  // Return loop — get pinged about DMs you miss while away
+  vibe_email: require('./tools/email'),
+
+  // Ship — share what you built
+  vibe_ship: require('./tools/ship'),
+  vibe_feed: require('./tools/feed'),
+
+  // Play — shared experiences over the DM transport. vibe_play is the open
+  // primitive (freeform state courier); game/poem/corpse carry real rule
+  // enforcement (chess/tictactoe legality, poem sealing, corpse hidden-state)
+  // and read their own legacy payloads — behaviors the primitive does NOT
+  // reproduce, so they stay as distinct tools.
+  vibe_play: require('./tools/play'),
+  vibe_game: require('./tools/game'),
+  vibe_poem: require('./tools/poem'),
+  vibe_corpse: require('./tools/corpse'),
+};
+
+// Admin tools (only loaded when VIBE_ADMIN=true)
+const adminTools = process.env.VIBE_ADMIN === 'true' ? {
+  vibe_admin_inbox: require('./tools/admin-inbox'),
+  vibe_test: require('./tools/test'),
+  vibe_doctor: require('./tools/doctor'),
+  vibe_update: require('./tools/update'),
+  vibe_patterns: require('./tools/patterns'),
+} : {};
+
+// Combine tools — kernel always; extras only when opted in
+const tools = { ...kernelTools, ...(EXTRAS_ENABLED ? extraTools : {}), ...adminTools };
 
 /**
  * MCP Protocol Handler
  */
 class VibeMCPServer {
   constructor() {
+    // Hydrate auth state from disk FIRST (before any tools need it)
+    authStore.hydrate();
+
+    // An access token is memory/cache; only the rotating refresh bundle survives a
+    // process. Refresh once at startup so a dead/reused family becomes one truthful
+    // reauthentication state before any future delivery transition can use it.
+    this.actorAccessReady = actorSession.getAccessToken().catch((error) => {
+      if (error?.reauthenticate) {
+        process.stderr.write(
+          '/vibe: terminal delivery sign-in needs renewal — say "vibe init"; ordinary /vibe sign-in is unchanged\n'
+        );
+      } else if (error?.code === 'actor_refresh_busy') {
+        process.stderr.write('/vibe: terminal delivery sign-in is being refreshed by another session\n');
+      }
+      return null;
+    });
+
     // Initialize notification emitter
     this.notifier = new NotificationEmitter(this);
 
@@ -206,40 +422,132 @@ class VibeMCPServer {
   async handleRequest(request) {
     const { method, params, id } = request;
 
+    // Modern era: any request carrying a _meta protocol version is served
+    // statelessly. The gate applies to server/discover too — an unsupported
+    // version gets -32022 whose `supported` list drives the retry; answering
+    // with a success the client didn't ask for breaks future negotiation.
+    // (Probes WITHOUT _meta still get a DiscoverResult, so the legacy-era
+    // backward-compat probe keeps working.)
+    const requestedVersion = params?._meta?.[META_PROTOCOL_VERSION];
+    const isModern = requestedVersion !== undefined;
+    if (isModern && requestedVersion !== MODERN_PROTOCOL_VERSION) {
+      return {
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32022,
+          message: 'Unsupported protocol version',
+          data: { supported: [MODERN_PROTOCOL_VERSION], requested: requestedVersion }
+        }
+      };
+    }
+
+    const response = await this.dispatch(request);
+    if (isModern && response?.result) {
+      response.result.resultType = response.result.resultType || 'complete';
+      response.result._meta = { [META_SERVER_INFO]: SERVER_INFO, ...(response.result._meta || {}) };
+    }
+    return response;
+  }
+
+  async dispatch(request) {
+    const { method, params, id } = request;
+
     switch (method) {
-      case 'initialize':
+      case 'server/discover':
+        // MUST-implement under 2026-07-28; also answers _meta-less probes
+        // (the version gate in handleRequest rejects unsupported versions
+        // before dispatch reaches here). Modern clients may name themselves
+        // here; env fingerprints (host.js) cover the ones that don't.
+        require('./host').setClientInfo(params?.clientInfo);
         return {
           jsonrpc: '2.0',
           id,
           result: {
-            protocolVersion: '2024-11-05',
-            capabilities: { tools: {} },
-            serverInfo: {
-              name: 'vibe',
-              version: '1.0.0',
-              description: 'Communication layer for Claude Code'
-            }
+            resultType: 'complete',
+            supportedVersions: [MODERN_PROTOCOL_VERSION, ...LEGACY_PROTOCOL_VERSIONS],
+            capabilities: SERVER_CAPABILITIES,
+            instructions: 'Social layer for terminal coding agents — identity, presence, and DMs between builders, from Claude Code, Codex, or Cursor. Start with vibe_start (sign in) or vibe_who (see who is online).',
+            ttlMs: 3600000,
+            cacheScope: 'public',
+            _meta: { [META_SERVER_INFO]: SERVER_INFO }
           }
         };
 
-      case 'notifications/initialized':
-        // Client confirms it's ready — no response needed for notifications
-        return null;
-
-      case 'ping':
-        return { jsonrpc: '2.0', id, result: {} };
+      case 'initialize': {
+        // Legacy handshake (2025-11-25 and earlier). Echo the client's version
+        // when we know it — the previous hardcoded 2024-11-05 forced every
+        // client down to the oldest revision; unknown versions get our latest
+        // legacy revision per the legacy negotiation rule.
+        // The host names itself here (claude-code, codex, cursor, …) —
+        // captured so the presence heartbeat can say WHICH agent this
+        // session lives in. See host.js.
+        require('./host').setClientInfo(params?.clientInfo);
+        const requested = params?.protocolVersion;
+        return {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            protocolVersion: LEGACY_PROTOCOL_VERSIONS.includes(requested)
+              ? requested
+              : LEGACY_PROTOCOL_VERSIONS[0],
+            capabilities: SERVER_CAPABILITIES,
+            serverInfo: SERVER_INFO
+          }
+        };
+      }
 
       case 'tools/list':
+        // Progressive disclosure: show only core tools until authenticated.
+        // Registration-object order is stable across calls and processes, so
+        // the deterministic-order SHOULD (2026-07-28) is met without sorting.
+        const allToolDefs = Object.values(tools).map(t => t.definition);
         return {
           jsonrpc: '2.0',
           id,
           result: {
-            tools: Object.values(tools).map(t => ({
-              ...t.definition,
-              annotations: TOOL_ANNOTATIONS[t.definition.name] || DEFAULT_ANNOTATIONS
-            }))
+            tools: isAuthed()
+              ? allToolDefs
+              : allToolDefs.filter(t => PRE_AUTH_TOOLS.has(t.name)),
+            // CacheableResult: private (varies with auth state). Pre-auth gets
+            // ZERO ttl — sign-in swaps the toolset and modern clients have no
+            // subscriptions/listen stream to invalidate through; only the
+            // legacy unsolicited list_changed exists. Post-auth may cache.
+            ttlMs: isAuthed() ? 60000 : 0,
+            cacheScope: 'private'
           }
         };
+
+      case 'resources/list':
+        return {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            resources: [presenceBoard.definition],
+            ttlMs: 3600000,
+            cacheScope: 'public'
+          }
+        };
+
+      case 'resources/read': {
+        if (params?.uri !== presenceBoard.RESOURCE_URI) {
+          // -32602 per 2026-07-28 (was -32002; realigned with JSON-RPC).
+          return {
+            jsonrpc: '2.0',
+            id,
+            error: { code: -32602, message: `Resource not found: ${params?.uri}` }
+          };
+        }
+        return {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            contents: [presenceBoard.content],
+            ttlMs: 3600000,
+            cacheScope: 'public'
+          }
+        };
+      }
 
       case 'tools/call':
         const tool = tools[params.name];
@@ -249,6 +557,48 @@ class VibeMCPServer {
             id,
             error: { code: -32601, message: `Unknown tool: ${params.name}` }
           };
+        }
+
+        // Auth gate: auto-detect unauthenticated state and trigger auth flow
+        if (!isAuthed() && !NO_AUTH_REQUIRED.has(params.name)) {
+          // Auto-trigger init flow — user never needs to know about "vibe init"
+          const actionName = params.name.replace('vibe_', '');
+          const initTool = tools['vibe_init'];
+          try {
+            // Forward the first command's args into init rather than dropping them.
+            // vibe_init reads only {handle, one_liner, auth_method} and ignores any
+            // extra keys, so this is safe for every command yet lets relevant
+            // context (e.g. a handle the caller already supplied) carry into auth.
+            const initResult = await initTool.handler(params.arguments || {});
+            const initDisplay = initResult.display || JSON.stringify(initResult, null, 2);
+
+            // After auth, emit tools/list_changed so Claude sees full toolset
+            if (isAuthed()) {
+              global.vibeNotifier?.emitImmediate();
+            }
+
+            return {
+              jsonrpc: '2.0',
+              id,
+              result: {
+                content: [{
+                  type: 'text',
+                  text: `> _You tried to **${actionName}** — signing you in first._\n\n${initDisplay}\n\n---\n💡 **You're in!** Try your \`${actionName}\` command again.`
+                }]
+              }
+            };
+          } catch (e) {
+            return {
+              jsonrpc: '2.0',
+              id,
+              result: {
+                content: [{
+                  type: 'text',
+                  text: `🔒 **Sign in required** to use **${actionName}**\n\nSay **"let's vibe"** to sign in with GitHub (30 seconds).\n\n_Error: ${e.message}_`
+                }]
+              }
+            };
+          }
         }
 
         try {
@@ -264,50 +614,49 @@ class VibeMCPServer {
             });
           }
 
+          // The HTTP store creates one random key per logical send and preserves it
+          // across its internal transport retries. JSON-RPC ids restart every MCP
+          // process, so deriving a durable key from `id` would collapse future sends.
           const result = await tool.handler(args);
 
           // Emit list_changed notification for state-changing tools
           // This triggers Claude to refresh without reconnection
           const stateChangingTools = [
-            'vibe_dm', 'vibe_status', 'vibe_ship'
+            'vibe_dm', 'vibe_reply', 'vibe_status',
+            'vibe_ship', 'vibe_play', 'vibe_game'
           ];
           if (stateChangingTools.includes(params.name)) {
             // Debounced notification (prevents spam)
             global.vibeNotifier?.emitChange(params.name);
           }
 
-          // Add ambient presence footer (unless tool is in skip list)
+          // After init/start completes auth, emit tools/list_changed
+          // so Claude sees the full toolset (progressive disclosure unlock)
+          if ((params.name === 'vibe_init' || params.name === 'vibe_start') && isAuthed()) {
+            global.vibeNotifier?.emitImmediate();
+          }
+
+          // Add ambient presence footer (unless tool is in skip list).
+          // State-changing tools bust the cache first so the footer reflects
+          // what they just did (e.g. inbox read clears the unread badge).
           let footer = '';
           if (!SKIP_FOOTER_TOOLS.includes(params.name)) {
-            footer = await getPresenceFooter();
+            if (AMBIENT_CACHE_BUSTERS.has(params.name)) bustAmbientCache();
+            footer = await resolveFooter(result, getPresenceFooter);
           }
 
-          // Build simplified hint indicator for Claude (human-readable)
-          let hintIndicator = '';
-          if (result.hint) {
-            // Simple format: <!-- vibe: hint_type @handle (count) -->
-            const hint = result.hint;
-            const handle = result.suggestion?.handle || result.for_handle || '';
-            const count = result.unread_count || '';
-
-            // Build minimal hint string
-            let hintParts = [hint];
-            if (handle) hintParts.push(`@${handle.replace('@', '')}`);
-            if (count) hintParts.push(`(${count})`);
-
-            hintIndicator = `\n\n<!-- vibe: ${hintParts.join(' ')} -->`;
-          }
-
-          return {
-            jsonrpc: '2.0',
-            id,
-            result: {
-              content: [{
-                type: 'text',
-                text: (result.display || JSON.stringify(result, null, 2)) + hintIndicator + footer
-              }]
-            }
+          const callResult = {
+            content: [{
+              type: 'text',
+              text: (result.display || JSON.stringify(result, null, 2)) + footer
+            }]
           };
+          // Structured mirror for MCP Apps (the presence board reads this) and
+          // modern clients; text-only hosts ignore it.
+          if (result.structured) {
+            callResult.structuredContent = result.structured;
+          }
+          return { jsonrpc: '2.0', id, result: callResult };
         } catch (e) {
           return {
             jsonrpc: '2.0',
@@ -328,6 +677,20 @@ class VibeMCPServer {
   start() {
     process.stdin.setEncoding('utf8');
     let buffer = '';
+    let shuttingDown = false;
+
+    // The host owns this stdio process. When its pipe disappears—or the host asks
+    // the process group to terminate—stop every interval and exit explicitly.
+    // Relying only on a clean `end` left abrupt host/plugin teardown without a
+    // lifecycle boundary and was especially costly when this process also raised
+    // native notifications (#23, #173).
+    const shutdown = () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      presence.stop();
+      this.notifier.cancelAll();
+      process.exit(0);
+    };
 
     process.stdin.on('data', async (chunk) => {
       buffer += chunk;
@@ -336,45 +699,24 @@ class VibeMCPServer {
 
       for (const line of lines) {
         if (!line.trim()) continue;
-        let request;
         try {
-          request = JSON.parse(line);
-        } catch (e) {
-          // Malformed JSON — return proper JSON-RPC parse error
-          const parseError = {
-            jsonrpc: '2.0',
-            id: null,
-            error: { code: -32700, message: 'Parse error' }
-          };
-          process.stdout.write(JSON.stringify(parseError) + '\n');
-          continue;
-        }
-        try {
+          const request = JSON.parse(line);
           const response = await this.handleRequest(request);
           if (response) {
             process.stdout.write(JSON.stringify(response) + '\n');
           }
         } catch (e) {
-          const rpcError = {
-            jsonrpc: '2.0',
-            id: request.id || null,
-            error: { code: -32603, message: e.message }
-          };
-          process.stdout.write(JSON.stringify(rpcError) + '\n');
+          process.stderr.write(`Error: ${e.message}\n`);
         }
       }
     });
 
-    const shutdown = () => {
-      presence.stop();
-      if (global.vibeNotifier) global.vibeNotifier.cancelAll();
-      try { require('./store/sqlite').close(); } catch (e) {}
-      process.exit(0);
-    };
-
-    process.stdin.on('end', shutdown);
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
+    process.stdin.once('end', shutdown);
+    process.stdin.once('close', shutdown);
+    process.once('disconnect', shutdown);
+    process.once('SIGHUP', shutdown);
+    process.once('SIGINT', shutdown);
+    process.once('SIGTERM', shutdown);
 
     // Welcome message
     process.stderr.write('\n/vibe ready.\n');
@@ -384,11 +726,61 @@ class VibeMCPServer {
 
     // Check for updates (non-blocking)
     this.checkForUpdates();
+
+    // Auto-presence: if authenticated, broadcast presence on connect
+    this.autoPresence();
+  }
+
+  async autoPresence() {
+    try {
+      // Presence follows the CREDENTIAL, not a handle written in a file. This used to
+      // read config.getHandle() and announce "Auto-connected" on the strength of that
+      // alone — so an expired or foreign session still printed a confident green line
+      // and started a heartbeat that could only 401. That is the client-side version
+      // of the bug where an agent holds a green dot and never reads its mail: the dot
+      // has to mean someone is actually reachable. (issues #107, #91)
+      const handle = authStore.getHandle();
+      if (!handle || !authStore.isAuthenticated()) return;
+
+      // ASK THE SERVER BEFORE CLAIMING ANYTHING.
+      //
+      // I added an explicit verified-vs-saved state and then gated nothing on it, so
+      // this still announced on the strength of "a token-shaped string exists on
+      // disk". A forged JWT-shaped value in config or Buddy's auth.json produced a
+      // confident "🟢 Auto-connected as @victim" and a heartbeat against production.
+      // Holding a credential is not the same as having one that works, and the green
+      // dot is the one thing in this product that must never be a guess.
+      let verified;
+      try {
+        verified = await store.verifyAuthToken(authStore.getToken());
+      } catch (e) {
+        verified = null;
+      }
+      if (!verified || !verified.valid) {
+        // Definitive rejection means the session is dead; unreachable means unknown.
+        // Neither earns a green dot, and neither is worth shouting about at startup.
+        if (verified && verified.definitive) {
+          process.stderr.write('/vibe: saved session is no longer valid — say "vibe init" to sign in again\n');
+        }
+        return;
+      }
+      authStore.markVerified(verified.handle);
+
+      const one_liner = config.getOneLiner() || '';
+
+      // Start presence heartbeat — now, and only now, is this handle a fact.
+      presence.start(authStore.getHandle(), one_liner);
+
+      // Log quietly (only to stderr, not intrusive)
+      process.stderr.write(`🟢 Auto-connected as @${authStore.getHandle()}\n`);
+    } catch (error) {
+      // Silent fail - don't block startup
+    }
   }
 
   async checkForUpdates() {
     try {
-      const { checkForUpdates, formatUpdateNotification } = await import('./auto-update.js');
+      const { checkForUpdates, formatUpdateNotification } = require('./auto-update');
       const update = await checkForUpdates();
 
       if (update) {
@@ -401,27 +793,6 @@ class VibeMCPServer {
   }
 }
 
-// CLI flags — intercept before MCP server starts
-const args = process.argv.slice(2);
-if (args[0] === '--version' || args[0] === '-v') {
-  const { version } = require('./version.json');
-  console.log(version);
-  process.exit(0);
-}
-if (args[0] === '--help' || args[0] === '-h') {
-  console.log('Usage: slashvibe-mcp [command]\n');
-  console.log('Commands:');
-  console.log('  install     Configure /vibe in your editors');
-  console.log('  --version   Show version');
-  console.log('  --help      Show this help\n');
-  console.log('When run without arguments, starts the MCP server (stdio).');
-  process.exit(0);
-}
-if (args[0] === 'install') {
-  require('./scripts/install-editors');
-  // install-editors handles its own exit
-} else {
-  // Start MCP server
-  const server = new VibeMCPServer();
-  server.start();
-}
+// Start
+const server = new VibeMCPServer();
+server.start();

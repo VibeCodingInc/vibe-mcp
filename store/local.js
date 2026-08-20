@@ -91,9 +91,7 @@ function loadMessages() {
   try {
     if (fs.existsSync(MESSAGES_FILE)) {
       const content = fs.readFileSync(MESSAGES_FILE, 'utf8');
-      return content
-        .trim()
-        .split('\n')
+      return content.trim().split('\n')
         .filter(line => line.length > 0)
         .map(line => JSON.parse(line));
     }
@@ -124,7 +122,9 @@ async function getInbox(handle) {
   const h = handle.toLowerCase().replace('@', '');
 
   // Get messages TO this user
-  return messages.filter(m => m.to === h).sort((a, b) => b.timestamp - a.timestamp);
+  return messages
+    .filter(m => m.to === h)
+    .sort((a, b) => b.timestamp - a.timestamp);
 }
 
 async function getUnreadCount(handle) {
@@ -144,7 +144,10 @@ async function getThread(myHandle, theirHandle) {
 
   // Get messages between these two users
   return messages
-    .filter(m => (m.from === me && m.to === them) || (m.from === them && m.to === me))
+    .filter(m =>
+      (m.from === me && m.to === them) ||
+      (m.from === them && m.to === me)
+    )
     .sort((a, b) => a.timestamp - b.timestamp);
 }
 
@@ -172,9 +175,7 @@ function loadSkillExchanges() {
   try {
     if (fs.existsSync(SKILL_EXCHANGE_FILE)) {
       const content = fs.readFileSync(SKILL_EXCHANGE_FILE, 'utf8');
-      return content
-        .trim()
-        .split('\n')
+      return content.trim().split('\n')
         .filter(line => line.length > 0)
         .map(line => JSON.parse(line));
     }

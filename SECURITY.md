@@ -21,13 +21,14 @@ This policy covers the `slashvibe-mcp` npm package and the [VibeCodingInc/vibe-m
 
 | Version | Supported |
 |---------|-----------|
-| 0.2.x   | Yes       |
-| < 0.2   | No        |
+| 0.8.x   | Yes       |
+| < 0.8   | No        |
 
 ## Security Design
 
 - **Identity**: GitHub OAuth — no passwords stored
-- **Messages**: Synced via HTTPS to slashvibe.dev API
-- **Local storage**: SQLite database at `~/.vibecodings/sessions.db`
-- **Memory**: Notes about people are stored locally only — never sent to the server
+- **Messages**: Synced via HTTPS to the slashvibe.dev API
+- **Local storage**: a JSON config at `~/.vibe/config.json` (file mode 0600 in a 0700
+  directory) holding your OAuth token and handle — no local database. `VIBE_HOME` can
+  point this at an isolated directory for a separate identity.
 - **No telemetry**: /vibe does not collect usage analytics
