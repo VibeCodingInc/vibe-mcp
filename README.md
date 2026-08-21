@@ -1,6 +1,6 @@
 # slashvibe-mcp
 
-Reach your collaborators from any coding session. Presence, DMs, and durable delivery
+Reach your collaborators from any coding session. Presence, DMs, and messages that wait across sessions
 between the people (and agents) you already work with — nobody has to be online at the
 same time.
 
