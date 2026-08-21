@@ -15,9 +15,18 @@ const path = require('node:path');
 
 // config.js resolves its paths at require time from process.env, so each case
 // re-requires the client modules with a fresh cache under a controlled env.
+//
+// Clear by PACKAGE ROOT, not a hardcoded repo name: this test runs both in the
+// public source-of-record (path .../vibe-mcp/...) and in the monorepo mirror
+// (path .../mcp-server/...). A predicate hardcoded to '/vibe-mcp/' silently
+// no-ops in the mirror, leaving modules cached and the env-dependent cases
+// falsely passing/failing. The package root is two levels up from this file.
+const PKG_ROOT = path.resolve(__dirname, '..');
 function freshRequire(mod) {
   for (const key of Object.keys(require.cache)) {
-    if (key.includes('/vibe-mcp/') && !key.includes('/node_modules/')) delete require.cache[key];
+    if (key.startsWith(PKG_ROOT + path.sep) && !key.includes(`${path.sep}node_modules${path.sep}`)) {
+      delete require.cache[key];
+    }
   }
   return require(mod);
 }
