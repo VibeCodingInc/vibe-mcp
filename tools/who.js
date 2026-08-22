@@ -261,7 +261,9 @@ dm whoever invited you — it'll be waiting on their next turn — or send
       const urgencyWord = req.urgency === 'high' ? 'urgent' : req.urgency === 'low' ? 'whenever' : 'soon';
       display += `   **@${inertField(req.handle, 40)}** (${urgencyWord}): ${inertField(req.problem, 50)}\n`;
     }
-    display += `→ \`vibe stuck\` to help or ask\n\n---\n\n`;
+    // #9.2: 'vibe stuck' is not a registered tool — point at the DM path
+    // that actually exists instead of a command that fails.
+    display += `→ message them to help\n\n---\n\n`;
   }
 
   // Activity section for active users

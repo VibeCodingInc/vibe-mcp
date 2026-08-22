@@ -375,12 +375,17 @@ async function handler(args) {
     display += updateNotice;
   }
 
-  // Step 6: Show rotating tips about features
+  // Step 6: Show rotating tips about features.
+  // A tip may only name a tool REGISTERED in a default session (#9.2) — the
+  // old set advertised "vibe stuck" / "vibe available" / "vibe context" /
+  // "start presence monitor", none of which exist, so every rotating tip
+  // told users to run a command that fails. If a tip's tool ever moves
+  // behind VIBE_EXTRAS, the tip moves with it.
   const tips = [
-    '💡 **Tip:** Say "vibe stuck" when you need help — others can jump in and assist.',
-    '💡 **Tip:** Use "vibe available \'React, auth\'" to signal you\'re open to chat about topics.',
-    '💡 **Tip:** Use "vibe context --file auth.js" to share what you\'re working on.',
-    '💡 **Tip:** Say "start presence monitor" for real-time alerts when people come online.'
+    '💡 **Tip:** Say "who\'s around?" — vibe_who shows who has a live heartbeat right now.',
+    '💡 **Tip:** Say "message @handle ..." to DM someone — replies land in your inbox across sessions.',
+    '💡 **Tip:** Say "check my vibe inbox" any time — messages wait for you between sessions.',
+    '💡 **Tip:** Run "npx slashvibe-mcp hook install" so waiting messages open your next Claude session.'
   ];
   const tipIndex = Math.floor(Date.now() / 60000) % tips.length; // Rotate every minute
   display += `\n\n---\n${tips[tipIndex]}`;
