@@ -31,4 +31,7 @@ This policy covers the `slashvibe-mcp` npm package and the [VibeCodingInc/vibe-m
 - **Local storage**: a JSON config at `~/.vibe/config.json` (file mode 0600 in a 0700
   directory) holding your OAuth token and handle — no local database. `VIBE_HOME` can
   point this at an isolated directory for a separate identity.
-- **No telemetry**: /vibe does not collect usage analytics
+- **No telemetry**: /vibe does not collect usage analytics. No client code calls
+  an analytics endpoint — enforced by `tools/_no-telemetry.test.js`. What the
+  server necessarily observes is your API traffic itself (auth, presence
+  heartbeats, messages you send); nothing else is emitted.
