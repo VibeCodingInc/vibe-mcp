@@ -87,5 +87,8 @@ test('the literal `npx slashvibe-mcp hook install` route the tips name exists', 
   const cliSrc = read(binEntries['slashvibe-mcp'].replace(/^\.\//, ''));
   assert.match(cliSrc, /args\[0\] === 'hook'/, 'cli.js dispatches the hook subcommand');
   const hookSrc = read('hook-cli.js');
-  assert.match(hookSrc, /install/, 'hook-cli.js handles install');
+  // Behavioral anchor: the actual dispatch branch, not the substring
+  // 'install' — which also lives in 'installed', 'uninstall' and usage copy,
+  // so the old match survived deleting the handler (review delta).
+  assert.match(hookSrc, /action === 'install'/, 'hook-cli.js dispatches the install action');
 });

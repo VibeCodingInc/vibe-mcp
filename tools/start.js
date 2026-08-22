@@ -385,7 +385,7 @@ async function handler(args) {
     '💡 **Tip:** Say "who\'s around?" — vibe_who shows who has a live heartbeat right now.',
     '💡 **Tip:** Say "message @handle ..." to DM someone — replies land in your inbox across sessions.',
     '💡 **Tip:** Say "check my vibe inbox" any time — messages wait for you between sessions.',
-    '💡 **Tip:** Run "npx slashvibe-mcp hook install" so waiting messages open your next Claude session.'
+    '💡 **Tip:** Run "npx slashvibe-mcp hook install" so waiting messages appear when your next Claude session starts.'
   ];
   const tipIndex = Math.floor(Date.now() / 60000) % tips.length; // Rotate every minute
   display += `\n\n---\n${tips[tipIndex]}`;
