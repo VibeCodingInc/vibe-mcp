@@ -176,7 +176,21 @@ function formatThreadDisplay(myHandle, them, thread, { guestSection = '', typing
     const sender = isMe ? 'you' : `@${m.from}`;
     const time = store.formatTimeAgo(m.timestamp);
 
-    display += `${agentBadge}**${sender}** — _${time}_\n`;
+    // The #id is the reply-target handle a human or agent quotes back to
+    // vibe_reply — the server's reply_to_id is the only verified linkage,
+    // so the id must be visible to be selectable (never guessed from
+    // adjacency; that mis-association happened live in Pass 3A).
+    const idTag = m.id ? ` · #${m.id}` : '';
+    display += `${agentBadge}**${sender}** — _${time}_${idTag}\n`;
+
+    if (m.reply_to) {
+      // Compact quoted parent: asserted link + honest content. A parent the
+      // server could not serve (deleted/missing) renders as unavailable —
+      // the link is a fact, the content is absent, nothing is re-guessed.
+      display += (m.reply_to.from || m.reply_to.text)
+        ? `↩ replying to #${m.reply_to.id} @${m.reply_to.from}: "${inertField(m.reply_to.text || '', 48)}"\n`
+        : `↩ replying to an unavailable message\n`;
+    }
 
     if (m.body) {
       display += isMe ? `${m.body}\n` : `${MSG_OPEN} >>>\n${neutralize(m.body)}\n<<< ${MSG_CLOSE}\n`;

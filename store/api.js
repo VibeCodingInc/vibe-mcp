@@ -134,7 +134,16 @@ function requestOnce(method, path, data = null, options = {}) {
 
           try {
             const parsed = JSON.parse(body);
-            resolve({ success: false, error: parsed.error || `HTTP ${res.statusCode}`, statusCode: res.statusCode });
+            // Keep the server's human message: dropping it here turned every
+            // remedy-carrying refusal (e.g. invalid_reply_target's "reply
+            // target not found in this conversation") into a generic
+            // "Failed to send message" downstream (#15 review).
+            resolve({
+              success: false,
+              error: parsed.error || `HTTP ${res.statusCode}`,
+              message: parsed.message || undefined,
+              statusCode: res.statusCode,
+            });
           } catch (e) {
             resolve({ success: false, error: `HTTP ${res.statusCode}`, statusCode: res.statusCode });
           }
@@ -762,6 +771,13 @@ async function getThreadWithRequest(makeRequest, myHandle, theirHandle) {
     from: m.from,
     isAgent: m.isAgent || m.is_agent || false,
     body: m.body ?? m.text,
+    // Reply linkage — served by the API since the v2 thread read; this mapper
+    // silently dropped it, which is why no surface could render "in reply to".
+    // Server contract: { id, from, text≤200 } when the parent is in the SAME
+    // thread and not deleted; { id, from: null, text: null } when the stored
+    // link's parent cannot be served (deleted/foreign) — render that as
+    // "replying to an unavailable message", never guess; null when unlinked.
+    reply_to: m.reply_to || null,
     payload: m.payload || null,
     source_client: m.source_client || null,
     timestamp: new Date(m.created_at || m.createdAt).getTime(),
