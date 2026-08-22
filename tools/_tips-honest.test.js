@@ -22,15 +22,26 @@ const { join } = require('node:path');
 const ROOT = join(__dirname, '..');
 const read = (p) => readFileSync(join(ROOT, p), 'utf8');
 
-const PHANTOMS = ['vibe stuck', "vibe available '", 'vibe context --file', 'start presence monitor'];
+// Command STEMS, not exact examples — 'vibe available "React"' and
+// 'vibe available anything-else' are the same phantom (review delta).
+const PHANTOMS = ['vibe stuck', 'vibe available', 'vibe context', 'start presence monitor'];
 
-// Kernel tool names = registrations OUTSIDE the extraTools block in index.js.
+// Kernel tool names = the actual KEYS of the kernelTools object literal in
+// index.js — not any quoted vibe_* string, which a comment or unrelated
+// string could masquerade as (review delta).
 function kernelToolNames() {
   const src = read('index.js');
-  const extrasStart = src.indexOf('const extraTools');
-  assert.ok(extrasStart > 0, 'extras block found');
-  const kernelSrc = src.slice(0, extrasStart);
-  return new Set([...kernelSrc.matchAll(/'(vibe_[a-z_]+)'/g)].map((m) => m[1]));
+  const start = src.indexOf('const kernelTools = {');
+  assert.ok(start > 0, 'kernelTools object found');
+  const end = src.indexOf('};', start);
+  assert.ok(end > start, 'kernelTools object closes');
+  const body = src.slice(start, end);
+  // keys look like `  vibe_name: require(...)` — anchor on key position.
+  const names = new Set(
+    [...body.matchAll(/^\s*(vibe_[a-z_]+)\s*:/gm)].map((m) => m[1])
+  );
+  assert.ok(names.has('vibe_who') && names.has('vibe_dm'), 'sanity: known kernel keys parsed');
+  return names;
 }
 
 function tipLines(src) {
@@ -65,4 +76,16 @@ test('guided actions and who.js do not promote phantom commands either', () => {
     !who.includes('`vibe stuck`'),
     'who.js suggests running unregistered `vibe stuck`'
   );
+});
+
+test('the literal `npx slashvibe-mcp hook install` route the tips name exists', () => {
+  const pkg = JSON.parse(read('package.json'));
+  const binEntries = typeof pkg.bin === 'string' ? { [pkg.name]: pkg.bin } : (pkg.bin || {});
+  assert.ok(binEntries['slashvibe-mcp'], 'package exposes the slashvibe-mcp bin');
+  // The route is two hops: cli.js dispatches 'hook' to hook-cli.js, which
+  // handles 'install'. Pin both hops, not just the first.
+  const cliSrc = read(binEntries['slashvibe-mcp'].replace(/^\.\//, ''));
+  assert.match(cliSrc, /args\[0\] === 'hook'/, 'cli.js dispatches the hook subcommand');
+  const hookSrc = read('hook-cli.js');
+  assert.match(hookSrc, /install/, 'hook-cli.js handles install');
 });
