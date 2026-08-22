@@ -154,3 +154,9 @@ test('the title and badge count only recent heartbeats, and lastActivity names o
   const badge = Buffer.from('●1').toString('base64');
   assert.ok(escapes.includes(`SetBadgeFormat=${badge}`), 'badge counts hereNow only');
 });
+
+test('ambient-escapes exports ONLY the gated entry point — no bypass surface', () => {
+  const mod = require('../ambient-escapes.js');
+  assert.deepEqual(Object.keys(mod), ['ambientEscapes'],
+    'exporting the raw formatters would hand callers an ungated online claim');
+});

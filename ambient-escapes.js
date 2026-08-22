@@ -36,9 +36,10 @@ function getBadgeSequence(onlineCount, unreadCount) {
 }
 
 /**
- * The one entry point index.js uses. Takes the RAW others list (active+away
- * union) and applies the recency gate here, so no caller can accidentally
- * feed an ungated count into an online claim.
+ * The ONLY export. Takes the RAW others list (active+away union) and applies
+ * the recency gate here, so no caller can feed an ungated count into an
+ * online claim — which is also why the two formatters above stay private:
+ * exporting them would hand back the bypass this module exists to close.
  * @param {Array<{handle: string, status?: string, lastSeen?: number}>} others
  * @param {number} unreadCount
  * @returns {string} concatenated escape sequences
@@ -50,4 +51,4 @@ function ambientEscapes(others, unreadCount) {
     + getBadgeSequence(hereNow.length, unreadCount);
 }
 
-module.exports = { ambientEscapes, getTerminalTitle, getBadgeSequence };
+module.exports = { ambientEscapes };
