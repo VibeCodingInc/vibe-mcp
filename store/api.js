@@ -762,6 +762,11 @@ async function getThreadWithRequest(makeRequest, myHandle, theirHandle) {
     from: m.from,
     isAgent: m.isAgent || m.is_agent || false,
     body: m.body ?? m.text,
+    // Reply linkage — served by the API since the v2 thread read; this mapper
+    // silently dropped it, which is why no surface could render "in reply to".
+    // Shape: { id, from, text≤200 } or null. A deleted/hard-missing parent
+    // arrives as null fields on the server side; render honestly, never guess.
+    reply_to: m.reply_to || null,
     payload: m.payload || null,
     source_client: m.source_client || null,
     timestamp: new Date(m.created_at || m.createdAt).getTime(),

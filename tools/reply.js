@@ -25,6 +25,10 @@ const definition = {
       to: {
         type: 'string',
         description: 'Optional: reply to a specific person (e.g., @alex). If not provided, replies to most recent unread.'
+      },
+      reply_to: {
+        type: 'string',
+        description: 'Optional: the exact message ID being answered (the #id shown beside messages in the thread view). When several messages could be the target, ask the human which one — NEVER silently pick the newest. Omit for an ordinary unlinked reply.'
       }
     },
     required: ['message']
@@ -35,7 +39,7 @@ async function handler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
 
-  const { message, to } = args;
+  const { message, to, reply_to } = args;
   const myHandle = config.getHandle();
 
   if (!message || message.trim().length === 0) {
@@ -102,11 +106,35 @@ async function handler(args) {
   }
   const finalMessage = trimmed;
 
+  // Explicit reply target: the ID must exist in this thread. An unknown ID is
+  // refused WITH the candidates — never corrected to "probably the newest",
+  // which is exactly the mis-association Pass 3A demonstrated live. No target
+  // at all stays an ordinary unlinked message (the truthful default).
+  let quotedParent = null;
+  if (reply_to) {
+    const thread = await store.getThread(myHandle, targetHandle);
+    const target = (thread || []).find((m) => m.id === reply_to);
+    if (!target) {
+      const candidates = (thread || [])
+        .filter((m) => m.id)
+        .slice(-6)
+        .map((m) => `  #${m.id} — ${m.from === myHandle ? 'you' : '@' + m.from}: "${truncate(m.body || '', 48)}"`)
+        .join('\n');
+      return {
+        display: `Not sent — no message #${reply_to} in this thread, and I won't guess the target.\nWhich message are you answering?\n${candidates || '  (no messages with IDs in the loaded window)'}`,
+      };
+    }
+    quotedParent = target;
+  }
+
   // Send typing indicator (shows "typing..." to recipient)
   store.sendTypingIndicator(myHandle, targetHandle).catch(() => {});
 
-  // Send the message
-  const result = await store.sendMessage(myHandle, targetHandle, finalMessage, 'dm', null);
+  // Send the message — reply_to writes the EXISTING reply_to field; the
+  // server's reply_to_id is the only authoritative link (no post-hoc linking).
+  const result = await store.sendMessage(myHandle, targetHandle, finalMessage, 'dm', null, {
+    replyTo: reply_to || null,
+  });
 
   // Same contract as dm.js: a falsy result is a failure (the store used to
   // return null on transport errors and this claimed "✓ Replied"), errors that
@@ -151,6 +179,9 @@ async function handler(args) {
 
   // Build response
   let display = `✓ Replied to **@${targetHandle}**`;
+  if (quotedParent) {
+    display += `\n↩ replying to #${quotedParent.id} ${quotedParent.from === myHandle ? 'you' : '@' + quotedParent.from}: "${truncate(quotedParent.body || '', 48)}"`;
+  }
 
   // Same receipt as dm.js: id · chars stored · server time, with a loud
   // mismatch warning — a shortened message can never pass as sent.
@@ -167,6 +198,7 @@ async function handler(args) {
     }
     const ts = result.serverTimestamp || result.created_at;
     if (ts) receiptBits.push(String(ts));
+    if (reply_to) receiptBits.push(`replying to ${reply_to}`);
     if (receiptBits.length) display += `\n_receipt: ${receiptBits.join(' · ')}_`;
   }
 
