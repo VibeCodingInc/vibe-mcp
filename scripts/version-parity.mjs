@@ -2,11 +2,14 @@
 /**
  * VERSION PARITY — production and npm advertise the same installable truth.
  *
- * Direction-aware, exactly like the check it was extracted from:
- *   Dangerous: production advertises a version npm cannot serve — people are
+ * Parity means EQUALITY, eventually. Direction still matters for the message,
+ * not the verdict:
+ *   live > npm — production advertises a version npm cannot serve; people are
  *   told about something they cannot install.
- *   Benign: npm is ahead of production — deploy propagation after a publish;
- *   installs work, the site catches up.
+ *   npm > live — normally deploy propagation after a publish, and it must
+ *   CONVERGE within the retry window. A permanently stale or failed deploy
+ *   (npm 0.8.18, live 0.8.17 forever) is a release problem, and a job named
+ *   "parity" that stays green through it would be lying (#14 review).
  *
  * WHY THIS IS ITS OWN SCRIPT (the 0.8.17 deadlock): this check used to run
  * inside release-conformance.mjs, which gates the PRE-publish path. Merging
@@ -23,8 +26,9 @@
  *     [--npm-meta-url <url>]                 npm packument (test stubbing)
  *     [--retries N] [--interval-ms M]        tolerate propagation, then fail
  *
- * Exit 0 = parity (or benign npm-ahead). Exit 1 = production advertises a
- * version npm cannot serve — report loudly, page a human.
+ * Exit 0 = both sides readable and EQUAL (within the retry window).
+ * Exit 1 = any remaining mismatch in either direction, or an unreadable side,
+ * after the final retry — report loudly with both versions, page a human.
  */
 
 const arg = (name, dflt) => {
@@ -56,29 +60,35 @@ async function readVersions() {
 }
 
 let last = { liveVersion: null, npmLatest: null };
-for (let attempt = 1; attempt <= Math.max(1, RETRIES); attempt++) {
+const attempts = Math.max(1, RETRIES);
+for (let attempt = 1; attempt <= attempts; attempt++) {
   last = await readVersions();
   const { liveVersion, npmLatest } = last;
-  if (liveVersion === null || npmLatest === null) {
-    console.log(`attempt ${attempt}: could not read both versions (live=${liveVersion} npm=${npmLatest})`);
-  } else if (cmp(liveVersion, npmLatest) > 0) {
-    console.log(`attempt ${attempt}: live=${liveVersion} npm=${npmLatest} — production is ahead of npm`);
-  } else {
-    const benign = cmp(npmLatest, liveVersion) > 0
-      ? ' — npm ahead, deploy still propagating (benign)' : '';
-    console.log(`✓ version parity  live=${liveVersion} npm=${npmLatest}${benign}`);
+  if (liveVersion !== null && npmLatest !== null && cmp(liveVersion, npmLatest) === 0) {
+    console.log(`✓ version parity  live=${liveVersion} npm=${npmLatest}`);
     process.exit(0);
   }
-  if (attempt < RETRIES) await new Promise((r) => setTimeout(r, INTERVAL_MS));
+  if (liveVersion === null || npmLatest === null) {
+    console.log(`attempt ${attempt}/${attempts}: could not read both versions (live=${liveVersion} npm=${npmLatest})`);
+  } else if (cmp(liveVersion, npmLatest) > 0) {
+    console.log(`attempt ${attempt}/${attempts}: live=${liveVersion} npm=${npmLatest} — production ahead of npm`);
+  } else {
+    console.log(`attempt ${attempt}/${attempts}: live=${liveVersion} npm=${npmLatest} — npm ahead, waiting for the deploy to converge`);
+  }
+  if (attempt < attempts) await new Promise((r) => setTimeout(r, INTERVAL_MS));
 }
 
+const direction =
+  last.liveVersion === null || last.npmLatest === null
+    ? 'A side is unreadable.'
+    : cmp(last.liveVersion, last.npmLatest) > 0
+      ? 'Production advertises a version npm cannot serve — every "npx slashvibe-mcp" the site suggests installs something older than promised. Complete the publish for the live version, or roll the deploy back to the published one.'
+      : 'npm is ahead and production never converged — the deploy failed or is permanently stale. Fix or roll forward the deploy so the site advertises what npm serves.';
+
 console.error(`
-✗ VERSION PARITY FAILED after ${Math.max(1, RETRIES)} attempt(s)
+✗ VERSION PARITY FAILED after ${attempts} attempt(s)
   live=${last.liveVersion}  npm=${last.npmLatest}
 
-  Production advertises a version npm cannot serve (or a side is unreadable).
-  Every "npx slashvibe-mcp" the site suggests will install something older
-  than what it promises. Fix by completing the npm publish for the live
-  version, or rolling the deploy back to the published one.
+  ${direction}
 `);
 process.exit(1);

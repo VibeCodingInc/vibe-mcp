@@ -34,10 +34,16 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const run = promisify(execFile);
 
 function stubServer({ live, npm }) {
+  // `live` may be a string (constant) or an array of versions consumed one
+  // per /api/version request — a converging (or failing) deploy in miniature.
+  const liveSequence = Array.isArray(live) ? [...live] : null;
   const server = createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
     if (req.url.startsWith('/api/version')) {
-      res.end(JSON.stringify({ version: live }));
+      const v = liveSequence
+        ? (liveSequence.length > 1 ? liveSequence.shift() : liveSequence[0])
+        : live;
+      res.end(JSON.stringify({ version: v }));
     } else if (req.url.startsWith('/npm-meta')) {
       res.end(JSON.stringify({ 'dist-tags': { latest: npm } }));
     } else {
@@ -53,14 +59,15 @@ function stubServer({ live, npm }) {
   });
 }
 
-async function parity({ live, npm }) {
+async function parity({ live, npm, retries = 1 }) {
   const { base, close } = await stubServer({ live, npm });
   try {
     return await run('node', [
       join(ROOT, 'scripts/version-parity.mjs'),
       '--base', base,
       '--npm-meta-url', `${base}/npm-meta`,
-      '--retries', '1',
+      '--retries', String(retries),
+      '--interval-ms', '50',
     ]).then(
       (r) => ({ code: 0, out: r.stdout + r.stderr }),
       (e) => ({ code: e.code, out: (e.stdout || '') + (e.stderr || '') })
@@ -70,18 +77,30 @@ async function parity({ live, npm }) {
   }
 }
 
-test('the exact 0.8.17 state (live ahead of npm) fails LOUDLY post-publish', async () => {
-  const r = await parity({ live: '0.8.17', npm: '0.8.16' });
+test('PERSISTENT live-ahead (the exact 0.8.17 state) fails LOUDLY after retries', async () => {
+  const r = await parity({ live: '0.8.17', npm: '0.8.16', retries: 2 });
   assert.equal(r.code, 1, 'a real mismatch must be a red job');
   assert.match(r.out, /VERSION PARITY FAILED/, 'the failure announces itself');
   assert.match(r.out, /0\.8\.17/, 'names the live version');
   assert.match(r.out, /0\.8\.16/, 'names the npm version');
 });
 
-test('npm ahead of production (post-publish propagation) is benign', async () => {
-  const r = await parity({ live: '0.8.16', npm: '0.8.17' });
-  assert.equal(r.code, 0, 'the direction publishing correctly creates must pass');
-  assert.match(r.out, /benign/);
+test('TRANSIENT npm-ahead that converges within the retry window passes', async () => {
+  // The deploy catches up on the third read — exactly what the verify job's
+  // retry window exists to tolerate.
+  const r = await parity({ live: ['0.8.16', '0.8.16', '0.8.17'], npm: '0.8.17', retries: 4 });
+  assert.equal(r.code, 0, 'convergence within the window must pass');
+  assert.match(r.out, /npm ahead, waiting/, 'the wait is narrated');
+  assert.match(r.out, /✓ version parity/);
+});
+
+test('PERSISTENT npm-ahead eventually fails — a stale deploy cannot stay green (#14 review)', async () => {
+  const r = await parity({ live: '0.8.17', npm: '0.8.18', retries: 3 });
+  assert.equal(r.code, 1, 'a job named parity may not pass a permanent mismatch');
+  assert.match(r.out, /VERSION PARITY FAILED/);
+  assert.match(r.out, /0\.8\.18/, 'names the npm version');
+  assert.match(r.out, /0\.8\.17/, 'names the live version');
+  assert.match(r.out, /never converged|stale/i, 'says what it means');
 });
 
 test('exact parity passes', async () => {
