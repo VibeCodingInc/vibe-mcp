@@ -19,7 +19,8 @@
     "lint": "eslint . --ext .js",
     "lint:fix": "eslint . --ext .js --fix",
     "test:pack": "node --test test/pack-artifact.test.mjs",
-    "test:release": "node scripts/release-conformance.mjs"
+    "test:release": "node scripts/release-conformance.mjs",
+    "test:parity": "node scripts/version-parity.mjs"
   },
   "keywords": [
     "mcp",

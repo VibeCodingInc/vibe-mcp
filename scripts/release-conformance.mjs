@@ -163,33 +163,14 @@ if (installed) {
     claimsAbsentHost === null ? '(could not evaluate)' : '');
 }
 
-// ── 6. release ordering: never advertise what is not downloadable ──────────
-let liveVersion = null, npmLatest = null;
-try {
-  const r = await fetch(`${BASE}/api/version`, { signal: AbortSignal.timeout(10000) });
-  liveVersion = (await r.json().catch(() => ({}))).version ?? null;
-} catch { /* null */ }
-try {
-  const r = await fetch('https://registry.npmjs.org/slashvibe-mcp', { signal: AbortSignal.timeout(10000) });
-  npmLatest = (await r.json())['dist-tags']?.latest ?? null;
-} catch { /* null */ }
-// DIRECTION MATTERS, and the first version of this check ignored it.
-//
-// Dangerous: production advertises a version npm cannot serve — we tell people about
-// something they cannot install. That is the ordering bug this check exists for.
-// Benign: npm is AHEAD of production, which is just deploy propagation after a publish.
-// Users can install and it works; the site catches up in a minute. Blocking on that
-// would mean a check that fails every time we do the thing correctly.
-const cmp = (a, b) => {
-  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
-  for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0); }
-  return 0;
-};
-const advertisesTooMuch = !!(liveVersion && npmLatest && cmp(liveVersion, npmLatest) > 0);
-check('production does not advertise a version npm cannot serve',
-  !advertisesTooMuch,
-  `live=${liveVersion} npm=${npmLatest}` +
-    (liveVersion && npmLatest && cmp(npmLatest, liveVersion) > 0 ? ' — npm ahead, deploy still propagating (benign)' : ''));
+// ── (6 moved) release ordering / npm↔production parity ─────────────────────
+// Lived here until the 0.8.17 deadlock: merging to main auto-deploys, so at
+// tag time production already advertised the version being published and this
+// PRE-publish gate failed on the exact condition only the publish could clear.
+// Parity is post-publish verification now: scripts/version-parity.mjs, run by
+// the publish workflow's verify job (and runnable any time via
+// `npm run test:parity`). Everything above proves the tag, source, artifact
+// and package are correct — nothing above depends on what npm serves.
 
 rmSync(tmp, { recursive: true, force: true });
 

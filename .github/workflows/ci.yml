@@ -27,6 +27,8 @@ jobs:
         run: npm run test:pack
       - name: Release conformance
         run: npm run test:release
+      - name: Release ordering regression (the 0.8.17 deadlock)
+        run: node --test test/release-deadlock.test.mjs
 
   secret-scan:
     runs-on: ubuntu-latest
