@@ -129,6 +129,23 @@ test('no reply_to = ordinary unlinked message', async () => {
   }
 });
 
+test("the server's write-boundary refusal is shown as-is — no useless retry advice", async () => {
+  const t = toolWith('reply', {
+    ...QUIET,
+    sendMessage: async () => ({
+      error: 'invalid_reply_target',
+      message: 'reply target not found in this conversation',
+    }),
+  });
+  try {
+    const res = await t.run({ message: 'x', to: 'stan', reply_to: 'msg_askA' });
+    assert.match(res.display, /reply target not found in this conversation/);
+    assert.ok(!/worth one retry/.test(res.display), 'retrying the same target cannot help');
+  } finally {
+    t.restore();
+  }
+});
+
 test('the thread view exposes #ids, the quoted parent, and the unavailable state', async () => {
   const t = toolWith('inbox', {
     ...QUIET,

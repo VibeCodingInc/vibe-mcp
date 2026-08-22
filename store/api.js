@@ -764,8 +764,10 @@ async function getThreadWithRequest(makeRequest, myHandle, theirHandle) {
     body: m.body ?? m.text,
     // Reply linkage — served by the API since the v2 thread read; this mapper
     // silently dropped it, which is why no surface could render "in reply to".
-    // Shape: { id, from, text≤200 } or null. A deleted/hard-missing parent
-    // arrives as null fields on the server side; render honestly, never guess.
+    // Server contract: { id, from, text≤200 } when the parent is in the SAME
+    // thread and not deleted; { id, from: null, text: null } when the stored
+    // link's parent cannot be served (deleted/foreign) — render that as
+    // "replying to an unavailable message", never guess; null when unlinked.
     reply_to: m.reply_to || null,
     payload: m.payload || null,
     source_client: m.source_client || null,

@@ -110,6 +110,10 @@ async function handler(args) {
   // refused WITH the candidates — never corrected to "probably the newest",
   // which is exactly the mis-association Pass 3A demonstrated live. No target
   // at all stays an ordinary unlinked message (the truthful default).
+  // DEFENSE-IN-DEPTH, not authority: the server validates replyTo at the
+  // write boundary (exists ∧ same conversation ∧ not deleted) and refuses
+  // with a stable invalid_reply_target — this local check just gives a better
+  // error (with candidates) before a round-trip.
   let quotedParent = null;
   if (reply_to) {
     const thread = await store.getThread(myHandle, targetHandle);
@@ -144,6 +148,10 @@ async function handler(args) {
     const REMEDY_CARRYING = new Set([
       'auth_expired', 'not_signed_in', 'auth_failed',
       'handle_not_found', 'self_dm', 'storage_error', 'transport_failed',
+      // The server's write-boundary refusal (target missing, foreign, or
+      // deleted — one uniform message, no existence oracle). Retrying the
+      // same target cannot help, so the refusal is shown as-is.
+      'invalid_reply_target',
     ]);
     const detail = (result && result.message) || "That reply didn't send — nothing was delivered.";
     return {
