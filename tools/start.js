@@ -18,7 +18,7 @@ const store = require('../store');
 const memory = require('../memory');
 const patterns = require('../intelligence/patterns');
 const { actions, formatActions } = require('./_actions');
-const { firstDmNudge } = require('./_shared');
+const { firstDmNudge, isHereNow } = require('./_shared');
 const { weaveMoment } = require('./weave');
 const init = require('./init');
 const { gatherWithTimeout } = require('./_work-context');
@@ -252,6 +252,11 @@ async function handler(args) {
   // Step 2: Get who's around
   const users = await store.getActiveUsers();
   const others = users.filter(u => u.handle !== myHandle);
+  // GREEN MEANS A RECENT CONFIRMED HEARTBEAT — the same isHereNow gate who and
+  // dm use. getActiveUsers returns active+away merged; rendering that union
+  // under 🟢 told users someone was live who last breathed 25 minutes ago.
+  const hereNow = others.filter(isHereNow);
+  const away = others.filter(u => !isHereNow(u));
 
   // Step 3: Check inbox
   let unreadCount = 0;
@@ -295,7 +300,7 @@ async function handler(args) {
   // Generate the ASCII welcome card (matches init.js format)
   const welcomeCard = generateWelcomeCard({
     handle: myHandle,
-    onlineCount: others.length,
+    onlineCount: hereNow.length,
     unreadCount,
     versionInfo
   });
@@ -303,9 +308,10 @@ async function handler(args) {
   // Build display with card + any additional info
   let display = welcomeCard;
 
-  // Add who's online section (top 5 with what they're building)
-  if (others.length > 0) {
-    const top5 = others.slice(0, 5);
+  // Add who's online section (top 5 with what they're building).
+  // Only isHereNow rows may sit under 🟢; everyone else is ○ away, in words.
+  if (hereNow.length > 0) {
+    const top5 = hereNow.slice(0, 5);
     display += `\n\n**🟢 Online now:**`;
     top5.forEach(u => {
       // status/one_liner/note are written by other users — inert before they
@@ -314,15 +320,18 @@ async function handler(args) {
       const truncated = inertField(u.one_liner || u.note || '', 40);
       display += `\n• @${u.handle}${status}${truncated ? ' — ' + truncated : ''}`;
     });
-    if (others.length > 5) {
-      display += `\n• _+${others.length - 5} more..._`;
+    if (hereNow.length > 5) {
+      display += `\n• _+${hereNow.length - 5} more..._`;
     }
+  }
+  if (away.length > 0) {
+    display += `\n${hereNow.length > 0 ? '' : '\n'}○ ${away.length} away`;
   }
 
   // First-DM activation nudge (dormant users only): if this user has never sent
   // a DM, point them at a real human who's around right now with a ready opener.
   // Gated inside firstDmNudge so we never nag people who already message.
-  display += firstDmNudge(others, threads);
+  display += firstDmNudge(hereNow, threads);
 
   // Add unread messages section (if any)
   if (unreadCount > 0) {
@@ -392,6 +401,7 @@ async function handler(args) {
   // Include full online users list so Claude doesn't need to call vibe_who
   response.onlineUsers = others.map(u => ({
     handle: u.handle,
+    hereNow: isHereNow(u),
     building: (u.one_liner || u.note) ? inertField(u.one_liner || u.note) : null,
     status: u.status ? inertField(u.status, 30) : null,
     lastActive: u.lastSeen ? new Date(u.lastSeen).toISOString() : null
@@ -440,7 +450,7 @@ async function handler(args) {
     response.reason = 'empty_room';
   } else if (others.length > 0) {
     // People around - check for interesting ones
-    const interesting = others.find(u => {
+    const interesting = hereNow.find(u => {
       const age = Date.now() - u.lastSeen;
       return age < 5 * 60 * 1000; // Active in last 5 min
     });

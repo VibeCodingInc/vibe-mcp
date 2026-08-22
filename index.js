@@ -119,27 +119,10 @@ function inferPromptFromArgs(toolName, args) {
 // badge can ask for it; nobody else should pay for it.
 const TERM_ESCAPES = ['1', 'true'].includes(String(process.env.VIBE_TERM_ESCAPES || '').toLowerCase());
 
-// Generate terminal title escape sequence (OSC 0)
-function getTerminalTitle(onlineCount, unreadCount, lastActivity) {
-  const parts = [];
-  if (onlineCount > 0) parts.push(`${onlineCount} online`);
-  if (unreadCount > 0) parts.push(`📩 ${unreadCount}`);
-  if (lastActivity) parts.push(lastActivity);
-  if (parts.length === 0) parts.push('quiet');
-
-  const title = `vibe: ${parts.join(' · ')}`;
-  return `\x1b]0;${title}\x07`;
-}
-
-// Generate iTerm2 badge escape sequence (OSC 1337)
-function getBadgeSequence(onlineCount, unreadCount) {
-  const parts = [];
-  if (onlineCount > 0) parts.push(`●${onlineCount}`);
-  if (unreadCount > 0) parts.push(`✉${unreadCount}`);
-  const badge = parts.join(' ') || '○';
-  const encoded = Buffer.from(badge).toString('base64');
-  return `\x1b]1337;SetBadgeFormat=${encoded}\x07`;
-}
+// Terminal title + badge escapes moved to ambient-escapes.js — they make
+// "N online" claims, so the module applies the isHereNow gate internally
+// and index.js can no longer feed it an ungated count (#9.1).
+const { ambientEscapes } = require('./ambient-escapes');
 
 // Fetch and acknowledge guest messages from the session API
 async function fetchGuestMessages(handle) {
@@ -251,14 +234,13 @@ async function getPresenceFooter() {
     ]);
 
     const others = users.filter(u => u.handle !== handle);
+    // The footer's "N others" deliberately counts the room AROUND you
+    // (active+away); the title/badge "online" claims are gated inside
+    // ambientEscapes on isHereNow — two different statements, two counts.
     const onlineCount = others.length;
 
     // Terminal title + badge: ambient by nature, invisible in the transcript.
-    const lastActivity = others.length > 0 ? `@${others[0].handle}` : null;
-    const escapes = TERM_ESCAPES
-      ? getTerminalTitle(onlineCount, unreadCount, lastActivity) +
-        getBadgeSequence(onlineCount, unreadCount)
-      : '';
+    const escapes = TERM_ESCAPES ? ambientEscapes(others, unreadCount) : '';
 
     // The status line. Counts only — no mood inference, no nudges.
     const parts = ['vibe'];

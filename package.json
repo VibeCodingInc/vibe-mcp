@@ -55,6 +55,7 @@
     "config.js",
     "crypto.js",
     "discord.js",
+    "ambient-escapes.js",
     "footer.js",
     "games/chess.js",
     "hook-cli.js",
