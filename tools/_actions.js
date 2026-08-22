@@ -549,11 +549,13 @@ const actions = {
         command: `message @${recentThreads[0]}`
       });
     } else {
-      // Promote presence monitor (lurk mode) - keeps engagement without active effort
+      // Same defect class as the tips (#9.2): 'start presence monitor' is not
+      // a registered command, so this promoted a dead action. Point at the
+      // inbox instead — the surface that always exists.
       result.push({
-        label: 'Enable lurk mode',
-        description: 'Get pinged when something interesting happens',
-        command: 'start presence monitor'
+        label: 'Check your inbox',
+        description: 'Messages wait for you between sessions',
+        command: 'check my vibe inbox'
       });
     }
 
