@@ -1,11 +1,13 @@
 {
-  "version": "0.8.17",
-  "updated": "2026-08-19",
-  "changelog": "Messages you send are the messages that arrive. Over-length messages are now refused before sending instead of being silently shortened, sends confirm the exact stored length, and reading a full thread shows the whole message — no more quiet truncation. Isolated identities (VIBE_HOME) stay fully separate.",
+  "version": "0.8.18",
+  "updated": "2026-08-22",
+  "changelog": "Green means someone is actually there, and answers attach to the exact question they answer. Presence dots everywhere now require a recent verified heartbeat, every tip names a command that exists, the client sends zero analytics, and replies can carry an explicit target: pick the message you're answering and the thread shows the quote.",
   "features": [
-    "vibe_dm and vibe_reply refuse an over-length message instead of trimming it, and show a receipt (id, stored length, server time) so a shortened send can never look successful",
-    "Reading a full conversation shows the entire message body, not the first 500 characters",
-    "VIBE_HOME isolation is real: an isolated session never reads or overwrites the shared identity, and an empty VIBE_HOME fails loudly instead of merging identities"
+    "vibe_start's card, list, terminal title and badge count only recent verified heartbeats \u2014 away and stale rows say so in words, never in green",
+    "Rotating tips and guided actions only suggest commands a default session actually registers",
+    "The setup_complete analytics event is removed; SECURITY.md's no-telemetry claim is now enforced by test",
+    "vibe_reply accepts an explicit reply target (#id shown beside messages); unknown targets are refused with candidates, never guessed; receipts name the new message id and its target",
+    "Thread views render the quoted parent (\u21a9 replying to #id) and honestly mark replies to unavailable messages"
   ],
   "deprecated": [],
   "breaking": false,
