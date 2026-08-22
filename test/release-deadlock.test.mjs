@@ -12,7 +12,8 @@
  *   1. The extracted parity script, fed the exact 0.8.17 state via local HTTP
  *      stubs, fails LOUDLY (exit 1, named versions) — right answer, wrong
  *      place fixed by WHERE it now runs.
- *   2. npm-ahead (the benign propagation direction) passes.
+ *   2. Transient npm-ahead that converges within the retry window passes;
+ *      persistent npm-ahead fails — a stale deploy cannot stay green.
  *   3. The pre-publish path no longer reads npm at all: release-conformance
  *      has no registry fetch, so the deadlock input cannot reach the gate.
  *   4. The publish workflow runs parity only in a job that `needs: publish` —
