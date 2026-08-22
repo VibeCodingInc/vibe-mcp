@@ -1,8 +1,11 @@
 name: Publish to npm
 
 # Publishes slashvibe-mcp from the PUBLIC source-of-record only, on a version
-# tag (e.g. v0.8.17). The artifact tests run and must pass before publish; a
-# failed pack/boot/conformance check stops the release before it reaches npm.
+# tag (e.g. v0.8.17). Pre-publish: the checks that prove the tag, source,
+# artifact and package are correct stop the release before it reaches npm.
+# Post-publish: the verify job proves npm serves what production advertises
+# (parity) and that the REGISTRY artifact conforms — loud on mismatch, never
+# a deadlock (see scripts/version-parity.mjs for the 0.8.17 story).
 on:
   push:
     tags:
@@ -64,3 +67,33 @@ jobs:
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # POST-publish verification — parity moved here from the pre-publish gate
+  # after the 0.8.17 deadlock (auto-deploy made production advertise the
+  # version being published, so the old pre-publish parity check failed on the
+  # exact condition only the publish could clear). A mismatch here is a loud
+  # red job on the release run, not a blocked release.
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: npm serves what production advertises (parity, with propagation retries)
+        run: node scripts/version-parity.mjs --retries 10 --interval-ms 30000
+
+      - name: Install
+        run: npm install
+
+      - name: Conformance against the REGISTRY artifact
+        # The strongest post-publish proof: what npm actually serves installs,
+        # boots, and accepts the live service — not the tarball on this disk.
+        run: node scripts/release-conformance.mjs --registry
