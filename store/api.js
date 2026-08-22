@@ -134,7 +134,16 @@ function requestOnce(method, path, data = null, options = {}) {
 
           try {
             const parsed = JSON.parse(body);
-            resolve({ success: false, error: parsed.error || `HTTP ${res.statusCode}`, statusCode: res.statusCode });
+            // Keep the server's human message: dropping it here turned every
+            // remedy-carrying refusal (e.g. invalid_reply_target's "reply
+            // target not found in this conversation") into a generic
+            // "Failed to send message" downstream (#15 review).
+            resolve({
+              success: false,
+              error: parsed.error || `HTTP ${res.statusCode}`,
+              message: parsed.message || undefined,
+              statusCode: res.statusCode,
+            });
           } catch (e) {
             resolve({ success: false, error: `HTTP ${res.statusCode}`, statusCode: res.statusCode });
           }
