@@ -532,18 +532,12 @@ async function setup() {
     console.log(`${colors.cyan}  Welcome to /vibe, @${authResult.handle}.${colors.reset}`);
     console.log('');
 
-    // Track setup completion
-    try {
-      await fetch(`${API_BASE}/api/analytics/track`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          event: 'setup_complete',
-          handle: authResult.handle,
-          source: 'one_click_install'
-        })
-      });
-    } catch (e) {}
+    // No analytics ping here (#9.3). SECURITY.md promises "/vibe does not
+    // collect usage analytics", and this file was the one place that broke
+    // that promise (a setup_complete event). Setup completion is already
+    // observable server-side — the OAuth token mint above IS the signal —
+    // so the event carried no information the server didn't have.
+    // _no-telemetry.test.js keeps this file (and every other) clean.
 
   } catch (err) {
     printStep(4, 'Opening browser for GitHub auth...', 'error');
