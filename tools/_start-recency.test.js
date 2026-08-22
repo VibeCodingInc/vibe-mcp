@@ -118,3 +118,39 @@ test('enriched onlineUsers carries the hereNow verdict per row', async () => {
     t.restore();
   }
 });
+
+// ── The AMBIENT escapes make the same claim outside the transcript (#9.1
+// review): the terminal title says "N online" and the iTerm badge renders
+// ●N. index.js used to feed them the raw active+away union, so a
+// stale/away-only room still put "2 online" in the title bar after the
+// card was fixed. ambientEscapes gates internally — no caller can feed it
+// an ungated count.
+
+test('a stale-only room produces a quiet title and empty badge, never an online claim', () => {
+  const { ambientEscapes } = require('../ambient-escapes.js');
+  const escapes = ambientEscapes(
+    [
+      { handle: 'stale', status: 'active', lastSeen: mins(25) },
+      { handle: 'resting', status: 'away', lastSeen: mins(3) },
+    ],
+    0
+  );
+  assert.ok(!escapes.includes('online'), 'no "N online" title from a stale-only room');
+  const badge = Buffer.from('○').toString('base64');
+  assert.ok(escapes.includes(`SetBadgeFormat=${badge}`), 'the badge is the empty ring, not ●N');
+});
+
+test('the title and badge count only recent heartbeats, and lastActivity names one', () => {
+  const { ambientEscapes } = require('../ambient-escapes.js');
+  const escapes = ambientEscapes(
+    [
+      { handle: 'fresh', status: 'active', lastSeen: mins(2) },
+      { handle: 'stale', status: 'active', lastSeen: mins(25) },
+    ],
+    0
+  );
+  assert.ok(escapes.includes('1 online'), 'one recent heartbeat, one online');
+  assert.ok(escapes.includes('@fresh'), 'lastActivity names the here-now handle');
+  const badge = Buffer.from('●1').toString('base64');
+  assert.ok(escapes.includes(`SetBadgeFormat=${badge}`), 'badge counts hereNow only');
+});
