@@ -851,9 +851,15 @@ async function markThreadRead(myHandle, theirHandle, lastMessageId = null, threa
 }
 
 /**
- * Mark messages as delivered
- * Called when messages are received via SSE or poll
- * @param {string[]} messageIds - Array of message IDs to mark as delivered
+ * Record first presentation of messages (the platform's /delivered receipt).
+ *
+ * Call this ONLY when a message has actually been PRESENTED — surfaced into a
+ * visible thread or the model's session context — never on mere receipt via
+ * SSE or poll. Fetching bytes is not presentation; presentation is not custody
+ * or read. delivered_at is the aggregate first-presentation marker on the
+ * platform's delivery ladder (vibe-platform #294/#295); custody remains the
+ * delivery_receipts claim/receipt mechanism.
+ * @param {string[]} messageIds - Array of message IDs that were presented
  */
 async function markMessagesDelivered(messageIds) {
   if (!messageIds || messageIds.length === 0) return { marked: 0 };
