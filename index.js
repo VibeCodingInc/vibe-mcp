@@ -14,6 +14,7 @@ const presence = require('./presence');
 const config = require('./config');
 const store = require('./store');
 const prompts = require('./prompts');
+const toolPrivacy = require('./tool-privacy');
 const NotificationEmitter = require('./notification-emitter');
 const authStore = require('./auth-store');
 const actorSession = require('./actor-session');
@@ -352,8 +353,16 @@ const adminTools = process.env.VIBE_ADMIN === 'true' ? {
   vibe_patterns: require('./tools/patterns'),
 } : {};
 
-// Combine tools — kernel always; extras only when opted in
-const tools = { ...kernelTools, ...(EXTRAS_ENABLED ? extraTools : {}), ...adminTools };
+// Personal Mind is an edge capability, not a public/default tool. Without the
+// regular 0600 local bearer file the seam does not exist in tools/list.
+const personalMind = require('./personal-mind');
+const mindTools = personalMind.isAvailable() ? {
+  vibe_mind: require('./tools/mind'),
+} : {};
+
+// Combine tools — kernel always; private Mind only with local capability;
+// extras only when opted in.
+const tools = { ...kernelTools, ...mindTools, ...(EXTRAS_ENABLED ? extraTools : {}), ...adminTools };
 
 /**
  * MCP Protocol Handler
@@ -586,7 +595,13 @@ class VibeMCPServer {
         try {
           // Log prompt pattern (if _prompt passed) or infer from args
           const args = params.arguments || {};
-          const inferredPrompt = args._prompt || inferPromptFromArgs(params.name, args);
+          // Personal Mind inputs are unsent thought, not product analytics.
+          // Do not retain even a derived prompt or recipient for this tool.
+          const inferredPrompt = toolPrivacy.retainedPrompt(
+            params.name,
+            args,
+            inferPromptFromArgs,
+          );
           if (inferredPrompt) {
             prompts.log(inferredPrompt, {
               tool: params.name,
@@ -622,7 +637,7 @@ class VibeMCPServer {
           // State-changing tools bust the cache first so the footer reflects
           // what they just did (e.g. inbox read clears the unread badge).
           let footer = '';
-          if (!SKIP_FOOTER_TOOLS.includes(params.name)) {
+          if (toolPrivacy.shouldAppendAmbientFooter(params.name, SKIP_FOOTER_TOOLS)) {
             if (AMBIENT_CACHE_BUSTERS.has(params.name)) bustAmbientCache();
             footer = await resolveFooter(result, getPresenceFooter);
           }
