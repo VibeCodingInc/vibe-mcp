@@ -101,7 +101,7 @@ async function handler(args) {
   const trimmed = message.trim();
   if (trimmed.length > MAX_LENGTH) {
     return {
-      display: `Not sent — the reply is ${trimmed.length} chars and the limit is ${MAX_LENGTH}. Nothing was delivered; shorten it and send again.`,
+      display: `Not sent — the reply is ${trimmed.length} chars and the limit is ${MAX_LENGTH}. Shorten it and send again.`,
     };
   }
   const finalMessage = trimmed;
@@ -153,7 +153,7 @@ async function handler(args) {
       // same target cannot help, so the refusal is shown as-is.
       'invalid_reply_target',
     ]);
-    const detail = (result && result.message) || "That reply didn't send — nothing was delivered.";
+    const detail = (result && result.message) || "No reply receipt returned.";
     return {
       display: (result && REMEDY_CARRYING.has(result.error))
         ? detail

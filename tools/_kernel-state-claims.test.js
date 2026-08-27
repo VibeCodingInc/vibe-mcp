@@ -86,7 +86,8 @@ test('dm: a falsy store result is a failure, not "Sent to @x"', async () => {
   try {
     const r = await h.run({ handle: 'rune', message: 'hello' });
     assert.ok(!/Sent to/i.test(r.display), 'must not claim the send succeeded');
-    assert.match(r.display, /didn't send|not.*deliver/i, 'must say nothing was delivered');
+    assert.match(r.display, /no send receipt|didn't send|not sent/i,
+      'must refuse the success claim without guessing what the server stored');
   } finally { h.restore(); }
 });
 
@@ -100,7 +101,7 @@ test('reply: a falsy store result is a failure, not "✓ Replied"', async () => 
     const r = await h.run({ message: 'hello' });
     assert.ok(!/Replied to/i.test(r.display), 'must not claim the reply succeeded');
     assert.ok(!/marked as read/i.test(r.display), 'must not claim the thread state changed');
-    assert.match(r.display, /didn't send|not.*deliver/i);
+    assert.match(r.display, /no reply receipt|didn't send|not sent/i);
   } finally { h.restore(); }
 });
 

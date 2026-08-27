@@ -71,6 +71,7 @@
     "notification-emitter.js",
     "oauth-callback.js",
     "presence.js",
+    "presentation.js",
     "prompts.js",
     "protocol/handle.js",
     "protocol/index.js",
