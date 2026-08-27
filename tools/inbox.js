@@ -11,6 +11,7 @@ const { canonicalHandle } = require('../protocol/handle');
 const { neutralize, inertField, MSG_OPEN, MSG_CLOSE } = require('../incoming');
 const { requireInit, header, emptyState, formatTimeAgo, truncate, divider, fetchRelevantUsers } = require('./_shared');
 const { actions, formatActions } = require('./_actions');
+const { attachPresentationIds, incomingPresentationIds } = require('../presentation');
 
 // Truncate message for preview (first 100 chars, clean break at word)
 function summarizeMessage(text, maxLen = 100) {
@@ -233,10 +234,10 @@ async function handler(args) {
       patterns.logMessageReceived(requestedHandle);
     }
 
-    return {
+    return attachPresentationIds({
       display: formatThreadDisplay(myHandle, requestedHandle, thread),
       footer: 'minimal',
-    };
+    }, incomingPresentationIds(thread, myHandle));
   }
 
   const threads = await store.getInbox(myHandle);
@@ -448,17 +449,17 @@ async function handler(args) {
             };
           });
 
-          return {
+          return attachPresentationIds({
             display,
             actions: formatActions(actions.recommendedConnections(recommendedActions))
-          };
+          }, incomingPresentationIds(thread, myHandle));
         }
       } catch (e) {
         console.warn('[inbox] Failed to fetch recommended builders:', e.message);
       }
     }
 
-    return { display };
+    return attachPresentationIds({ display }, incomingPresentationIds(thread, myHandle));
   }
 
   // Build compact display (3 lines above the fold)

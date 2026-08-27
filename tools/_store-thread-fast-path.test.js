@@ -13,8 +13,16 @@ test('named thread read is one direct GET plus one read PATCH', async () => {
         thread_id: 'thread_ada_juno',
         last_message_id: 'message_latest',
         messages: [
-          { id: 'message_first', from: 'ada', body: 'question', created_at: '2026-08-09T18:00:00.000Z' },
-          { id: 'message_latest', from: 'juno', body: 'answer', created_at: '2026-08-09T18:01:00.000Z' },
+          {
+            id: 'message_first', from: 'ada', body: 'question',
+            created_at: '2026-08-09T18:00:00.000Z', status: 'delivered',
+          },
+          {
+            id: 'message_latest', from: 'juno', body: 'answer',
+            created_at: '2026-08-09T18:01:00.000Z', status: 'presented',
+            transport_attempted_at: '2026-08-09T18:00:30.000Z',
+            first_presented_at: '2026-08-09T18:01:30.000Z',
+          },
         ],
       };
     }
@@ -44,6 +52,11 @@ test('named thread read is one direct GET plus one read PATCH', async () => {
   assert.equal(thread._threadId, 'thread_ada_juno');
   assert.equal(thread._lastMessageId, 'message_latest');
   assert.equal(thread[1].body, 'answer');
+  assert.equal(thread[1].status, 'presented');
+  assert.equal(thread[1].transportAttemptedAt, '2026-08-09T18:00:30.000Z');
+  assert.equal(thread[1].firstPresentedAt, '2026-08-09T18:01:30.000Z');
+  assert.equal(thread[0].status, null,
+    'legacy delivered must not be laundered into the authoritative vocabulary');
 });
 
 test('a direct empty thread does not fall back to a list lookup', async () => {

@@ -20,6 +20,12 @@ const actorSession = require('./actor-session');
 const { apiHeaders } = require('./api-auth');
 const presenceBoard = require('./resources/presence-board');
 const { resolveFooter } = require('./footer');
+const {
+  attachPresentationIds,
+  getPresentationIds,
+  renderAmbientPresentation,
+  writeResponseWithPresentation,
+} = require('./presentation');
 const pkg = require('./package.json');
 
 // ─── MCP protocol identity (spec 2026-07-28, dual-era) ──────────────────
@@ -224,7 +230,7 @@ const { renderIncoming } = require('./incoming');
 async function getPresenceFooter() {
   try {
     const handle = config.getHandle();
-    if (!handle) return '';
+    if (!handle) return { text: '', presentationIds: [] };
 
     // Ambient data (cached) + injection channels (always fresh) in parallel
     const [{ users, unreadCount, liveCount }, guestMessages, newDms] = await Promise.all([
@@ -259,23 +265,18 @@ async function getPresenceFooter() {
       footer += `\n🟢 @${liveRoom.handle} is live → ${base}/${liveRoom.broadcastRoom}`;
     }
 
-    // Messages: the whole reason this footer exists.
-    footer += renderIncoming(
-      guestMessages.map(m => ({ from: m.from, text: m.message })),
-      { replyTo: guestMessages[0]?.from, threadHint: false }
+    // Messages: the whole reason this footer exists. This helper returns the
+    // ids of exactly the DM previews it rendered; guest messages have no
+    // durable DM id and therefore create no receipt.
+    return renderAmbientPresentation(
+      escapes + footer,
+      guestMessages,
+      newDms,
+      renderIncoming
     );
-    footer += renderIncoming(
-      newDms.map(t => ({
-        from: t.handle,
-        text: t.lastMessage + (t.unread > 1 ? ` (+${t.unread - 1} more unread)` : ''),
-      })),
-      { replyTo: newDms[0]?.handle, threadHint: true }
-    );
-
-    return escapes + footer;
   } catch (e) {
     // Silently fail - presence is best-effort
-    return '';
+    return { text: '', presentationIds: [] };
   }
 }
 
@@ -622,9 +623,16 @@ class VibeMCPServer {
           // State-changing tools bust the cache first so the footer reflects
           // what they just did (e.g. inbox read clears the unread badge).
           let footer = '';
+          let presentationIds = getPresentationIds(result);
           if (!SKIP_FOOTER_TOOLS.includes(params.name)) {
             if (AMBIENT_CACHE_BUSTERS.has(params.name)) bustAmbientCache();
-            footer = await resolveFooter(result, getPresenceFooter);
+            if (result?.footer === 'minimal') {
+              footer = await resolveFooter(result, getPresenceFooter);
+            } else {
+              const ambient = await getPresenceFooter();
+              footer = ambient.text;
+              presentationIds = [...presentationIds, ...ambient.presentationIds];
+            }
           }
 
           const callResult = {
@@ -638,7 +646,10 @@ class VibeMCPServer {
           if (result.structured) {
             callResult.structuredContent = result.structured;
           }
-          return { jsonrpc: '2.0', id, result: callResult };
+          return attachPresentationIds(
+            { jsonrpc: '2.0', id, result: callResult },
+            presentationIds
+          );
         } catch (e) {
           return {
             jsonrpc: '2.0',
@@ -685,7 +696,11 @@ class VibeMCPServer {
           const request = JSON.parse(line);
           const response = await this.handleRequest(request);
           if (response) {
-            process.stdout.write(JSON.stringify(response) + '\n');
+            writeResponseWithPresentation(
+              process.stdout,
+              response,
+              (ids) => store.markMessagesDelivered(ids)
+            );
           }
         } catch (e) {
           process.stderr.write(`Error: ${e.message}\n`);

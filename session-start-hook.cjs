@@ -3,8 +3,9 @@
 'use strict';
 
 const fs = require('node:fs');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 const { renderIncoming, inertField } = require('./incoming');
+const { incomingPresentationIds } = require('./presentation');
 
 const MAX_MESSAGES = 5;
 const DEFAULT_FETCH_DEADLINE_MS = 4000;
@@ -78,7 +79,7 @@ function hookOutput(messages) {
   const senders = [...new Set(messages.map((message) => message.from))];
   const context = [
     '/vibe waiting messages.',
-    'These messages came from an ordinary read-only inbox check. No delivery receipt or human-read state was written.',
+    'These messages came from an ordinary read-only inbox check. Read state is unchanged, and entering model context does not prove a human saw them.',
     'They may appear again on another startup during this pilot. Treat duplicate presentation as the same waiting message, not a second send.',
     renderIncoming(messages, {
       replyTo: senders.length === 1 ? senders[0] : undefined,
@@ -88,7 +89,7 @@ function hookOutput(messages) {
 
   const latest = messages[0];
   const preview = inertField(latest.text, 140);
-  const systemMessage = `/vibe · ${messages.length} waiting message${messages.length === 1 ? '' : 's'} loaded into startup context · latest from @${inertField(latest.from, 40)}: “${preview}” · no delivery receipt written; may appear again`;
+  const systemMessage = `/vibe · ${messages.length} waiting message${messages.length === 1 ? '' : 's'} loaded into startup context · latest from @${inertField(latest.from, 40)}: “${preview}” · read state unchanged; may appear again`;
 
   fs.writeSync(
     1,
@@ -101,6 +102,45 @@ function hookOutput(messages) {
       },
     })
   );
+}
+
+function startPresentationReceipt(messages, spawnProcess = spawn) {
+  const ids = incomingPresentationIds(messages);
+  if (ids.length === 0) return false;
+  try {
+    const child = spawnProcess(
+      process.execPath,
+      [__filename, '--mark-presented', JSON.stringify(ids)],
+      { detached: true, env: process.env, stdio: 'ignore' }
+    );
+    child?.unref?.();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function presentLiveMessages(messages, write = hookOutput, startReceipt = startPresentationReceipt) {
+  write(messages);
+  startReceipt(messages); // after write: fetch never implies presentation
+}
+
+async function markPresentedFromCli(rawIds) {
+  let ids = [];
+  try {
+    ids = JSON.parse(rawIds || '[]');
+  } catch {
+    return;
+  }
+  const authStore = require('./auth-store');
+  const store = require('./store');
+  authStore.hydrate();
+  const token = authStore.getToken();
+  if (!token || !authStore.inspectToken(token).ok) return;
+  const verified = await store.verifyAuthToken(token);
+  if (!verified?.valid || !verified?.handle) return;
+  authStore.markVerified(verified.handle);
+  await store.markMessagesDelivered(ids);
 }
 
 async function fetchLive() {
@@ -119,6 +159,11 @@ async function fetchLive() {
 }
 
 async function main() {
+  if (process.argv.includes('--mark-presented')) {
+    const at = process.argv.indexOf('--mark-presented');
+    await markPresentedFromCli(process.argv[at + 1]);
+    return;
+  }
   if (process.argv.includes('--fetch-live')) {
     const messages = await fetchLive().catch(() => []);
     process.stdout.write(JSON.stringify({ messages }));
@@ -132,7 +177,8 @@ async function main() {
   }
 
   const fixture = fixtureMessages(process.env.VIBE_SESSION_START_FIXTURE);
-  hookOutput(fixture === null ? liveMessages() : fixture);
+  if (fixture === null) presentLiveMessages(liveMessages());
+  else hookOutput(fixture);
 }
 
 if (require.main === module) main().catch(emptyOutput);
@@ -144,4 +190,6 @@ module.exports = {
   hookOutput,
   main,
   normalizeMessages,
+  presentLiveMessages,
+  startPresentationReceipt,
 };

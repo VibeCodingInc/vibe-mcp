@@ -595,7 +595,7 @@ async function sendMessage(from, to, body, type = 'dm', payload = null, options 
     console.error('Send failed:', e.message);
     return {
       error: 'transport_failed',
-      message: "That didn't send — the connection dropped mid-request. Nothing was delivered. Worth one retry; if it keeps failing, say `vibe help troubleshooting`.",
+      message: "No send receipt returned — the connection dropped mid-request. Open the thread before retrying; the server may already have stored it.",
     };
   }
 }
@@ -621,6 +621,9 @@ async function getInbox(handle) {
         lastMessage: t.last_message?.body,
         lastMessageId: t.last_message?.id || null,
         lastFrom: t.last_message?.from || null,
+        transportAttemptedAt: t.last_message?.transport_attempted_at || null,
+        firstPresentedAt: t.last_message?.first_presented_at || null,
+        status: servedMessageStatus(t.last_message?.status),
         muted: t.preferences?.muted || false,
         lastTimestamp: t.last_message?.created_at ? new Date(t.last_message.created_at).getTime() : null
       }));
@@ -654,6 +657,11 @@ async function getInboxV1(handle) {
         messages: [],
         unread: t.unread || 0,
         lastMessage: t.last_message?.body,
+        lastMessageId: t.last_message?.id || null,
+        lastFrom: t.last_message?.from || null,
+        transportAttemptedAt: t.last_message?.transport_attempted_at || null,
+        firstPresentedAt: t.last_message?.first_presented_at || null,
+        status: servedMessageStatus(t.last_message?.status),
         lastTimestamp: t.last_message?.created_at ? new Date(t.last_message.created_at).getTime() : null
       }));
     }
@@ -740,6 +748,9 @@ async function getRawInbox(handle) {
           read: false, // If it's in unread threads, it's unread
           thread_id: thread.id,
           unread_count: thread.unread,
+          transportAttemptedAt: thread.last_message.transport_attempted_at || null,
+          firstPresentedAt: thread.last_message.first_presented_at || null,
+          status: servedMessageStatus(thread.last_message.status),
         });
       }
     }
@@ -749,6 +760,13 @@ async function getRawInbox(handle) {
     console.error('[getRawInbox] Error:', e.message);
     return [];
   }
+}
+
+// The served ladder's authoritative vocabulary. A legacy `delivered` string
+// is not renamed to `presented`: doing so would convert an imprecise old claim
+// into a precise new one without evidence.
+function servedMessageStatus(value) {
+  return ['sent', 'presented', 'read'].includes(value) ? value : null;
 }
 
 async function getThreadWithRequest(makeRequest, myHandle, theirHandle) {
@@ -783,6 +801,9 @@ async function getThreadWithRequest(makeRequest, myHandle, theirHandle) {
     timestamp: new Date(m.created_at || m.createdAt).getTime(),
     direction: m.direction || (m.from === myHandle ? 'sent' : 'received'),
     readByThem: m.read_by_them || false,
+    transportAttemptedAt: m.transport_attempted_at || null,
+    firstPresentedAt: m.first_presented_at || null,
+    status: servedMessageStatus(m.status),
   }));
   messages._threadId = result.thread_id || null;
   messages._lastMessageId = result.last_message_id || rows.at(-1)?.id || null;
@@ -1379,6 +1400,7 @@ module.exports = {
   _testing: {
     getThreadWithRequest,
     markThreadReadWithRequest,
+    servedMessageStatus,
   },
 
   // Auth
