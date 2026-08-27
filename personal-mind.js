@@ -17,6 +17,9 @@ const MAX_DRAFT_BYTES = 4_000;
 const MAX_CONTEXT_BYTES = 2_000;
 const MAX_RECENT_MESSAGES = 8;
 const MAX_RESPONSE_BYTES = 256 * 1_024;
+const PRIME_TIMEOUT_MS = 2_500;
+
+const UNAVAILABLE = Symbol('unavailable');
 
 function tokenPath() {
   return path.join(vibeHome(), 'mind', 'runtime-token');
@@ -105,6 +108,7 @@ async function post(route, payload, token, timeoutMs, fetchImpl = global.fetch) 
       },
       body: JSON.stringify(payload),
     });
+    if (response.status === 401 || response.status === 403) return UNAVAILABLE;
     if (!response.ok) return null;
     return await boundedJSON(response);
   } catch {
@@ -128,7 +132,7 @@ async function ask({ handle, draft, recentMessages = [] }, fetchImpl = global.fe
   if (context) {
     // Priming is an optimization. A miss or timeout falls through to the same
     // slow-path facet request; composing and sending never depend on it.
-    await post('/prime', { handle: normalizedHandle, context }, token, 180_000, fetchImpl);
+    await post('/prime', { handle: normalizedHandle, context }, token, PRIME_TIMEOUT_MS, fetchImpl);
   }
   const facet = await post(
     '/facet',
@@ -137,6 +141,7 @@ async function ask({ handle, draft, recentMessages = [] }, fetchImpl = global.fe
     90_000,
     fetchImpl,
   );
+  if (facet === UNAVAILABLE) return { error: 'unavailable' };
   if (!facet || facet.silence) return { silence: true };
   return { facet };
 }
@@ -146,6 +151,7 @@ module.exports = {
   MAX_DRAFT_BYTES,
   MAX_CONTEXT_BYTES,
   MAX_RECENT_MESSAGES,
+  PRIME_TIMEOUT_MS,
   tokenPath,
   readPrivateToken,
   isAvailable,

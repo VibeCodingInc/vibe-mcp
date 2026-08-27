@@ -49,7 +49,8 @@ function sourceLine(facet) {
   const source = privateDetail?.source || facet?.source;
   const date = privateDetail?.freshness || facet?.content_date;
   const leaf = source ? path.basename(source) : null;
-  return `${leaf ? `from ${leaf}` : 'from your private sources'}${date ? ` · ${date}` : ''}`;
+  if (!leaf) return null;
+  return `from ${leaf}${date ? ` · ${date}` : ''}`;
 }
 
 async function handler(args) {
@@ -73,11 +74,15 @@ async function handler(args) {
   const privateDetail = facet?.aperture?.shown_to_owner_only
     || facet?.aperture?.shown_to_seth_only;
   const insight = facet.proposed_prose || facet.facet || privateDetail?.exact_words;
+  const source = sourceLine(facet);
+  if (!insight || !source) {
+    return { display: 'Private Mind stayed quiet. Nothing was sent; continue with the human’s draft.' };
+  }
   const attribution = facet.attribution || facet.author_class;
   const caveat = facet.caveat || facet.labeled_inference || facet.disclosure_reason;
   const lines = [
-    `Private Mind · ${sourceLine(facet)} · see`,
-    insight ? `\n${insight}` : '',
+    `Private Mind · ${source} · see`,
+    `\n${insight}`,
     attribution ? `\nsource voice: ${attribution}` : '',
     caveat ? `\ncaveat: ${caveat}` : '',
     '\nNothing was sent. Show this offer to the human and wait for approve, edit, or discard.',

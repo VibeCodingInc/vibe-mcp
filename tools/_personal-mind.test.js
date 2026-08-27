@@ -12,6 +12,8 @@ fs.mkdirSync(mindDir, { recursive: true, mode: 0o700 });
 const tokenFile = path.join(mindDir, 'runtime-token');
 const TOKEN = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG';
 const mind = require('../personal-mind');
+const mindTool = require('./mind');
+const toolPrivacy = require('../tool-privacy');
 
 after(() => fs.rmSync(HOME, { recursive: true, force: true }));
 
@@ -32,6 +34,11 @@ function jsonResponse(value) {
       },
     }),
   };
+}
+
+function statusResponse(status, value = {}) {
+  const response = jsonResponse(value);
+  return { ...response, ok: status >= 200 && status < 300, status };
 }
 
 test('capability exists only as a regular private file', () => {
@@ -91,6 +98,32 @@ test('over-bound active drafts never leave the process', async () => {
   assert.equal(calls, 0);
 });
 
+test('a refused credential is unavailable, never articulated silence', async () => {
+  installToken();
+  const result = await mind.ask({
+    handle: 'friend',
+    draft: 'Should this decision use the old frame or the new one?',
+    recentMessages: [],
+  }, async () => statusResponse(401));
+  assert.equal(result.error, 'unavailable');
+  assert.equal(result.silence, undefined);
+});
+
+test('an unsourced or empty candidate renders as silence', async () => {
+  const originalAsk = mind.ask;
+  mind.ask = async () => ({ facet: { silence: false } });
+  try {
+    const unsourced = await mindTool.handler({
+      handle: 'friend',
+      draft: 'Should this decision use the old frame or the new one?',
+    });
+    assert.match(unsourced.display, /stayed quiet/);
+    assert.ok(!unsourced.display.includes('from your private sources'));
+  } finally {
+    mind.ask = originalAsk;
+  }
+});
+
 test('direct send tools do not import or invoke Personal Mind', () => {
   for (const file of ['dm.js', 'reply.js']) {
     const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
@@ -99,8 +132,18 @@ test('direct send tools do not import or invoke Personal Mind', () => {
   }
 });
 
-test('Mind calls bypass prompt retention and the presence footer', () => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
-  assert.match(source, /params\.name === 'vibe_mind'[\s\S]{0,100}\? null/);
-  assert.match(source, /SKIP_FOOTER_TOOLS[^\n]+vibe_mind/);
+test('Mind calls behaviorally bypass prompt retention and the presence footer', () => {
+  const args = {
+    _prompt: 'private unsent thought',
+    handle: 'friend',
+    draft: 'Should this remain private?',
+  };
+  let inferenceCalls = 0;
+  const retained = toolPrivacy.retainedPrompt('vibe_mind', args, () => {
+    inferenceCalls += 1;
+    return 'derived private thought';
+  });
+  assert.equal(retained, null);
+  assert.equal(inferenceCalls, 0);
+  assert.equal(toolPrivacy.shouldAppendAmbientFooter('vibe_mind', []), false);
 });

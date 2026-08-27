@@ -14,6 +14,7 @@ const presence = require('./presence');
 const config = require('./config');
 const store = require('./store');
 const prompts = require('./prompts');
+const toolPrivacy = require('./tool-privacy');
 const NotificationEmitter = require('./notification-emitter');
 const authStore = require('./auth-store');
 const actorSession = require('./actor-session');
@@ -47,7 +48,7 @@ const SERVER_CAPABILITIES = {
 };
 
 // Tools that shouldn't show presence footer (would be redundant/noisy)
-const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_test', 'vibe_update', 'vibe_mind'];
+const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_test', 'vibe_update'];
 
 // Progressive disclosure: only these tools are visible before authentication
 // After auth, the full toolset is revealed via tools/list_changed notification
@@ -596,9 +597,11 @@ class VibeMCPServer {
           const args = params.arguments || {};
           // Personal Mind inputs are unsent thought, not product analytics.
           // Do not retain even a derived prompt or recipient for this tool.
-          const inferredPrompt = params.name === 'vibe_mind'
-            ? null
-            : (args._prompt || inferPromptFromArgs(params.name, args));
+          const inferredPrompt = toolPrivacy.retainedPrompt(
+            params.name,
+            args,
+            inferPromptFromArgs,
+          );
           if (inferredPrompt) {
             prompts.log(inferredPrompt, {
               tool: params.name,
@@ -634,7 +637,7 @@ class VibeMCPServer {
           // State-changing tools bust the cache first so the footer reflects
           // what they just did (e.g. inbox read clears the unread badge).
           let footer = '';
-          if (!SKIP_FOOTER_TOOLS.includes(params.name)) {
+          if (toolPrivacy.shouldAppendAmbientFooter(params.name, SKIP_FOOTER_TOOLS)) {
             if (AMBIENT_CACHE_BUSTERS.has(params.name)) bustAmbientCache();
             footer = await resolveFooter(result, getPresenceFooter);
           }
