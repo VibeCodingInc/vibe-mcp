@@ -47,7 +47,7 @@ const SERVER_CAPABILITIES = {
 };
 
 // Tools that shouldn't show presence footer (would be redundant/noisy)
-const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_test', 'vibe_update'];
+const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_test', 'vibe_update', 'vibe_mind'];
 
 // Progressive disclosure: only these tools are visible before authentication
 // After auth, the full toolset is revealed via tools/list_changed notification
@@ -352,8 +352,16 @@ const adminTools = process.env.VIBE_ADMIN === 'true' ? {
   vibe_patterns: require('./tools/patterns'),
 } : {};
 
-// Combine tools — kernel always; extras only when opted in
-const tools = { ...kernelTools, ...(EXTRAS_ENABLED ? extraTools : {}), ...adminTools };
+// Personal Mind is an edge capability, not a public/default tool. Without the
+// regular 0600 local bearer file the seam does not exist in tools/list.
+const personalMind = require('./personal-mind');
+const mindTools = personalMind.isAvailable() ? {
+  vibe_mind: require('./tools/mind'),
+} : {};
+
+// Combine tools — kernel always; private Mind only with local capability;
+// extras only when opted in.
+const tools = { ...kernelTools, ...mindTools, ...(EXTRAS_ENABLED ? extraTools : {}), ...adminTools };
 
 /**
  * MCP Protocol Handler
@@ -586,7 +594,11 @@ class VibeMCPServer {
         try {
           // Log prompt pattern (if _prompt passed) or infer from args
           const args = params.arguments || {};
-          const inferredPrompt = args._prompt || inferPromptFromArgs(params.name, args);
+          // Personal Mind inputs are unsent thought, not product analytics.
+          // Do not retain even a derived prompt or recipient for this tool.
+          const inferredPrompt = params.name === 'vibe_mind'
+            ? null
+            : (args._prompt || inferPromptFromArgs(params.name, args));
           if (inferredPrompt) {
             prompts.log(inferredPrompt, {
               tool: params.name,
