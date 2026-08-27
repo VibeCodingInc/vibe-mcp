@@ -1,13 +1,14 @@
 {
-  "version": "0.8.18",
-  "updated": "2026-08-22",
-  "changelog": "Green means someone is actually there, and answers attach to the exact question they answer. Presence dots everywhere now require a recent verified heartbeat, every tip names a command that exists, the client sends zero analytics, and replies can carry an explicit target: pick the message you're answering and the thread shows the quote.",
+  "version": "0.8.19",
+  "updated": "2026-08-27",
+  "changelog": "Your private Mind can now sit beside the composer — and only there. vibe_mind appears when a private 0600 credential exists on this machine, consults your own edge Mind over your private network, and shows one sourced offer or stays silent. It never sends, never touches slashvibe.dev, and ordinary messaging is unchanged and immediate.",
   "features": [
-    "vibe_start's card, list, terminal title and badge count only recent verified heartbeats \u2014 away and stale rows say so in words, never in green",
-    "Rotating tips and guided actions only suggest commands a default session actually registers",
-    "The setup_complete analytics event is removed; SECURITY.md's no-telemetry claim is now enforced by test",
-    "vibe_reply accepts an explicit reply target (#id shown beside messages); unknown targets are refused with candidates, never guessed; receipts name the new message id and its target",
-    "Thread views render the quoted parent (\u21a9 replying to #id) and honestly mark replies to unavailable messages"
+    "vibe_mind: a private pre-send thinking pass — one sourced offer or silence; nothing is sent without your explicit approval",
+    "The tool exists only when ~/.vibe/<identity>/mind/runtime-token is a private (0600) regular file; without it, vibe_mind does not appear in tools/list",
+    "The Mind is consulted directly over your private Tailnet — no request ever transits slashvibe.dev",
+    "Mind consultations bypass prompt retention and the ambient footer entirely (tool-privacy policy, behaviorally tested)",
+    "An offer without a concrete source, or a refused credential, is reported honestly — silence and unavailable are different words",
+    "vibe_dm and vibe_reply are untouched: exact user-approved prose sends immediately, Mind or no Mind"
   ],
   "deprecated": [],
   "breaking": false,
