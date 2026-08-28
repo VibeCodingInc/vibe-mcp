@@ -33,7 +33,11 @@ const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 fs.writeFileSync(path.join(HOME, 'config.json'), JSON.stringify({
   username: 'ada',
   authMethod: 'github',
-  authToken: `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`,
+  // principal_id matters too (#320): a handle-only token now correctly REFUSES
+  // the already-signed-in short-circuit (it falls through to reauth), so the
+  // fixture must prove a principal for every test that expects the signed-in
+  // surface. The handle-only shape gets its own pin below.
+  authToken: `h.${b64({ sub: 'ada', principal_id: 'prin_ada_1', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`,
   one_liner: 'migration cleanup',
 }));
 
@@ -291,6 +295,54 @@ test('isHereNow: one rule for green, shared by who and dm', () => {
 });
 
 // ── 3c. Signing off ends presence, not identity ────────────────────────────
+
+test('init (#320): a handle-only session never claims "already signed in"', async () => {
+  // The trap this pins shut: web reauth minted a principal-bearing cookie,
+  // but ~/.vibe/auth.json kept the Aug-13 handle-only token and vibe_init
+  // short-circuited — leaving the terminal with NO path to the server's
+  // reauth action. A valid handle-only credential must fall through to
+  // re-auth instead of claiming the signed-in state.
+  const cfgPath = path.join(HOME, 'config.json');
+  const keep = fs.readFileSync(cfgPath, 'utf8');
+  const cfg = JSON.parse(keep);
+  cfg.authToken = `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+  // The fall-through lands in the REAL browser OAuth flow, which a test must
+  // never reach (it opened live sign-in windows on the developer's machine —
+  // observed, not hypothetical). Stub the oauth module BEFORE the tool
+  // reloads: the pin only claims the short-circuit refuses, not the flow.
+  const oauthPath = require.resolve('../oauth-callback');
+  const realOauth = require.cache[oauthPath];
+  require.cache[oauthPath] = {
+    id: oauthPath, filename: oauthPath, loaded: true,
+    exports: {
+      beginOAuth: async () => {
+        throw new Error('reauth-flow-reached'); // proof of fall-through, no browser
+      },
+    },
+  };
+  const h = toolWith('init', {
+    ...QUIET_STORE,
+    verifyAuthToken: async () => ({ definitive: false }),
+  });
+  try {
+    let display = null, fellThrough = false;
+    try {
+      const r = await h.run({});
+      display = r?.display || '';
+    } catch (e) {
+      fellThrough = /reauth-flow-reached/.test(String(e && e.message));
+    }
+    if (display !== null && !fellThrough) {
+      assert.ok(!/Already signed in/.test(display),
+        'a handle-only session must not short-circuit — it has no principal to be signed in AS');
+    }
+  } finally {
+    h.restore();
+    if (realOauth) require.cache[oauthPath] = realOauth; else delete require.cache[oauthPath];
+    fs.writeFileSync(cfgPath, keep);
+  }
+});
 
 test('init (already signed in): bye keeps your identity — no logout, no re-init', async () => {
   const h = toolWith('init', {

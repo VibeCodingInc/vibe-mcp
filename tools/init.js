@@ -344,7 +344,19 @@ async function handler(args) {
         console.error(`[vibe] Saved session for @${existingHandle} was rejected by the server — reconnecting.`);
       }
     }
-    if (existingHandle && !sessionDead) {
+    // #320: a session that proves only a HANDLE cannot exercise principal
+    // authority (thought-bearing invitations refuse it with principal_required).
+    // The server now mints principal-bearing sessions on every fresh OAuth —
+    // but this short-circuit was the trap: "Already signed in" left the
+    // legacy credential in place with no path to the reauth action. A valid
+    // handle-only token therefore falls through to re-auth instead of
+    // short-circuiting; offline/timeout still short-circuits (unreachable is
+    // not invalid, and offline must never force a sign-in loop).
+    const provesPrincipal = !!authStore.principalFromToken(config.getAuthToken());
+    if (existingHandle && !sessionDead && !provesPrincipal) {
+      console.error(`[vibe] @${existingHandle}'s saved session proves the handle but not the principal — refreshing sign-in (server action: reauth).`);
+    }
+    if (existingHandle && !sessionDead && provesPrincipal) {
       // Enrich the returning-user surface — this fires on every `vibe` for an
       // already-authed user, so it's our highest-frequency touchpoint. Surface
       // unread (the reason to come back) and, if we have no email on file, nudge
@@ -426,6 +438,12 @@ Heading out? \`vibe bye\` ends presence for this session — you stay @${existin
       if (actor) await actorSession.installOAuthSession(actor);
       else await actorSession.clearActorSession();
 
+      // VERIFY BEFORE CLAIMING (#320): the point of reauth is a credential
+      // that PROVES the principal. Decode the claim before reporting success —
+      // a fresh token without principal_id is saved (it is the newer valid
+      // credential) but success is never reported over it.
+      const mintedPrincipal = authStore.principalFromToken(token);
+
       // Save to config (file persistence for restarts)
       config.saveAuthToken(token);
       config.setSessionIdentity(finalHandle, one_liner || '');
@@ -453,7 +471,14 @@ Heading out? \`vibe bye\` ends presence for this session — you stay @${existin
       // Post to Discord
       discord.postJoin(finalHandle, one_liner);
 
-      const result = { success: true, handle: finalHandle };
+      const result = { success: !!mintedPrincipal, handle: finalHandle };
+      if (!mintedPrincipal) {
+        // Honest failure: the newer credential is kept, but principal
+        // authority was NOT established, and nothing may report otherwise.
+        return {
+          display: `## Signed in as @${finalHandle} — but this session still proves only your handle\n\nThe server did not mint a principal claim into this session, so principal-gated actions (like thought-bearing invitations) will still refuse with \`principal_required\`. The refreshed credential was saved; try \`vibe init\` again, and if this repeats it is a server-side minting issue, not your sign-in.`
+        };
+      }
 
       // Send personalized welcome and wait for it (2.5s timeout)
       let welcomeResult = null;
