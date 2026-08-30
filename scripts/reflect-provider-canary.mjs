@@ -18,14 +18,18 @@ const reflect = require('../tools/reflect.js');
 
 const res = await reflect.handler({});
 const d = res.data || {};
-const problems = [];
-if (d.capability) problems.push(`capability gate blocked: ${JSON.stringify(d.capability)}`);
-if (d.provider_error) problems.push('provider failed to answer');
-if (!d.no_data && !d.provider_error && !d.capability) {
-  if (typeof d.archetype !== 'string' || !d.archetype.trim()) problems.push('no archetype string');
-  if (!d.provenance || !d.provenance.version) problems.push('no provider version provenance');
-  if (!/private reflection/.test(res.display)) problems.push('display missing private framing');
+// The canary certifies INTEGRATION: only a real reflection is a PASS
+// (review round 2: no_data must not pass vacuously — it exits 3, honest but
+// uncertified, so CI on a data-less machine cannot green-wash the contract).
+if (d.outcome === 'no_data') {
+  console.log(`NO_DATA: real provider ran but this machine has no /insights data — integration NOT certified here`);
+  process.exit(3);
 }
-const outcome = d.no_data ? 'NO_DATA (honest)' : problems.length ? 'FAIL' : 'PASS';
-console.log(`${outcome}: real provider ${cli.split('/').slice(-2).join('/')} · archetype=${d.archetype ? '[present, not printed]' : 'n/a'} · version=${d.provenance?.version || 'n/a'}${problems.length ? ' · ' + problems.join(' | ') : ''}`);
+const problems = [];
+if (d.outcome !== 'reflection') problems.push(`outcome ${d.outcome}, wanted reflection`);
+if (typeof d.archetype !== 'string' || !d.archetype.trim()) problems.push('no archetype string');
+if (!d.provenance || !d.provenance.version) problems.push('no provider version provenance');
+if (!/private reflection/.test(res.display)) problems.push('display missing private framing');
+const verdict = problems.length ? 'FAIL' : 'PASS';
+console.log(`${verdict}: real provider ${cli.split('/').slice(-2).join('/')} · archetype=[${d.archetype ? 'present, not printed' : 'absent'}] · version=${d.provenance?.version || 'n/a'}${problems.length ? ' · ' + problems.join(' | ') : ''}`);
 process.exit(problems.length ? 1 : 0);

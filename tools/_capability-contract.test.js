@@ -118,7 +118,7 @@ test('vibe_reflect with no provider reports honestly instead of fabricating', as
   try {
     const reflect = require('./reflect');
     const res = await reflect.handler({});
-    assert.equal(res.data.silence, true);
+    assert.ok(['unavailable', 'off'].includes(res.data.outcome));
     assert.match(res.display, /unavailable|off/);
   } finally {
     process.env.PATH = savedPath;
@@ -185,6 +185,7 @@ test('reflect consumes the REAL reveal contract (pinned fixture from vibestats v
     const reflect = require('./reflect');
     assert.equal(reflect.definition.inputSchema.required, undefined, 'reveal answers no questions — no required inputs');
     const res = await reflect.handler({});
+    assert.equal(res.data.outcome, 'reflection');
     assert.equal(res.data.archetype, 'Fixture Orchestrator');
     assert.equal(res.data.provenance.version, '0.1.0');
     assert.match(res.display, /private reflection/);
@@ -207,8 +208,31 @@ test('reflect: valid JSON without an archetype is NO DATA, distinct from silence
   try {
     const reflect = require('./reflect');
     const res = await reflect.handler({});
-    assert.equal(res.data.no_data, true);
+    assert.equal(res.data.outcome, 'no_data');
+    assert.equal(res.data.silence, undefined, 'no shared silence flag to collapse outcomes through');
     assert.match(res.display, /no local data/);
+  } finally {
+    if (savedCli === undefined) delete process.env.VIBE_STATS_CLI;
+    else process.env.VIBE_STATS_CLI = savedCli;
+    delete require.cache[require.resolve('../capabilities')];
+    delete require.cache[require.resolve('./reflect')];
+  }
+});
+
+test('the REAL no-data behavior (nonzero exit + insights message) is NO DATA, not failure', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-realnodata-'));
+  const cli = path.join(dir, 'vibestats');
+  // replicate bin/vibestats.js exactly: throw path = nonzero exit, message on stderr
+  fs.writeFileSync(cli, '#!/bin/sh\necho "Error: No Claude Code /insights session metadata found under ~/.claude/usage-data" >&2\nexit 1', { mode: 0o755 });
+  const savedCli = process.env.VIBE_STATS_CLI;
+  process.env.VIBE_STATS_CLI = cli;
+  delete require.cache[require.resolve('../capabilities')];
+  delete require.cache[require.resolve('./reflect')];
+  try {
+    const reflect = require('./reflect');
+    const res = await reflect.handler({});
+    assert.equal(res.data.outcome, 'no_data');
+    assert.match(res.display, /no local \/insights data/);
   } finally {
     if (savedCli === undefined) delete process.env.VIBE_STATS_CLI;
     else process.env.VIBE_STATS_CLI = savedCli;
@@ -228,7 +252,8 @@ test('review P1: a provider that errors is reported as failed, never as silence'
   try {
     const reflect = require('./reflect');
     const res = await reflect.handler({});
-    assert.equal(res.data.provider_error, true);
+    assert.equal(res.data.outcome, 'provider_error');
+    assert.equal(res.data.silence, undefined);
     assert.match(res.display, /failed to answer/);
   } finally {
     if (savedCli === undefined) delete process.env.VIBE_STATS_CLI;

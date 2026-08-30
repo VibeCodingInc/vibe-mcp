@@ -34,14 +34,22 @@ const definition = {
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
 };
 
+// The REAL CLI signals missing /insights data by exiting nonzero with this
+// message (bin/vibestats.js cliErrorMessage) — that is NO DATA, not failure.
+const NO_DATA_SIGNATURE = /No Claude Code \/insights session metadata found|usage-data/;
+
 function runProvider(cli) {
   return new Promise((resolve) => {
     execFile(
       cli,
       ['reveal', '--json'],
       { timeout: REFLECT_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES },
-      (error, stdout) => {
-        if (error) return resolve({ failed: true });
+      (error, stdout, stderr) => {
+        if (error) {
+          const said = `${stderr || ''}\n${stdout || ''}`;
+          if (NO_DATA_SIGNATURE.test(said)) return resolve({ noData: true });
+          return resolve({ failed: true });
+        }
         try {
           return resolve({ reveal: JSON.parse(stdout) });
         } catch {
@@ -70,11 +78,14 @@ function renderReflection(reveal) {
 }
 
 async function handler() {
+  // ONE discriminator, never blurred (review round 2): every result names its
+  // outcome — reflection · no_data · provider_error · off · unavailable. No
+  // shared `silence` flag exists for a consumer to collapse them through.
   const cap = capabilities.manifest().reflect;
   if (cap.state !== 'available') {
     return {
       display: `reflect — ${cap.state} · ${cap.why}`,
-      data: { silence: true, capability: cap },
+      data: { outcome: cap.state, capability: cap },
     };
   }
   const cli = process.env.VIBE_STATS_CLI || 'vibestats';
@@ -82,14 +93,20 @@ async function handler() {
   if (result.failed) {
     return {
       display: 'reflect — the provider failed to answer (ran but errored); nothing was reflected',
-      data: { silence: true, provider_error: true },
+      data: { outcome: 'provider_error' },
+    };
+  }
+  if (result.noData) {
+    return {
+      display: 'reflect — the provider ran and found no local /insights data to reflect yet',
+      data: { outcome: 'no_data' },
     };
   }
   const reveal = result.reveal;
   if (!reveal || typeof reveal.archetype !== 'string' || !reveal.archetype.trim()) {
     return {
       display: 'reflect — the provider ran and found no local data to reflect yet',
-      data: { silence: true, no_data: true },
+      data: { outcome: 'no_data' },
     };
   }
   return {
@@ -97,6 +114,7 @@ async function handler() {
       `**private reflection** (yours alone; share only by sending approved words)\n` +
       renderReflection(reveal),
     data: {
+      outcome: 'reflection',
       archetype: reveal.archetype,
       metrics: reveal.metrics || null,
       provenance: {
