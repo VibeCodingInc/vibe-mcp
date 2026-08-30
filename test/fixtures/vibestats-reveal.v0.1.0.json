@@ -1,0 +1,22 @@
+{
+  "archetype": "Fixture Orchestrator",
+  "scores": {
+    "orchestrator": 90, "shipper": 70, "architect": 60, "debugger": 55,
+    "polyglot": 40, "sprinter": 45, "deepdiver": 50, "builder": 65,
+    "_percentiles": { "orchestrator": 99 }
+  },
+  "metrics": {
+    "commitsPerDay": 7, "sessions": 84, "languages": 5,
+    "msgsPerSession": 41, "days": 30, "facet_signals": {}
+  },
+  "raw_meta": {
+    "dateRange": "2026-07-30 → 2026-08-29",
+    "source": "claude-code /insights (local)",
+    "version": "0.1.0",
+    "signature": "fixture",
+    "signatureCombo": "fixture",
+    "secondaryArchetype": "Shipper",
+    "signatureFingerprint": "fixture",
+    "moments": []
+  }
+}
