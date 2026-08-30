@@ -37,6 +37,9 @@ const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const EXPECTED_KERNEL = [
   'vibe_bye', 'vibe_dm', 'vibe_help', 'vibe_inbox', 'vibe_init', 'vibe_reply',
   'vibe_start', 'vibe_status', 'vibe_token', 'vibe_who',
+  // The four verbs of the communications runtime (canon PR #333 / epic #329):
+  // the manifest plus remember/reflect/call; message is dm/inbox/reply above.
+  'vibe_capabilities', 'vibe_call', 'vibe_reflect', 'vibe_remember',
 ].sort();
 const EXPECTED_EXTRAS = [
   'vibe_corpse', 'vibe_email', 'vibe_fable', 'vibe_feed', 'vibe_game',

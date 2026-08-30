@@ -48,7 +48,11 @@ const SERVER_CAPABILITIES = {
 };
 
 // Tools that shouldn't show presence footer (would be redundant/noisy)
-const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_test', 'vibe_update'];
+// The local-only verbs make NO platform side effects (review P1): the
+// ambient footer performs platform requests, so remember/reflect/call and
+// the manifest never carry it.
+const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_test', 'vibe_update',
+  'vibe_capabilities', 'vibe_remember', 'vibe_reflect', 'vibe_call'];
 
 // Progressive disclosure: only these tools are visible before authentication
 // After auth, the full toolset is revealed via tools/list_changed notification
@@ -60,12 +64,19 @@ const PRE_AUTH_TOOLS = new Set([
   'vibe_dm',      // Shown so users can try — triggers auth gate
   'vibe_inbox',   // Shown so users can try — triggers auth gate
   'vibe_status',  // Shown so users can try — triggers auth gate
-  'vibe_help'     // Always accessible
+  'vibe_help',    // Always accessible
+  // The truthful capability manifest is exactly what a fresh install should
+  // be able to ask: it reads no private data and reports message as
+  // "available · sign in with vibe start" until a principal exists.
+  'vibe_capabilities'
 ]);
 
 // Tools that genuinely work without authentication
 const NO_AUTH_REQUIRED = new Set([
-  'vibe_start', 'vibe_init', 'vibe_token', 'vibe_who', 'vibe_help'
+  'vibe_start', 'vibe_init', 'vibe_token', 'vibe_who', 'vibe_help',
+  // The manifest is local truth; signed out it must ANSWER (message:
+  // available · sign in), never start an auth flow (review P1).
+  'vibe_capabilities'
 ]);
 
 // "Is this session signed in" — the credential answers, not the filesystem.
@@ -306,6 +317,15 @@ const kernelTools = {
   // Utility
   vibe_help: require('./tools/help'),
   vibe_bye: require('./tools/bye'),
+
+  // ── The four verbs (canon PR #333 / epic #329) ─────────────────────────
+  // remember · reflect · message · call. Messaging IS vibe_dm/inbox/reply
+  // above; these three complete the verb set, and the manifest tells the
+  // truth about every one of them. Install once is not consent once.
+  vibe_capabilities: require('./tools/capabilities'),
+  vibe_remember: require('./tools/remember'),
+  vibe_reflect: require('./tools/reflect'),
+  vibe_call: require('./tools/call'),
 };
 
 // ─── Extras ──────────────────────────────────────────────────────────────
@@ -353,16 +373,14 @@ const adminTools = process.env.VIBE_ADMIN === 'true' ? {
   vibe_patterns: require('./tools/patterns'),
 } : {};
 
-// Personal Mind is an edge capability, not a public/default tool. Without the
-// regular 0600 local bearer file the seam does not exist in tools/list.
-const personalMind = require('./personal-mind');
-const mindTools = personalMind.isAvailable() ? {
-  vibe_mind: require('./tools/mind'),
-} : {};
+// The Personal Mind seam now answers through the verb: vibe_remember reports
+// the capability state honestly without a grant and consults the private edge
+// with one. The vibe_mind name is retired from tools/list; its engine
+// (tools/mind.js) is the granted path inside vibe_remember.
 
-// Combine tools — kernel always; private Mind only with local capability;
-// extras only when opted in.
-const tools = { ...kernelTools, ...mindTools, ...(EXTRAS_ENABLED ? extraTools : {}), ...adminTools };
+// Combine tools — kernel always (the four verbs report their own truthful
+// states); extras only when opted in.
+const tools = { ...kernelTools, ...(EXTRAS_ENABLED ? extraTools : {}), ...adminTools };
 
 /**
  * MCP Protocol Handler

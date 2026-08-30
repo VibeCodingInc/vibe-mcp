@@ -6,7 +6,10 @@
  * append nothing around its explicit result.
  */
 
-const PRIVATE_INPUT_TOOLS = new Set(['vibe_mind']);
+// vibe_remember succeeded vibe_mind as the private-input verb (the old name
+// stays listed defensively). vibe_reflect's question is likewise the person's
+// own private thought about their own data.
+const PRIVATE_INPUT_TOOLS = new Set(['vibe_mind', 'vibe_remember', 'vibe_reflect']);
 
 function retainedPrompt(toolName, args, inferPromptFromArgs) {
   if (PRIVATE_INPUT_TOOLS.has(toolName)) return null;
