@@ -46,7 +46,8 @@ async function handler(args) {
   // The dispatcher does not enforce inputSchema patterns; the handler must
   // (review P1: raw JSON-RPC could smuggle newlines/prose into the draft).
   const ROOM_OK = /^[A-Za-z0-9:/._?#=-]{1,200}$/;
-  if (args.room !== undefined && !ROOM_OK.test(String(args.room))) {
+  // '' behaves like omission (the schema permits it; the front door carries it)
+  if (args.room !== undefined && args.room !== '' && !ROOM_OK.test(String(args.room))) {
     return {
       display: 'call — that room address contains characters a room address cannot: nothing drafted',
       data: { silence: true, refused: 'invalid_room' },
