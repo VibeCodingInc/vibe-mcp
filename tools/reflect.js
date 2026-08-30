@@ -36,7 +36,11 @@ const definition = {
 
 // The REAL CLI signals missing /insights data by exiting nonzero with this
 // message (bin/vibestats.js cliErrorMessage) — that is NO DATA, not failure.
-const NO_DATA_SIGNATURE = /No Claude Code \/insights session metadata found|usage-data/;
+// NARROW on purpose (round-3): the CLI appends a usage-data advice footer to
+// every insights-adjacent error, so a bare 'usage-data' match would swallow
+// real failures (e.g. malformed metadata). Only the actual no-data throws
+// qualify: the exact phrase, or the ENOENT of the usage-data files.
+const NO_DATA_SIGNATURE = /No Claude Code \/insights session metadata found|ENOENT[^\n]*usage-data/;
 
 function runProvider(cli) {
   return new Promise((resolve) => {

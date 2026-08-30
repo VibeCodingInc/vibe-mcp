@@ -241,6 +241,49 @@ test('the REAL no-data behavior (nonzero exit + insights message) is NO DATA, no
   }
 });
 
+test('round-3: a real failure wearing the usage-data advice footer is provider_error, not no_data', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-malformed-'));
+  const cli = path.join(dir, 'vibestats');
+  // replicate the founder CLI's malformed-metadata failure: caught error +
+  // the advice footer that mentions the usage-data path — but NOT the
+  // no-data phrase and NOT an ENOENT
+  fs.writeFileSync(cli, '#!/bin/sh\nprintf "Error: Unexpected token in JSON at position 12\\n\\nRun /insights in Claude Code, then re-run; data is read from ~/.claude/usage-data\\n" >&2\nexit 1', { mode: 0o755 });
+  const savedCli = process.env.VIBE_STATS_CLI;
+  process.env.VIBE_STATS_CLI = cli;
+  delete require.cache[require.resolve('../capabilities')];
+  delete require.cache[require.resolve('./reflect')];
+  try {
+    const reflect = require('./reflect');
+    const res = await reflect.handler({});
+    assert.equal(res.data.outcome, 'provider_error');
+  } finally {
+    if (savedCli === undefined) delete process.env.VIBE_STATS_CLI;
+    else process.env.VIBE_STATS_CLI = savedCli;
+    delete require.cache[require.resolve('../capabilities')];
+    delete require.cache[require.resolve('./reflect')];
+  }
+});
+
+test('round-3: the ENOENT no-data shape still counts as no_data', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-enoent-'));
+  const cli = path.join(dir, 'vibestats');
+  fs.writeFileSync(cli, '#!/bin/sh\necho "ENOENT: no such file or directory, open /Users/x/.claude/usage-data/session-meta" >&2\nexit 1', { mode: 0o755 });
+  const savedCli = process.env.VIBE_STATS_CLI;
+  process.env.VIBE_STATS_CLI = cli;
+  delete require.cache[require.resolve('../capabilities')];
+  delete require.cache[require.resolve('./reflect')];
+  try {
+    const reflect = require('./reflect');
+    const res = await reflect.handler({});
+    assert.equal(res.data.outcome, 'no_data');
+  } finally {
+    if (savedCli === undefined) delete process.env.VIBE_STATS_CLI;
+    else process.env.VIBE_STATS_CLI = savedCli;
+    delete require.cache[require.resolve('../capabilities')];
+    delete require.cache[require.resolve('./reflect')];
+  }
+});
+
 test('review P1: a provider that errors is reported as failed, never as silence', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-errprov-'));
   const cli = path.join(dir, 'vibestats');
