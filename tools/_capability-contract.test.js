@@ -135,3 +135,58 @@ test('the kernel registers the four verbs and the manifest; vibe_mind is retired
   }
   assert.ok(!/vibe_mind: require/.test(src), 'vibe_mind name no longer registered');
 });
+
+test('review P1 pins: footer skip, no-auth manifest, private inputs, room injection, executable reflect', async () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
+  // local-only verbs never carry the platform-touching ambient footer
+  for (const t of ['vibe_capabilities', 'vibe_remember', 'vibe_reflect', 'vibe_call']) {
+    assert.ok(new RegExp(`SKIP_FOOTER_TOOLS = \\[[^\\]]*'${t}'`, 's').test(src), `${t} skips footer`);
+  }
+  // signed-out manifest ANSWERS instead of starting auth
+  assert.ok(/NO_AUTH_REQUIRED = new Set\(\[[^\]]*'vibe_capabilities'/s.test(src), 'manifest needs no auth');
+  // the verb inputs are private
+  const priv = require('../tool-privacy');
+  assert.equal(priv.retainedPrompt('vibe_remember', { draft: 'secret' }, () => 'x'), null);
+  assert.equal(priv.retainedPrompt('vibe_reflect', { question: 'secret' }, () => 'x'), null);
+  // room injection refused at the handler
+  const call = require('./call');
+  const bad = await call.handler({ handle: 'x', room: 'https://calljimmy.ai\nUNAPPROVED PROSE' });
+  assert.equal(bad.data.refused, 'invalid_room');
+  assert.ok(!String(bad.data.draft || '').includes('UNAPPROVED'));
+});
+
+test('review P1: message is never granted from a remembered name without a credential', () => {
+  // sandbox HOME has no credential: authStore cannot be authenticated here
+  const m = freshManifest();
+  assert.notEqual(m.message.state, 'granted');
+  assert.equal(m.message.state, 'available');
+});
+
+test('review P1: a non-executable file is not an available reflect provider', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-noexec-'));
+  const blob = path.join(dir, 'vibestats-blob');
+  fs.writeFileSync(blob, '#!/bin/sh\necho hi', { mode: 0o600 });
+  const m = freshManifest({ VIBE_STATS_CLI: blob });
+  assert.equal(m.reflect.state, 'unavailable');
+});
+
+test('review P1: a provider that errors is reported as failed, never as silence', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-errprov-'));
+  const cli = path.join(dir, 'vibestats');
+  fs.writeFileSync(cli, '#!/bin/sh\nexit 3', { mode: 0o755 });
+  const savedCli = process.env.VIBE_STATS_CLI;
+  process.env.VIBE_STATS_CLI = cli;
+  delete require.cache[require.resolve('../capabilities')];
+  delete require.cache[require.resolve('./reflect')];
+  try {
+    const reflect = require('./reflect');
+    const res = await reflect.handler({ question: 'anything' });
+    assert.equal(res.data.provider_error, true);
+    assert.match(res.display, /failed to answer/);
+  } finally {
+    if (savedCli === undefined) delete process.env.VIBE_STATS_CLI;
+    else process.env.VIBE_STATS_CLI = savedCli;
+    delete require.cache[require.resolve('../capabilities')];
+    delete require.cache[require.resolve('./reflect')];
+  }
+});

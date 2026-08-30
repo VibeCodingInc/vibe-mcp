@@ -63,20 +63,40 @@ function runHost(name, env) {
   });
 }
 
+// Deterministic expectations (review P2: no vacuous matching): the canary
+// pins each verb to ONE expected state on any machine — off flags make
+// remember/reflect/call machine-independent; the synthetic credential makes
+// message granted. Each verb must appear exactly once WITH a reason.
+const CONTROLLED_ENV = { VIBE_REMEMBER: 'off', VIBE_REFLECT: 'off', VIBE_CALL: 'off' };
+const EXPECTED = { remember: 'off', reflect: 'off', call: 'off', message: 'granted' };
+
 const hosts = {
-  'claude-code': { CLAUDECODE: '1' },
-  codex: { CODEX_HOME: mkdtempSync(join(tmpdir(), 'codex-home-')) },
+  'claude-code': { CLAUDECODE: '1', ...CONTROLLED_ENV },
+  codex: { CODEX_HOME: mkdtempSync(join(tmpdir(), 'codex-home-')), ...CONTROLLED_ENV },
 };
 
 let failed = false;
 for (const [name, env] of Object.entries(hosts)) {
   const r = await runHost(name, env);
   const missing = VERBS.filter((v) => !r.tools.includes(v));
-  const states = [...r.manifestText.matchAll(/(remember|reflect|message|call) — (\w+)/g)];
-  const badStates = states.filter(([, , s]) => !LEGAL.has(s));
-  const ok = missing.length === 0 && states.length === 4 && badStates.length === 0
-    && !r.tools.includes('vibe_mind') && !r.tools.includes('vibe_doctor');
-  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}: ${r.tools.length} tools; verbs ${VERBS.length - missing.length}/${VERBS.length}; states ${states.map(([, v, s]) => `${v}=${s}`).join(' ')}${missing.length ? `; MISSING ${missing}` : ''}`);
+  const states = [...r.manifestText.matchAll(/(remember|reflect|message|call) — (\w+) · (.+)/g)];
+  const seen = new Map(states.map(([, verb, state, why]) => [verb, { state, why }]));
+  const problems = [];
+  if (states.length !== 4) problems.push(`expected 4 state lines, saw ${states.length}`);
+  for (const [verb, want] of Object.entries(EXPECTED)) {
+    const got = seen.get(verb);
+    if (!got) problems.push(`${verb}: missing`);
+    else {
+      if (!LEGAL.has(got.state)) problems.push(`${verb}: illegal state ${got.state}`);
+      if (got.state !== want) problems.push(`${verb}: expected ${want}, got ${got.state}`);
+      if (!got.why || got.why.trim().length < 5) problems.push(`${verb}: no reason given`);
+    }
+  }
+  if (missing.length) problems.push(`missing tools: ${missing}`);
+  if (r.tools.includes('vibe_mind')) problems.push('retired vibe_mind still listed');
+  if (r.tools.includes('vibe_doctor')) problems.push('admin doctor leaked into default list');
+  const ok = problems.length === 0;
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${name}: ${r.tools.length} tools; ${[...seen].map(([v, g]) => `${v}=${g.state}`).join(' ')}${ok ? '' : '; PROBLEMS: ' + problems.join(' | ')}`);
   if (!ok) failed = true;
 }
 process.exit(failed ? 1 : 0);

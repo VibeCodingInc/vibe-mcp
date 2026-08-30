@@ -20,8 +20,8 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const config = require('./config');
 const personalMind = require('./personal-mind');
+const authStore = require('./auth-store');
 
 const OFF_VALUES = new Set(['off', '0', 'false', 'no']);
 
@@ -49,12 +49,28 @@ function vibeCheckPresent() {
   );
 }
 
+function executableFile(p) {
+  // Available must mean RUNNABLE: a regular file with an execute bit. A
+  // directory or a mode-0600 blob is not a provider (review P1).
+  try {
+    const st = fs.statSync(p);
+    return st.isFile() && (st.mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
+}
+
 function vibeStatsProvider() {
   // Provider contract: an executable named `vibestats`, or an explicit path
-  // in VIBE_STATS_CLI. Existence only; never executed during discovery.
+  // in VIBE_STATS_CLI. Executability is checked; nothing is executed during
+  // discovery.
   const explicit = process.env.VIBE_STATS_CLI;
-  if (explicit) return fs.existsSync(explicit) ? explicit : null;
-  return onPath('vibestats') ? 'vibestats' : null;
+  if (explicit) return executableFile(explicit) ? explicit : null;
+  const entries = String(process.env.PATH || '').split(path.delimiter);
+  for (const dir of entries) {
+    if (dir && executableFile(path.join(dir, 'vibestats'))) return path.join(dir, 'vibestats');
+  }
+  return null;
 }
 
 /**
@@ -62,7 +78,10 @@ function vibeStatsProvider() {
  * platform or any provider — states describe THIS machine, honestly.
  */
 function manifest() {
-  const message = config.isInitialized()
+  // The CREDENTIAL answers, in memory — never the filesystem, and never a
+  // remembered username without a credential (review P1: a leftover name is
+  // not a principal). authStore hydrates once at server boot.
+  const message = authStore.isAuthenticated()
     ? { state: 'granted', why: 'signed in as one /vibe principal' }
     : { state: 'available', why: 'runtime installed; sign in with vibe start' };
 

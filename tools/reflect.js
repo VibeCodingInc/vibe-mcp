@@ -42,14 +42,14 @@ function runProvider(cli, question) {
       ['reflect', '--json', String(question)],
       { timeout: REFLECT_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES },
       (error, stdout) => {
-        if (error) return resolve(null);
+        if (error) return resolve({ failed: true });
         try {
           const parsed = JSON.parse(stdout);
           if (parsed && typeof parsed.reflection === 'string' && parsed.reflection.trim()) {
             return resolve(parsed);
           }
         } catch {
-          /* fall through to null */
+          return resolve({ failed: true }); // non-JSON output is a provider fault, not silence
         }
         resolve(null);
       }
@@ -67,6 +67,14 @@ async function handler(args) {
   }
   const cli = process.env.VIBE_STATS_CLI || 'vibestats';
   const result = await runProvider(cli, args.question);
+  if (result && result.failed) {
+    // A provider that errors did NOT answer — saying "silence" here would be
+    // a fabricated state (review P1). Distinct, honest, actionable.
+    return {
+      display: 'reflect — the provider failed to answer (ran but errored); nothing was reflected',
+      data: { silence: true, provider_error: true },
+    };
+  }
   if (!result) {
     return {
       display: 'reflect — the provider answered with silence (no reflection for that question)',

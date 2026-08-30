@@ -48,7 +48,11 @@ const SERVER_CAPABILITIES = {
 };
 
 // Tools that shouldn't show presence footer (would be redundant/noisy)
-const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_test', 'vibe_update'];
+// The local-only verbs make NO platform side effects (review P1): the
+// ambient footer performs platform requests, so remember/reflect/call and
+// the manifest never carry it.
+const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_test', 'vibe_update',
+  'vibe_capabilities', 'vibe_remember', 'vibe_reflect', 'vibe_call'];
 
 // Progressive disclosure: only these tools are visible before authentication
 // After auth, the full toolset is revealed via tools/list_changed notification
@@ -69,7 +73,10 @@ const PRE_AUTH_TOOLS = new Set([
 
 // Tools that genuinely work without authentication
 const NO_AUTH_REQUIRED = new Set([
-  'vibe_start', 'vibe_init', 'vibe_token', 'vibe_who', 'vibe_help'
+  'vibe_start', 'vibe_init', 'vibe_token', 'vibe_who', 'vibe_help',
+  // The manifest is local truth; signed out it must ANSWER (message:
+  // available · sign in), never start an auth flow (review P1).
+  'vibe_capabilities'
 ]);
 
 // "Is this session signed in" — the credential answers, not the filesystem.
