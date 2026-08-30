@@ -78,6 +78,7 @@
     "protocol/index.js",
     "resources/presence-board.js",
     "resources/vibe-tokens.json",
+    "scripts/reflect-provider-canary.mjs",
     "scripts/verb-canary.mjs",
     "session-start-hook-settings.js",
     "session-start-hook.cjs",

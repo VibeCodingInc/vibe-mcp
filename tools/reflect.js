@@ -5,59 +5,71 @@
  * provider and shown only to them. Nothing here publishes; approved prose
  * still travels only through vibe_dm / vibe_reply after a human decision.
  *
- * Provider contract (smallest honest adapter): an executable `vibestats` on
- * PATH (or VIBE_STATS_CLI=/path), invoked as `vibestats reflect --json
- * <question>`, returning JSON { reflection: string, source?: string }. Where
- * no provider exists the verb says so — it never fabricates a reflection.
+ * Provider contract (vibe-mcp#24 — the REAL VibeStats CLI, v0.1.x): an
+ * executable `vibestats` on PATH or VIBE_STATS_CLI=/path, invoked as
+ * `vibestats reveal --json`, returning the local reveal:
+ *   { archetype, scores{...}, metrics{...}, raw_meta{ dateRange, source,
+ *     version, ... } }
+ * The provider reveals an archetype from local /insights-derived data; it
+ * does not answer arbitrary questions, so this verb takes none — offering a
+ * question box the provider cannot honor would be a fabricated capability.
+ *
+ * Distinct outcomes, never blurred (issue #24 acceptance):
+ *   reflection      — valid reveal with an archetype, provenance attached
+ *   no local data   — the provider ran, answered validly, had nothing
+ *   provider failed — ran but errored / non-JSON / timed out
+ *   unavailable/off — from the manifest; the provider was never run
  */
 
 const { execFile } = require('node:child_process');
 const capabilities = require('../capabilities');
 
-const REFLECT_TIMEOUT_MS = 10_000;
-const MAX_OUTPUT_BYTES = 64 * 1024;
+const REFLECT_TIMEOUT_MS = 30_000;
+const MAX_OUTPUT_BYTES = 512 * 1024;
 
 const definition = {
   name: 'vibe_reflect',
   description:
-    'Ask the user’s own local VibeStats provider for one private reflection about their activity (patterns, cadence, streaks). Local-only: raw analytics inputs never leave this machine and nothing publishes without explicit human approval. Reports the capability state honestly when no provider exists.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      question: {
-        type: 'string',
-        maxLength: 500,
-        description: 'What to reflect on, in plain words (e.g. "how has my messaging cadence with @sam changed?").',
-      },
-    },
-    required: ['question'],
-    additionalProperties: false,
-  },
+    'Reveal the user’s own private VibeStats reflection — their local coding archetype and cadence, derived on this machine from their own /insights data. Local-only: raw inputs never leave the machine and nothing publishes without explicit human approval. Reports the capability state honestly when no provider exists.',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
 };
 
-function runProvider(cli, question) {
+function runProvider(cli) {
   return new Promise((resolve) => {
     execFile(
       cli,
-      ['reflect', '--json', String(question)],
+      ['reveal', '--json'],
       { timeout: REFLECT_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES },
       (error, stdout) => {
         if (error) return resolve({ failed: true });
         try {
-          const parsed = JSON.parse(stdout);
-          if (parsed && typeof parsed.reflection === 'string' && parsed.reflection.trim()) {
-            return resolve(parsed);
-          }
+          return resolve({ reveal: JSON.parse(stdout) });
         } catch {
-          return resolve({ failed: true }); // non-JSON output is a provider fault, not silence
+          return resolve({ failed: true }); // non-JSON output is a provider fault
         }
-        resolve(null);
       }
     );
   });
 }
 
-async function handler(args) {
+function renderReflection(reveal) {
+  const metrics = reveal.metrics || {};
+  const meta = reveal.raw_meta || {};
+  const lines = [`**${reveal.archetype}** — your local archetype right now`];
+  const cadence = [];
+  if (Number.isFinite(metrics.sessions)) cadence.push(`${metrics.sessions} sessions`);
+  if (Number.isFinite(metrics.days)) cadence.push(`${metrics.days} days`);
+  if (Number.isFinite(metrics.commitsPerDay)) cadence.push(`${metrics.commitsPerDay} commits/day`);
+  if (Number.isFinite(metrics.msgsPerSession)) cadence.push(`${metrics.msgsPerSession} msgs/session`);
+  if (cadence.length) lines.push(cadence.join(' · '));
+  const prov = [meta.source, meta.dateRange, meta.version && `vibestats ${meta.version}`]
+    .filter(Boolean)
+    .join(' · ');
+  if (prov) lines.push(`_${prov}_`);
+  return lines.join('\n');
+}
+
+async function handler() {
   const cap = capabilities.manifest().reflect;
   if (cap.state !== 'available') {
     return {
@@ -66,25 +78,33 @@ async function handler(args) {
     };
   }
   const cli = process.env.VIBE_STATS_CLI || 'vibestats';
-  const result = await runProvider(cli, args.question);
-  if (result && result.failed) {
-    // A provider that errors did NOT answer — saying "silence" here would be
-    // a fabricated state (review P1). Distinct, honest, actionable.
+  const result = await runProvider(cli);
+  if (result.failed) {
     return {
       display: 'reflect — the provider failed to answer (ran but errored); nothing was reflected',
       data: { silence: true, provider_error: true },
     };
   }
-  if (!result) {
+  const reveal = result.reveal;
+  if (!reveal || typeof reveal.archetype !== 'string' || !reveal.archetype.trim()) {
     return {
-      display: 'reflect — the provider answered with silence (no reflection for that question)',
-      data: { silence: true },
+      display: 'reflect — the provider ran and found no local data to reflect yet',
+      data: { silence: true, no_data: true },
     };
   }
-  const source = result.source ? `\n_source: ${String(result.source).slice(0, 200)}_` : '';
   return {
-    display: `**private reflection** (yours alone; share only by sending approved words)\n${result.reflection.slice(0, 2000)}${source}`,
-    data: { reflection: result.reflection.slice(0, 2000), source: result.source || null },
+    display:
+      `**private reflection** (yours alone; share only by sending approved words)\n` +
+      renderReflection(reveal),
+    data: {
+      archetype: reveal.archetype,
+      metrics: reveal.metrics || null,
+      provenance: {
+        source: reveal.raw_meta?.source || null,
+        dateRange: reveal.raw_meta?.dateRange || null,
+        version: reveal.raw_meta?.version || null,
+      },
+    },
   };
 }
 

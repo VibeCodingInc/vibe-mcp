@@ -117,7 +117,7 @@ test('vibe_reflect with no provider reports honestly instead of fabricating', as
   delete require.cache[require.resolve('./reflect')];
   try {
     const reflect = require('./reflect');
-    const res = await reflect.handler({ question: 'how goes it' });
+    const res = await reflect.handler({});
     assert.equal(res.data.silence, true);
     assert.match(res.display, /unavailable|off/);
   } finally {
@@ -170,6 +170,53 @@ test('review P1: a non-executable file is not an available reflect provider', ()
   assert.equal(m.reflect.state, 'unavailable');
 });
 
+test('reflect consumes the REAL reveal contract (pinned fixture from vibestats v0.1.0)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-realprov-'));
+  const cli = path.join(dir, 'vibestats');
+  const fixture = path.join(__dirname, '..', 'test', 'fixtures', 'vibestats-reveal.v0.1.0.json');
+  // the fake provider replays the REAL CLI's output shape, and refuses the
+  // OLD wrong subcommand so a regression to `reflect --json` fails loudly
+  fs.writeFileSync(cli, `#!/bin/sh\nif [ "$1" != "reveal" ]; then echo "Unknown command: $1" >&2; exit 1; fi\ncat ${fixture}`, { mode: 0o755 });
+  const savedCli = process.env.VIBE_STATS_CLI;
+  process.env.VIBE_STATS_CLI = cli;
+  delete require.cache[require.resolve('../capabilities')];
+  delete require.cache[require.resolve('./reflect')];
+  try {
+    const reflect = require('./reflect');
+    assert.equal(reflect.definition.inputSchema.required, undefined, 'reveal answers no questions — no required inputs');
+    const res = await reflect.handler({});
+    assert.equal(res.data.archetype, 'Fixture Orchestrator');
+    assert.equal(res.data.provenance.version, '0.1.0');
+    assert.match(res.display, /private reflection/);
+  } finally {
+    if (savedCli === undefined) delete process.env.VIBE_STATS_CLI;
+    else process.env.VIBE_STATS_CLI = savedCli;
+    delete require.cache[require.resolve('../capabilities')];
+    delete require.cache[require.resolve('./reflect')];
+  }
+});
+
+test('reflect: valid JSON without an archetype is NO DATA, distinct from silence and failure', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-nodata-'));
+  const cli = path.join(dir, 'vibestats');
+  fs.writeFileSync(cli, '#!/bin/sh\necho {}', { mode: 0o755 });
+  const savedCli = process.env.VIBE_STATS_CLI;
+  process.env.VIBE_STATS_CLI = cli;
+  delete require.cache[require.resolve('../capabilities')];
+  delete require.cache[require.resolve('./reflect')];
+  try {
+    const reflect = require('./reflect');
+    const res = await reflect.handler({});
+    assert.equal(res.data.no_data, true);
+    assert.match(res.display, /no local data/);
+  } finally {
+    if (savedCli === undefined) delete process.env.VIBE_STATS_CLI;
+    else process.env.VIBE_STATS_CLI = savedCli;
+    delete require.cache[require.resolve('../capabilities')];
+    delete require.cache[require.resolve('./reflect')];
+  }
+});
+
 test('review P1: a provider that errors is reported as failed, never as silence', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-errprov-'));
   const cli = path.join(dir, 'vibestats');
@@ -180,7 +227,7 @@ test('review P1: a provider that errors is reported as failed, never as silence'
   delete require.cache[require.resolve('./reflect')];
   try {
     const reflect = require('./reflect');
-    const res = await reflect.handler({ question: 'anything' });
+    const res = await reflect.handler({});
     assert.equal(res.data.provider_error, true);
     assert.match(res.display, /failed to answer/);
   } finally {
