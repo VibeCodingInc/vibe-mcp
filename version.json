@@ -1,13 +1,13 @@
 {
-  "version": "0.8.18",
-  "updated": "2026-08-22",
-  "changelog": "Green means someone is actually there, and answers attach to the exact question they answer. Presence dots everywhere now require a recent verified heartbeat, every tip names a command that exists, the client sends zero analytics, and replies can carry an explicit target: pick the message you're answering and the thread shows the quote.",
+  "version": "0.8.19",
+  "updated": "2026-08-29",
+  "changelog": "The runtime now answers four verbs \u2014 remember, reflect, message, call \u2014 and tells the truth about every one of them. vibe_capabilities reports each capability as granted, available, off, or unavailable with its reason (visible even before sign-in); discovery reads no private data and executes nothing. vibe_remember consults your own local memory with a grant or reports its state without one; vibe_reflect reveals your local VibeStats archetype (local-only, never published); vibe_call drafts an explicit live-room handoff that only you can send. Nothing sends, joins, or publishes on its own.",
   "features": [
-    "vibe_start's card, list, terminal title and badge count only recent verified heartbeats \u2014 away and stale rows say so in words, never in green",
-    "Rotating tips and guided actions only suggest commands a default session actually registers",
-    "The setup_complete analytics event is removed; SECURITY.md's no-telemetry claim is now enforced by test",
-    "vibe_reply accepts an explicit reply target (#id shown beside messages); unknown targets are refused with candidates, never guessed; receipts name the new message id and its target",
-    "Thread views render the quoted parent (\u21a9 replying to #id) and honestly mark replies to unavailable messages"
+    "vibe_capabilities: the truthful local manifest \u2014 remember/reflect/message/call as granted/available/off/unavailable, discovery existence-only",
+    "vibe_remember: one sourced offer or silence with a Personal Mind grant; the honest capability state without (vibe_mind name retired)",
+    "vibe_reflect: your local VibeStats reveal (archetype + cadence + the provider's own provenance); reflection/no-data/provider-failure/unavailable stay distinct",
+    "vibe_call: drafts the live-room handoff line for YOU to approve and send; never sends, joins, or notifies",
+    "Local-only verbs carry no ambient footer and their inputs are never retained"
   ],
   "deprecated": [],
   "breaking": false,
