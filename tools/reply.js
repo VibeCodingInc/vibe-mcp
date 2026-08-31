@@ -1,5 +1,5 @@
 /**
- * vibe reply — Quick reply to the most recent unread message
+ * vibe reply — reply to a specific message by its visible #id (linked), or continue a named thread unlinked; never guesses the newest.
  *
  * Streamlined flow: one command instead of inbox → open → dm
  */
@@ -14,7 +14,7 @@ const { actions, formatActions } = require('./_actions');
 
 const definition = {
   name: 'vibe_reply',
-  description: 'Quick reply to your most recent unread message, or to a specific person. Streamlined: one command instead of inbox → open → dm.',
+  description: 'Reply to a specific message by its visible #id (reply_to) — the reply is linked to exactly that message. Or continue a named thread unlinked with `to`. Never guesses: with neither, it lists the visible ids instead of sending.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -232,7 +232,10 @@ async function handler(args) {
     const nextHandle = stillUnread[0].handle;
     const totalUnread = stillUnread.reduce((sum, t) => sum + t.unread, 0);
     display += `\n\n📬 ${totalUnread} more unread from ${stillUnread.map(t => `@${t.handle}`).slice(0, 3).join(', ')}`;
-    display += `\n_Say \`vibe reply "message"\` to reply to @${nextHandle}_`;
+    const nextId = stillUnread[0].lastMessageId;
+    display += nextId
+      ? `\n_Reply to @${nextHandle} exactly: \`vibe reply\` with reply_to: "${nextId}"_`
+      : `\n_Open @${nextHandle}'s thread with \`vibe inbox @${nextHandle}\` to reply to a specific message_`;
   }
 
   // Build response with actions

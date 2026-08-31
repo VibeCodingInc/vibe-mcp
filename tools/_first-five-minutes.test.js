@@ -33,7 +33,7 @@ const init = require('./init');
 const config = require('../config');
 const authStore = require('../auth-store');
 
-afterEach(() => init._resetPendingAuth());
+afterEach(async () => { await init._resetPendingAuth(); });
 
 const quietStore = () => stubStore({
   registerSession: async () => ({}), heartbeat: async () => ({}),
@@ -66,6 +66,65 @@ test('repeated start while waiting reuses the SAME flow and says it is still wai
   } finally { restore(); }
 });
 
+// ── review-round pins (2e52785 → repaired) ───────────────────────────────
+test('P1: concurrent signed-out starts share ONE flow (no second listener)', async () => {
+  const restore = quietStore();
+  try {
+    const [a, b, c] = await Promise.all([init.handler({}), init.handler({}), init.handler({})]);
+    assert.equal(a.data.login_url, b.data.login_url);
+    assert.equal(b.data.login_url, c.data.login_url);
+    const ports = new Set([a, b, c].map((r) => new URL(new URL(r.data.login_url).searchParams.get('redirect')).port));
+    assert.equal(ports.size, 1, 'exactly one callback port bound');
+  } finally { restore(); }
+});
+
+test('P1: the structured auth_required state is returned as `structured` for the dispatcher', async () => {
+  const restore = quietStore();
+  try {
+    const res = await init.handler({});
+    assert.equal(res.structured?.state, 'auth_required');
+    assert.equal(res.structured.login_url, res.data.login_url);
+  } finally { restore(); }
+});
+
+test('P1: signed-out vibe_start reaches sign-in without running auto-update first', async () => {
+  const src = fs.readFileSync(path.join(__dirname, 'start.js'), 'utf8');
+  const authIdx = src.indexOf("if (!config.hasOAuth())");
+  const updIdx = src.indexOf('const updateResult = await autoUpdate();');
+  assert.ok(authIdx > 0 && updIdx > 0 && authIdx < updIdx, 'auth check precedes autoUpdate in the handler');
+});
+
+test('P2: replacing an expired flow cancels the old listener', async () => {
+  const restore = quietStore();
+  try {
+    const a = await init.handler({});
+    const oldRedirect = new URL(new URL(a.data.login_url).searchParams.get('redirect'));
+    // force expiry the way a timeout would
+    const mod = require('./init');
+    mod._forceExpireForTest?.();
+    const b = await init.handler({});
+    assert.ok(b.display.includes('expired'), 'says the earlier link expired');
+    // The replacement may rebind the SAME default port, so "gone" is proven by
+    // the OLD state being refused (400) or the connection being refused (0) —
+    // never a 200 from a lingering old listener.
+    const status = await new Promise((resolve) => http.get(oldRedirect, { agent: false }, (r) => { r.resume(); resolve(r.statusCode); }).on('error', () => resolve(0)));
+    assert.ok(status === 0 || status === 400, `old flow no longer honored (got ${status})`);
+  } finally { restore(); }
+});
+
+test('P2: the tool-list notification uses the MCP method name', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'notification-emitter.js'), 'utf8');
+  assert.ok(src.includes('"notifications/tools/list_changed"'));
+  assert.ok(!src.includes('"notifications/list_changed"'));
+});
+
+test('P2: reply description and footer no longer advertise guessing', () => {
+  const src = fs.readFileSync(path.join(__dirname, 'reply.js'), 'utf8');
+  assert.ok(!src.split('inputSchema')[0].includes('most recent unread'), 'description does not promise newest-unread guessing');
+  assert.ok(!src.includes('vibe reply "message"'), 'footer does not recommend a target-less reply');
+});
+
+// ── sign-in completion (signs the sandbox in — keep LAST among init pins) ──
 test('the callback listener outlives the tool call; completion persists the credential for the next start', async () => {
   const restore = quietStore();
   try {
@@ -81,13 +140,13 @@ test('the callback listener outlives the tool call; completion persists the cred
     const token = `h.${b64({ sub: 'newbie', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
     redirect.searchParams.set('token', token);
     redirect.searchParams.set('handle', 'newbie');
-    const status = await new Promise((resolve) => http.get(redirect, (r) => { r.resume(); resolve(r.statusCode); }).on('error', () => resolve(0)));
-    assert.equal(status, 200, 'listener is alive after the tool returned');
+    const status = await new Promise((resolve) => http.get(redirect, { agent: false }, (r) => { r.resume(); resolve(r.statusCode); }).on('error', (e) => resolve(`ERR:${e.code}:${redirect.port}`)));
+    assert.equal(status, 200, `listener is alive after the tool returned (got ${status}; url ${res.data.login_url.slice(0, 80)})`);
     // actor-aware flow: legacy GET parks the token; the actor POST completes it.
     const actorUrl = new URL(redirect); actorUrl.pathname = '/actor-callback'; actorUrl.search = `state=${url.searchParams.get('state')}`;
     // "no actor credential available" is the legitimate null-actor outcome
     const actorStatus = await new Promise((resolve) => {
-      const req = http.request(actorUrl, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' } }, (r) => { r.resume(); resolve(r.statusCode); });
+      const req = http.request(actorUrl, { agent: false, method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' } }, (r) => { r.resume(); resolve(r.statusCode); });
       req.on('error', () => resolve(0)); req.end('actor_status=unavailable');
     });
     assert.equal(actorStatus, 204, 'actor step accepted');
@@ -155,3 +214,4 @@ test('the inbox list exposes each thread\'s stable message id', async () => {
     assert.match(res.display, /reply_to/);
   } finally { restore(); }
 });
+

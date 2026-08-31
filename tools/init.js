@@ -267,7 +267,7 @@ async function sendWelcomeMessage(handle, one_liner) {
 
 const definition = {
   name: 'vibe_init',
-  description: `Join /vibe social network. Opens the browser for GitHub sign-in — NO INPUT NEEDED; the user's GitHub username becomes their handle automatically. This BLOCKS for up to 5 minutes waiting for the browser login to finish, so BEFORE it returns the user sees only a spinner. IMPORTANT: right when you call this, tell the user in your own words that their browser is opening to sign in with GitHub, then finish the login there and come back.`,
+  description: `Sign in to /vibe with GitHub — NO INPUT NEEDED; the GitHub username becomes the handle. Returns IMMEDIATELY with an auth_required state, the login URL, and one sentence to relay: 'Open this, sign in with GitHub, then say vibe start.' It may open a browser when one is available locally (never over SSH/headless); it never waits. Sign-in completes in the background; the next vibe start recognizes it.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -304,7 +304,9 @@ function openBrowser(url) {
     command = `xdg-open "${url}"`;
   }
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), 1500);
+    // A launcher still running after the cap is 'unknown' — never reported as
+    // failed while it may yet open a window (review P2).
+    const timer = setTimeout(() => resolve('unknown'), 5000);
     exec(command, (err) => {
       clearTimeout(timer);
       if (err) console.error('[vibe_init] Could not open a browser:', err.message);
@@ -320,6 +322,7 @@ function openBrowser(url) {
 // credential. Expired flows are replaced with a fresh one and say so.
 const AUTH_SENTENCE = 'Open this, sign in with GitHub, then say vibe start.';
 let pendingAuth = null; // { oauth, loginUrl, startedAt, browserOpened, expired }
+let pendingAuthCreation = null; // in-flight ensureAuthFlow, so concurrent starts share ONE flow (review P1)
 
 async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) {
   if (actor) await actorSession.installOAuthSession(actor);
@@ -344,11 +347,28 @@ async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) 
   try { await Promise.race([sendPersonalizedWelcome(finalHandle, one_liner), new Promise((r) => setTimeout(r, 2500))]); } catch {}
 }
 
-async function ensureAuthFlow({ requestedHandle, one_liner }) {
+async function ensureAuthFlow(opts) {
   if (pendingAuth && !pendingAuth.expired) {
     return { ...pendingAuth, reused: true };
   }
+  // Concurrent signed-out starts must not each bind a listener: the FIRST
+  // caller's creation promise is shared until pendingAuth exists.
+  if (pendingAuthCreation) {
+    const flow = await pendingAuthCreation;
+    return { ...flow, reused: true };
+  }
+  pendingAuthCreation = createAuthFlow(opts).finally(() => { pendingAuthCreation = null; });
+  return pendingAuthCreation;
+}
+
+async function createAuthFlow({ requestedHandle, one_liner }) {
   const replacedExpired = Boolean(pendingAuth && pendingAuth.expired);
+  if (replacedExpired) {
+    // The expired listener must not linger through its grace period beside
+    // the replacement (review P2).
+    try { await pendingAuth.oauth.cancel(); } catch {}
+    pendingAuth = null;
+  }
   const oauth = await beginOAuth({ requestedHandle, actorAware: true });
   const flow = { oauth, loginUrl: oauth.loginUrl, startedAt: Date.now(), browserOpened: false, expired: false, reused: false, replacedExpired };
   pendingAuth = flow;
@@ -367,26 +387,36 @@ function authRequiredResult(flow, presenceBanner) {
     ? 'The earlier sign-in link expired — here is a fresh one.'
     : flow.reused
       ? 'Still waiting for your sign-in.'
-      : flow.browserOpened
+      : flow.browserOpened === true
         ? 'A browser window is opening for GitHub sign-in.'
-        : 'No browser could be opened from here.';
+        : flow.browserOpened === 'unknown'
+          ? 'A browser may be opening; if it did not, use the link.'
+          : 'No browser could be opened from here.';
+  const structured = {
+    state: 'auth_required',
+    login_url: flow.loginUrl,
+    browser_opened: flow.browserOpened,
+    waiting_since: flow.startedAt,
+    next: 'vibe start',
+    sentence: AUTH_SENTENCE,
+  };
   return {
     display: `${presenceBanner || ''}\n\n**Sign in to /vibe**\n${lead}\n${AUTH_SENTENCE}\n\n${flow.loginUrl}`,
-    data: {
-      state: 'auth_required',
-      login_url: flow.loginUrl,
-      browser_opened: flow.browserOpened,
-      waiting_since: flow.startedAt,
-      next: 'vibe start',
-      sentence: AUTH_SENTENCE,
-    },
+    data: structured,
+    structured, // the dispatcher forwards `structured` as structuredContent (review P1)
   };
 }
 
 // Test seam: reset the one pending flow between cases.
-function _resetPendingAuth() {
-  if (pendingAuth?.oauth) pendingAuth.oauth.cancel().catch(() => {});
+function _forceExpireForTest() {
+  if (pendingAuth) pendingAuth.expired = true;
+}
+
+async function _resetPendingAuth() {
+  const flow = pendingAuth;
   pendingAuth = null;
+  pendingAuthCreation = null;
+  if (flow?.oauth) { try { await flow.oauth.cancel(); } catch {} }
 }
 
 
@@ -478,7 +508,12 @@ Heading out? \`vibe bye\` ends presence for this session — you stay @${existin
   // ===========================================
   // Show welcome banner (pre-auth)
   // ===========================================
-  const presence = await getPresenceCounts();
+  // Bounded: the pre-auth banner must never hold the sign-in response hostage
+  // to a slow presence fetch (review P1 — 'return immediately').
+  const presence = await Promise.race([
+    getPresenceCounts(),
+    new Promise((resolve) => setTimeout(() => resolve({ online: 0, humans: 0, agents: 0 }), 1500)),
+  ]);
   const welcomeBanner = generatePreAuthBanner(presence);
 
   // ===========================================
@@ -500,11 +535,13 @@ Heading out? \`vibe bye\` ends presence for this session — you stay @${existin
         return {
           display: `${welcomeBanner}\n\n**Sign in to /vibe**\nAnother /vibe session on this machine is already signing in — finish that one, then say vibe start.`,
           data: { state: 'auth_required', login_url: null, browser_opened: false, next: 'vibe start', sentence: AUTH_SENTENCE },
+          structured: { state: 'auth_required', login_url: null, browser_opened: false, next: 'vibe start', sentence: AUTH_SENTENCE },
         };
       }
       return {
         display: `${welcomeBanner}\n\nCould not start sign-in (${error?.message || error}). Say vibe start to try again.`,
         data: { state: 'auth_error', next: 'vibe start' },
+        structured: { state: 'auth_error', next: 'vibe start' },
       };
     }
     return authRequiredResult(flow, welcomeBanner);
@@ -600,4 +637,4 @@ _Say "vibe onboarding" anytime to check your progress_`
   };
 }
 
-module.exports = { definition, handler,  _resetPendingAuth, AUTH_SENTENCE };
+module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE };
