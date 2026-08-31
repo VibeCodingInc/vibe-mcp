@@ -288,9 +288,14 @@ const definition = {
  * Open URL in default browser
  */
 function openBrowser(url) {
+  // Resolves to whether a browser was actually asked to open. Over SSH or in
+  // a headless/CI shell we do not try: `open` on a remote Mac would pop the
+  // window on a screen the person is not looking at, and a failed attempt
+  // must be REPORTED so the URL becomes the honest next action.
+  const remote = Boolean(process.env.SSH_CONNECTION || process.env.SSH_TTY || process.env.CI);
+  if (remote) return Promise.resolve(false);
   const platform = process.platform;
   let command;
-
   if (platform === 'darwin') {
     command = `open "${url}"`;
   } else if (platform === 'win32') {
@@ -298,13 +303,92 @@ function openBrowser(url) {
   } else {
     command = `xdg-open "${url}"`;
   }
-
-  exec(command, (err) => {
-    if (err) {
-      console.error('[vibe_init] Failed to open browser:', err.message);
-    }
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 1500);
+    exec(command, (err) => {
+      clearTimeout(timer);
+      if (err) console.error('[vibe_init] Could not open a browser:', err.message);
+      resolve(!err);
+    });
   });
 }
+
+// ── Non-blocking sign-in (first-five-minutes repair, 2026-08-30) ─────────
+// The tool call NEVER waits for OAuth. One flow at a time lives here; the
+// callback listener stays alive after the tool returns, and completion is
+// persisted in the background so the NEXT vibe_start recognizes the
+// credential. Expired flows are replaced with a fresh one and say so.
+const AUTH_SENTENCE = 'Open this, sign in with GitHub, then say vibe start.';
+let pendingAuth = null; // { oauth, loginUrl, startedAt, browserOpened, expired }
+
+async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) {
+  if (actor) await actorSession.installOAuthSession(actor);
+  else await actorSession.clearActorSession();
+  config.saveAuthToken(token);
+  config.setSessionIdentity(finalHandle, one_liner || '');
+  authStore.setToken(token);
+  authStore.setHandle(finalHandle);
+  authStore.setOneLiner(one_liner || '');
+  const authConfig = config.load();
+  authConfig.handle = finalHandle;
+  authConfig.one_liner = one_liner || '';
+  authConfig.authMethod = 'browser';
+  authConfig.pendingAuth = false;
+  config.save(authConfig);
+  // The toolset just changed — tell the host now, not on the next call.
+  global.vibeNotifier?.emitImmediate();
+  // Presence + welcome are best-effort and must never block or throw here.
+  try { await store.registerSession(config.getSessionId(), finalHandle, one_liner); } catch {}
+  try { await store.heartbeat(finalHandle, one_liner); } catch {}
+  try { discord.postJoin(finalHandle, one_liner); } catch {}
+  try { await Promise.race([sendPersonalizedWelcome(finalHandle, one_liner), new Promise((r) => setTimeout(r, 2500))]); } catch {}
+}
+
+async function ensureAuthFlow({ requestedHandle, one_liner }) {
+  if (pendingAuth && !pendingAuth.expired) {
+    return { ...pendingAuth, reused: true };
+  }
+  const replacedExpired = Boolean(pendingAuth && pendingAuth.expired);
+  const oauth = await beginOAuth({ requestedHandle, actorAware: true });
+  const flow = { oauth, loginUrl: oauth.loginUrl, startedAt: Date.now(), browserOpened: false, expired: false, reused: false, replacedExpired };
+  pendingAuth = flow;
+  // Background completion: nobody awaits this. Success persists the credential;
+  // timeout marks the flow expired so the next start issues a fresh link.
+  oauth.waitForCallback().then(
+    (result) => completeSignIn(result, one_liner).catch((e) => console.error('[vibe_init] sign-in completion failed:', e.message)).finally(() => { if (pendingAuth === flow) pendingAuth = null; }),
+    (err) => { flow.expired = true; if (err?.message !== 'AUTH_TIMEOUT') console.error('[vibe_init] sign-in flow ended:', err?.message || err); }
+  );
+  flow.browserOpened = await openBrowser(oauth.loginUrl);
+  return flow;
+}
+
+function authRequiredResult(flow, presenceBanner) {
+  const lead = flow.replacedExpired
+    ? 'The earlier sign-in link expired — here is a fresh one.'
+    : flow.reused
+      ? 'Still waiting for your sign-in.'
+      : flow.browserOpened
+        ? 'A browser window is opening for GitHub sign-in.'
+        : 'No browser could be opened from here.';
+  return {
+    display: `${presenceBanner || ''}\n\n**Sign in to /vibe**\n${lead}\n${AUTH_SENTENCE}\n\n${flow.loginUrl}`,
+    data: {
+      state: 'auth_required',
+      login_url: flow.loginUrl,
+      browser_opened: flow.browserOpened,
+      waiting_since: flow.startedAt,
+      next: 'vibe start',
+      sentence: AUTH_SENTENCE,
+    },
+  };
+}
+
+// Test seam: reset the one pending flow between cases.
+function _resetPendingAuth() {
+  if (pendingAuth?.oauth) pendingAuth.oauth.cancel().catch(() => {});
+  pendingAuth = null;
+}
+
 
 async function handler(args) {
   const { handle, one_liner, auth_method } = args;
@@ -401,197 +485,29 @@ Heading out? \`vibe bye\` ends presence for this session — you stay @${existin
   // BROWSER AUTH (Default): GitHub OAuth
   // ===========================================
   if (auth_method === 'browser' || !auth_method) {
-    let oauth;
-
-    // Save one_liner for callback handler
+    // Save one_liner for the completion handler
     const cfg = config.load();
     if (h) cfg.handle = h;
     cfg.one_liner = one_liner || '';
     cfg.pendingAuth = true;
     config.save(cfg);
 
+    let flow;
     try {
-      // The callback listener is bound before this resolves. Only then is it
-      // safe to hand the attempt-correlated URL to the browser.
-      oauth = await beginOAuth({ requestedHandle: h, actorAware: true });
-      openBrowser(oauth.loginUrl);
-
-      // Wait for callback (blocks until auth completes or times out)
-      const { token, handle: callbackHandle, actor } = await oauth.waitForCallback();
-      const finalHandle = callbackHandle;
-
-      // Actor state is a separate credential family. Install it before claiming
-      // sign-in success; an account switch or failed shadow issuance must not leave a
-      // previous principal's Actor bundle alive beside the new legacy session.
-      if (actor) await actorSession.installOAuthSession(actor);
-      else await actorSession.clearActorSession();
-
-      // Save to config (file persistence for restarts)
-      config.saveAuthToken(token);
-      config.setSessionIdentity(finalHandle, one_liner || '');
-
-      // PUSH to in-memory auth store (immediate propagation)
-      authStore.setToken(token);
-      authStore.setHandle(finalHandle);
-      authStore.setOneLiner(one_liner || '');
-
-      // Update shared config
-      const authConfig = config.load();
-      authConfig.handle = finalHandle;
-      authConfig.one_liner = one_liner || '';
-      authConfig.authMethod = 'browser';
-      authConfig.pendingAuth = false;
-      config.save(authConfig);
-
-      // Register session with API
-      const sessionId = config.getSessionId();
-      await store.registerSession(sessionId, finalHandle, one_liner);
-
-      // Send initial heartbeat
-      await store.heartbeat(finalHandle, one_liner);
-
-      // Post to Discord
-      discord.postJoin(finalHandle, one_liner);
-
-      const result = { success: true, handle: finalHandle };
-
-      // Send personalized welcome and wait for it (2.5s timeout)
-      let welcomeResult = null;
-      try {
-        welcomeResult = await Promise.race([
-          sendPersonalizedWelcome(result.handle, one_liner),
-          new Promise(resolve => setTimeout(() => resolve(null), 2500))
-        ]);
-      } catch (e) {
-        console.error('[vibe_init] Welcome message failed:', e.message);
-      }
-
-      // Check for unread messages (includes the welcome we just sent)
-      let unreadCount = 0;
-      try {
-        unreadCount = await store.getUnreadCount(result.handle);
-      } catch (e) {}
-
-      // Fetch GitHub friends (non-blocking, 3s timeout)
-      let friendsData = null;
-      try {
-        const friendsPromise = fetchGitHubFriends(result.handle);
-        friendsData = await Promise.race([
-          friendsPromise,
-          new Promise(resolve => setTimeout(() => resolve(null), 3000))
-        ]);
-      } catch (e) {}
-
-      // Do we have an email to reach them at when a DM lands while away?
-      // (non-blocking, 2s timeout — never hold up onboarding for this)
-      let hasEmail = null;
-      try {
-        hasEmail = await Promise.race([
-          fetchHasEmail(config.getAuthToken()),
-          new Promise(resolve => setTimeout(() => resolve(null), 2000))
-        ]);
-      } catch (e) {}
-
-      // Generate authenticated banner with handle + unread (3 lines only - won't collapse)
-      const authBanner = generateAuthBanner(result.handle, unreadCount, presence);
-
-      // Build friends section if we have data
-      let friendsSection = '';
-      if (friendsData?.friendsOnVibe?.length > 0) {
-        const friendHandles = friendsData.friendsOnVibe.map(f => `@${f.vibe_handle}`).join(', ');
-        friendsSection = `\n\n🤝 **${friendsData.friendsOnVibe.length} of your GitHub friends are here!**\n${friendHandles}`;
-      } else if (friendsData?.totalContacts > 0) {
-        friendsSection = `\n\n👋 None of your GitHub friends are on /vibe yet — say **"vibe invite"** to bring them in!`;
-      }
-
-      // Build welcome section - show inline if we have the message
-      let welcomeSection = '';
-      if (welcomeResult?.messageText) {
-        welcomeSection = `\n\n---\n**📨 Welcome from @seth:**\n\n> ${welcomeResult.messageText.split('\n').join('\n> ')}`;
-      } else {
-        welcomeSection = '\n\n---\n**📨 @seth sent you a welcome message** — say **"vibe inbox"** to read it.';
-      }
-
-      // Always close on a concrete next move toward the aha: your first DM
-      // landing in someone else's terminal. Only commands that exist (who /
-      // @handle / ship). Avoid pointing the reply at a specific founder handle
-      // here — it can misroute; reading the inbox is the safe path to reply.
-      // Only promise a crowd of *humans* when there's actually one to meet —
-      // presence skews agent-heavy, and overselling an empty room is how the
-      // green dot stops meaning anything. Agents still show in `vibe who`.
-      const whoNudge = presence.humans > 1
-        ? `**"vibe who"** — see the ${presence.humans} builders online right now`
-        : `**"vibe who"** — see who's building right now`;
-      // You are here because someone you work with invited you. So the first move
-      // is answering THEM, not being matched with a stranger.
-      //
-      // This used to instruct the agent to call `vibe_intro` — auto-introduce the
-      // newcomer to whoever seemed related. That tool is RETIRED (docs/PRIVATE-FABRIC.md:
-      // cold introduction is out of scope), so the very first instruction a new
-      // invitee received pointed at the discovery model we deleted.
-      const nextSteps = unreadCount > 0
-        ? `\n\n---\n**Someone is already waiting on you.** Say **"vibe inbox"** to read it, then **"vibe reply"** to answer.\n\n`
-          + `_Stuck? Say **"vibe help"**._`
-        : `\n\n---\n**You're in.** Say **"vibe dm @<handle>"** to reach whoever invited you — they'll get it in their next session, whether or not they're online now.\n`
-          + `\n${whoNudge}.\n\n`
-          + `_Stuck? Say **"vibe help"**._`;
-
-      // One-time email nudge — only for users we can't otherwise reach (no
-      // address on file). This is the return loop: a DM that lands while you're
-      // away from Claude Code emails you so you actually come back.
-      const emailNudge = (EXTRAS_ENABLED && hasEmail === false)
-        ? `\n\n---\n📧 **Don't miss a DM** — add an email and /vibe pings you when someone messages you while you're away:\n**"vibe email you@example.com"** _(offline only · one-click unsubscribe)_`
-        : '';
-
-      return {
-        display: authBanner + friendsSection + welcomeSection + nextSteps + emailNudge,
-        onboarding: {
-          isNewUser: true,
-          handle: result.handle,
-          hint: 'show_onboarding_options',
-          hasWelcomeMessage: !!welcomeResult,
-          welcomeText: welcomeResult?.messageText || null,
-          friendsOnVibe: friendsData?.friendsOnVibe || [],
-          inviteSuggestions: friendsData?.inviteSuggestions || []
-        }
-      };
-
-    } catch (err) {
-      if (err.message === 'AUTH_IN_PROGRESS') {
+      flow = await ensureAuthFlow({ requestedHandle: h, one_liner });
+    } catch (error) {
+      if (error?.message === 'AUTH_IN_PROGRESS') {
         return {
-          display: `## A login is already running
-
-Another sign-in owns the callback listener. Finish that browser sign-in, or say
-**"let's vibe"** again to start a fresh attempt.`
+          display: `${welcomeBanner}\n\n**Sign in to /vibe**\nAnother /vibe session on this machine is already signing in — finish that one, then say vibe start.`,
+          data: { state: 'auth_required', login_url: null, browser_opened: false, next: 'vibe start', sentence: AUTH_SENTENCE },
         };
       }
-
-      if (err.message === 'AUTH_TIMEOUT') {
-        return {
-          display: `## The sign-in timed out
-
-The browser login wasn't finished within 5 minutes — no problem, just start it again.
-
-**1. Say "let's vibe"** to reopen the login.
-**2. Sign in with GitHub** in that tab, then come back here.
-
-_Tip: keep this window and the browser both visible so you can see when it finishes._`
-        };
-      }
-
-      if (oauth) await oauth.cancel();
       return {
-        display: `## Couldn't finish sign-in
-
-**What happened:** ${err.message}
-
-**Try this:**
-1. Say **"let's vibe"** to open a fresh sign-in
-2. Finish the GitHub sign-in in that tab, then come back
-
-**Still stuck?** Email seth@slashvibe.dev — happy to get you in.`
+        display: `${welcomeBanner}\n\nCould not start sign-in (${error?.message || error}). Say vibe start to try again.`,
+        data: { state: 'auth_error', next: 'vibe start' },
       };
     }
+    return authRequiredResult(flow, welcomeBanner);
   }
 
   // ===========================================
@@ -684,4 +600,4 @@ _Say "vibe onboarding" anytime to check your progress_`
   };
 }
 
-module.exports = { definition, handler };
+module.exports = { definition, handler,  _resetPendingAuth, AUTH_SENTENCE };

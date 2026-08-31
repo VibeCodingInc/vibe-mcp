@@ -374,10 +374,11 @@ async function handler(args) {
     // were rendering as the same sentence. "Recent: @a, @b, @c" also named the
     // handles without saying what they were: recent conversations, recent arrivals,
     // or a suggestion? Naming the relationship costs three words.
-    const recentHandles = sorted.slice(0, 3).map((th) => `@${th.handle}`).join(', ');
+    // ids ride inline so the summary stays one compact line (and greppable)
+    const recentLine = sorted.slice(0, 3).map((th) => `@${th.handle}${th.lastMessageId ? ` (#${th.lastMessageId})` : ''}`).join(', ');
     return {
-      display: recentHandles
-        ? `📭 nothing unread.\n\n_your recent threads:_ ${recentHandles}\n_open one with_ \`vibe inbox @handle\``
+      display: recentLine
+        ? `📭 nothing unread.\n\n_your recent threads:_ ${recentLine}\n_open one with_ \`vibe inbox @handle\` _· reply to a message exactly with its #id_`
         : '📭 nothing unread.',
       actions: formatActions(actions.recommendedConnections([]))
     };
@@ -475,12 +476,18 @@ async function handler(args) {
   // Line 3: Divider
   display += '───────────────────────────────────\n';
 
-  // Line 4+: Expanded list with counts and badges
+  // Line 4+: one line per unread thread — handle, count, and the STABLE id of
+  // its newest message so a reply can name its target exactly (first-five-
+  // minutes repair: vibe_reply never guesses). Compact: the id is a copyable
+  // suffix, not the headline.
   const expanded = unreadSenders.map(t => {
     const agent = t.isAgent ? ' 🤖' : '';
-    return `@${t.handle} (${t.unread})${agent}`;
-  }).join(' • ');
+    const idTag = t.lastMessageId ? ` · #${t.lastMessageId}` : '';
+    const who = t.lastFrom && t.lastFrom !== t.handle ? '' : '';
+    return `• @${t.handle} (${t.unread})${agent}${idTag}${who}`;
+  }).join('\n');
   display += expanded;
+  display += `\n\n_reply to one exactly:_ \`vibe reply\` with reply_to: "<id>"`;
 
   // Build response with optional hints for structured flows
   const response = { display };
@@ -491,6 +498,8 @@ async function handler(args) {
     response.unread_count = totalUnread;
     response.threads = unreadSenders.map(t => ({
       handle: t.handle,
+      thread_id: t.thread_id || null,
+      last_message_id: t.lastMessageId || null,
       unread: t.unread,
       preview: truncate(t.lastMessage || '', 40)
     }));

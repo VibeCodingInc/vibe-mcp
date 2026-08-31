@@ -654,6 +654,10 @@ async function getInboxV1(handle) {
         messages: [],
         unread: t.unread || 0,
         lastMessage: t.last_message?.body,
+        // The stable id + author of the newest message — what a reply MUST
+        // name explicitly (first-five-minutes repair: no guessed targets).
+        lastMessageId: t.last_message?.id || null,
+        lastFrom: t.last_message?.from || null,
         lastTimestamp: t.last_message?.created_at ? new Date(t.last_message.created_at).getTime() : null
       }));
     }
