@@ -9,7 +9,7 @@
 const store = require('../store');
 const config = require('../config');
 const { requireInit } = require('./_shared');
-const { inertField } = require('../incoming');
+const { inertMarkup } = require('../incoming');
 
 const definition = {
   name: 'vibe_unlist_me',
@@ -25,7 +25,7 @@ async function handler() {
   const result = await store.setListed(false);
   if (!result.ok) {
     return {
-      display: `Still listed${result.message ? ` (${inertField(result.message, 80)})` : ''} — nothing changed.`,
+      display: `Still listed${result.message ? ` (${inertMarkup(result.message, 80)})` : ''} — nothing changed.`,
     };
   }
   const handle = config.getHandle();

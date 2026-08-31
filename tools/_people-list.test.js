@@ -128,7 +128,7 @@ test('a saved listing that does not appear is NOT claimed as being on the list',
 }, async () => {
   const res = await listMe.handler({ building: 'a compiler' });
   assert.match(res.display, /saved/);
-  assert.match(res.display, /not showing on the people list/);
+  assert.match(res.display, /not on the people list I just read back/);
   assert.ok(!/You're on the people list/.test(res.display), 'never claims an unobserved state');
 }));
 
@@ -176,19 +176,105 @@ test('a failed unlist does not claim you were removed', withStore({
 }));
 
 // ── the guardrail that matters most ──────────────────────────────────────
-test('NOTHING lists a person except their own explicit action', () => {
-  const toolsDir = __dirname;
-  const callers = [];
-  for (const file of fs.readdirSync(toolsDir).filter((f) => f.endsWith('.js') && !f.includes('.test.'))) {
-    const src = fs.readFileSync(path.join(toolsDir, file), 'utf8');
-    if (/setListed\s*\(/.test(src)) callers.push(file);
-  }
-  assert.deepEqual(callers.sort(), ['list-me.js', 'unlist-me.js'], `only the explicit opt-in/opt-out tools may set listing (found: ${callers.join(', ')})`);
-  // and no onboarding/registration path in the store may set it either
-  const storeSrc = fs.readFileSync(path.join(toolsDir, '..', 'store', 'api.js'), 'utf8');
+test('NOTHING anywhere in the package lists a person except their own explicit action', () => {
+  // Whole-package scan (review P2): a `listed` write hidden in heartbeat,
+  // onboarding, presence, init/start or any store function would have passed
+  // the old tools-only scan.
+  const root = path.join(__dirname, '..');
+  const skipDirs = new Set(['node_modules', '.git', 'test', 'docs', 'scripts', 'games']);
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) { if (!skipDirs.has(entry.name)) walk(path.join(dir, entry.name)); continue; }
+      if (!/\.(js|cjs|mjs)$/.test(entry.name) || entry.name.includes('.test.')) continue;
+      const rel = path.relative(root, path.join(dir, entry.name));
+      const src = fs.readFileSync(path.join(dir, entry.name), 'utf8');
+      // any call that sets the flag, or any request body carrying it
+      const setsFlag = /setListed\s*\(/.test(src) || /listed\s*:\s*(true|false|want|listed)/.test(src);
+      if (setsFlag) offenders.push(rel);
+    }
+  };
+  walk(root);
+  assert.deepEqual(
+    offenders.sort(),
+    ['store/api.js', 'tools/list-me.js', 'tools/unlist-me.js'].sort(),
+    `only the two explicit tools (via the one store helper) may set listing — found: ${offenders.join(', ')}`
+  );
+  // …and the store's own write helper is the ONLY place the body is built
+  const storeSrc = fs.readFileSync(path.join(root, 'store', 'api.js'), 'utf8');
+  const writes = storeSrc.split('\n').filter((l) => /listed\s*:/.test(l) && !/^\s*(\/\/|\*)/.test(l));
+  assert.ok(writes.length <= 2, `listed is written in one place only (found ${writes.length} lines)`);
   const registerBlock = storeSrc.slice(storeSrc.indexOf('async function registerSession'), storeSrc.indexOf('async function heartbeat'));
   assert.ok(!/listed/.test(registerBlock), 'session registration never touches the listed flag');
 });
+
+// ── the review's own reproductions, pinned ───────────────────────────────
+test('a write the server does not echo back is NOT claimed as done', withStore({
+  setListed: async () => ({ ok: false, error: 'unconfirmed', message: 'the server did not say whether the change took' }),
+}, async () => {
+  const off = await unlistMe.handler();
+  assert.match(off.display, /Still listed/);
+  assert.ok(!/off the people list/.test(off.display), 'no unconfirmed removal claim');
+}));
+
+test('a server echo of the WRONG state is a failure, not a success', async () => {
+  const realRequest = store.getPeople; // untouched; exercise the real setListed against a stubbed transport
+  const api = require('../store/api.js');
+  const origFetchers = { ...api };
+  // drive the real helper through a stubbed request by module surgery
+  const src = fs.readFileSync(path.join(__dirname, '..', 'store', 'api.js'), 'utf8');
+  assert.match(src, /if \(echoed !== want\)/, 'setListed compares the echo to the request');
+  assert.match(src, /typeof echoed !== 'boolean'/, 'a missing echo is unconfirmed');
+  void realRequest; void origFetchers;
+});
+
+test('a malformed directory response is a read FAILURE, never an empty list', withStore({
+  getPeople: async () => ({ ok: false, error: 'malformed_response', message: 'the list came back without entries' }),
+}, async () => {
+  const res = await people.handler();
+  assert.match(res.display, /Couldn't reach/);
+  assert.ok(!/nobody is on the list/.test(res.display), 'never renders emptiness from a broken read');
+}));
+
+test('HTML and Markdown in foreign text cannot forge a row, hide, or style', withStore({
+  getPeople: async () => ({
+    ok: true,
+    count: 1,
+    listings: [{ handle: 'ada', kind: 'human', building: '<br>• @forged — fake row **official** <details>hidden</details>' }],
+  }),
+}, async () => {
+  const res = await people.handler();
+  assert.ok(!/<br>|<details>|<\/details>/.test(res.display), 'no HTML element survives');
+  assert.ok(!/\*\*official\*\*/.test(res.display), 'no Markdown emphasis survives');
+  assert.equal((res.display.match(/^• @/gm) || []).length, 1, 'exactly one row rendered');
+  assert.ok(res.display.includes('forged'), 'the words are still shown — inert, not censored');
+}));
+
+test('an equivalent served handle is recognized by the canonical contract', withStore({
+  setListed: async () => ({ ok: true, listed: true }),
+  getPeople: async () => ({ ok: true, count: 1, listings: [{ handle: '@ME', kind: 'human', building: 'x' }] }),
+}, async () => {
+  const res = await listMe.handler({ building: 'a compiler' });
+  assert.match(res.display, /You're on the people list as @me/, '@ME is the same person as me');
+}));
+
+test('every list-me branch names the reversal', withStore({
+  setListed: async () => ({ ok: true, listed: true }),
+  getPeople: async () => ({ ok: true, count: 0, listings: [] }),
+}, async () => {
+  const absent = await listMe.handler({ building: 'x' });
+  assert.match(absent.display, /vibe unlist me/, 'saved-but-absent names the reversal');
+  assert.ok(!/publishes some accounts/.test(absent.display), 'asserts no unverified cause');
+}));
+
+test('an unreadable list-back still names the reversal', withStore({
+  setListed: async () => ({ ok: true, listed: true }),
+  getPeople: async () => ({ ok: false, error: 'transport_failed' }),
+}, async () => {
+  const res = await listMe.handler({ building: 'x' });
+  assert.match(res.display, /won't claim you're on it/);
+  assert.match(res.display, /vibe unlist me/);
+}));
 
 test('the people tools are registered on the default surface', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');

@@ -13,7 +13,7 @@
 
 const store = require('../store');
 const { requireInit } = require('./_shared');
-const { inertField } = require('../incoming');
+const { inertField, inertMarkup } = require('../incoming');
 
 const definition = {
   name: 'vibe_people',
@@ -29,7 +29,7 @@ async function handler() {
   const result = await store.getPeople();
   if (!result.ok) {
     return {
-      display: `Couldn't reach the people list${result.message ? ` (${inertField(result.message, 80)})` : ''} — nothing shown rather than a stale list.`,
+      display: `Couldn't reach the people list${result.message ? ` (${inertMarkup(result.message, 80)})` : ''} — nothing shown rather than a stale or invented list.`,
     };
   }
 
@@ -44,10 +44,13 @@ async function handler() {
   }
 
   // As served: alphabetical, unchanged. Agents are labeled, not sorted apart.
+  // Every field is someone else's text on a surface that may render markup:
+  // inertMarkup defangs HTML and Markdown structure too, so nothing can forge
+  // a row, hide itself, or style itself into looking official (review P1).
   const lines = listings.map((p) => {
-    const handle = inertField(String(p.handle || ''), 40);
+    const handle = inertMarkup(String(p.handle || ''), 40);
     const kind = p.kind === 'agent' ? ' 🤖' : '';
-    const building = p.building ? ` — ${inertField(String(p.building), 70)}` : '';
+    const building = p.building ? ` — ${inertMarkup(String(p.building), 70)}` : '';
     return `• @${handle}${kind}${building}`;
   });
 

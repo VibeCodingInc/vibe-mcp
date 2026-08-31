@@ -111,4 +111,23 @@ function inertField(text, maxLen = 80) {
   return flat.length > maxLen ? flat.slice(0, maxLen - 1) + '\u2026' : flat;
 }
 
-module.exports = { renderIncoming, neutralize, scrub, inertField, MSG_OPEN, MSG_CLOSE, MAX_BODY };
+/**
+ * inertField, plus the markup a rendered surface can act on.
+ *
+ * inertField defangs terminal/agent structure (control chars, bidi, backticks,
+ * brackets). It deliberately leaves HTML and Markdown alone, which is fine for
+ * a plain terminal line and NOT fine anywhere a client renders markup: `<br>`
+ * forges a new row, `<details>` hides text, `**x**` and a leading bullet fake
+ * structure (review P1 on the people list). This makes those inert while
+ * keeping every word visible — defanged, never censored.
+ */
+function inertMarkup(text, maxLen = 80) {
+  return inertField(text, maxLen)
+    .replaceAll('<', '\u2039')          // ‹ — no HTML element can form
+    .replaceAll('>', '\u203a')          // ›
+    .replaceAll('*', '\u2217')          // ∗ — no bold/italic/bullet
+    .replaceAll('|', '\u2502')          // │ — no table row
+    .replace(/^[\s\u2022•\-+#]+/, '');   // no forged list item or heading
+}
+
+module.exports = { renderIncoming, neutralize, scrub, inertField, inertMarkup, MSG_OPEN, MSG_CLOSE, MAX_BODY };

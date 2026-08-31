@@ -12,7 +12,8 @@
 const store = require('../store');
 const config = require('../config');
 const { requireInit } = require('./_shared');
-const { inertField } = require('../incoming');
+const { inertMarkup } = require('../incoming');
+const { sameHandle } = require('../protocol/handle');
 
 const listDefinition = {
   name: 'vibe_list_me',
@@ -47,7 +48,7 @@ async function listHandler(args) {
       };
     }
     return {
-      display: `Not listed${result.message ? ` (${inertField(result.message, 80)})` : ''} — nothing changed.`,
+      display: `Not listed${result.message ? ` (${inertMarkup(result.message, 80)})` : ''} — nothing changed.`,
     };
   }
 
@@ -56,10 +57,13 @@ async function listHandler(args) {
   // ON the list — some identities it accepts, it does not publish. Say which
   // actually happened; never claim a state that was not observed.
   const handle = config.getHandle();
-  const buildingPart = building ? ` — building ${inertField(building, 70)}` : '';
+  const buildingPart = building ? ` — building ${inertMarkup(building, 70)}` : '';
   const check = await store.getPeople();
+  // The repo's canonical handle contract (@, case, whitespace, zero-width,
+  // -/_ ) decides identity — a lowercase-only compare would report an
+  // equivalent served handle as absent (review P2).
   const visible = check.ok
-    ? check.listings.some((p) => String(p.handle || '').toLowerCase() === String(handle || '').toLowerCase())
+    ? check.listings.some((p) => sameHandle(p.handle, handle))
     : null;
 
   if (visible === true) {
@@ -71,18 +75,20 @@ async function listHandler(args) {
     };
   }
   if (visible === false) {
+    // State ONLY what was observed. Why the list does not show the handle is
+    // not knowable from one read, so no cause is asserted (review P2) — and
+    // the reversal is named here as everywhere else.
     return {
       display:
-        `Your listing was saved${buildingPart} — but @${handle} is not showing on the people list.\n` +
-        '_the platform publishes some accounts and not others; nothing more to do on your side._\n\n' +
-        '_See the list with_ `vibe people`',
+        `Your listing was saved${buildingPart}, but @${handle} is not on the people list I just read back.\n` +
+        '_read it yourself with_ `vibe people` _· take the listing back any time with_ `vibe unlist me`',
     };
   }
   // The write succeeded; the read-back could not be made. Claim only the write.
   return {
     display:
-      `Your listing was saved${buildingPart}. Couldn't check the list just now, so I won't claim you're on it.\n\n` +
-      '_Check with_ `vibe people`',
+      `Your listing was saved${buildingPart}. Couldn't read the list just now, so I won't claim you're on it.\n` +
+      '_check with_ `vibe people` _· take the listing back any time with_ `vibe unlist me`',
   };
 }
 

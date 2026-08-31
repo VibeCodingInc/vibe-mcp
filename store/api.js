@@ -1321,16 +1321,27 @@ async function setNotificationPace(pace) {
  * Nothing here ranks, recommends, or lists anyone automatically.
  */
 async function setListed(listed, building) {
-  const body = { listed: listed === true };
+  const want = listed === true;
+  const body = { listed: want };
   // `building` rides along ONLY when the person supplied it with the action —
   // the platform's contained self-profile write owns both fields.
   if (typeof building === 'string' && building.trim()) body.building = building.trim();
   try {
     const result = await request('POST', '/api/users', body, { auth: true });
-    if (result && result.success === false) {
-      return { ok: false, error: result.error || 'request_failed', message: result.message };
+    if (!result || result.success === false) {
+      return { ok: false, error: result?.error || 'request_failed', message: result?.message };
     }
-    return { ok: true, listed: result?.user?.listed };
+    // The SERVER'S ECHO is the fact, not the absence of an error (review P1).
+    // A response that omits `listed`, or echoes the value we did not ask for,
+    // is an unconfirmed write — never rendered as success.
+    const echoed = result?.user?.listed;
+    if (typeof echoed !== 'boolean') {
+      return { ok: false, error: 'unconfirmed', message: 'the server did not say whether the change took' };
+    }
+    if (echoed !== want) {
+      return { ok: false, error: 'unconfirmed', message: `the server reports listed=${echoed}` };
+    }
+    return { ok: true, listed: echoed };
   } catch (e) {
     return { ok: false, error: 'transport_failed', message: e.message };
   }
@@ -1342,7 +1353,12 @@ async function getPeople() {
     if (!result || result.success === false) {
       return { ok: false, error: result?.error || 'request_failed', message: result?.message };
     }
-    return { ok: true, listings: Array.isArray(result.listings) ? result.listings : [], count: result.count, note: result.note };
+    // A response without a listings ARRAY is malformed — reporting it as an
+    // empty list would turn a read failure into "nobody is here" (review P2).
+    if (!Array.isArray(result.listings)) {
+      return { ok: false, error: 'malformed_response', message: 'the list came back without entries' };
+    }
+    return { ok: true, listings: result.listings, count: result.count, note: result.note };
   } catch (e) {
     return { ok: false, error: 'transport_failed', message: e.message };
   }
