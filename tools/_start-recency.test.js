@@ -2,10 +2,14 @@
  * vibe_start's green claims pass the SAME recency gate as who and dm (#9.1).
  *
  * getActiveUsers returns active+away merged. vibe_start used to render that
- * whole union under "🟢 N online" / "🟢 Online now:", so a handle whose last
- * heartbeat was 25 minutes ago rendered as live. Green means a recent
- * confirmed heartbeat — one definition (isHereNow in _shared.js), every
- * surface. Away rows render as ○ away, in words, never under green.
+ * whole union as live, so a handle whose last heartbeat was 25 minutes ago
+ * counted as present. One definition of present — isHereNow in _shared.js —
+ * on every surface.
+ *
+ * The first screen no longer lists people at all (2026-08-31: no presence
+ * roster, no chosen person, no message bodies), so the claim under test is
+ * now the COUNT: "N here" must count recent heartbeats only, and the screen
+ * must not name anyone it has not been asked about.
  *
  * Run: node --test tools/_start-recency.test.js
  */
@@ -77,12 +81,11 @@ test('green count and green list are gated on isHereNow, not the merged union', 
     const res = await t.run({});
     const text = res.display;
 
-    assert.match(text, /🟢 1 online/, 'the card counts recent heartbeats only');
-    assert.match(text, /🟢 Online now:[\s\S]*@fresh/, 'a fresh heartbeat is green');
+    assert.match(text, /\b1 here\b/, 'the count includes recent heartbeats only');
     const greenSection = text.split('○')[0];
-    assert.ok(!greenSection.includes('@stale'), 'a 25m-old heartbeat never sits under green');
-    assert.ok(!greenSection.includes('@resting'), 'an away row never sits under green');
-    assert.match(text, /○ 2 away/, 'non-green rows are said in words, not hidden');
+    assert.ok(!text.includes('@stale'), 'a 25m-old heartbeat is not counted or named');
+    assert.ok(!text.includes('@resting'), 'an away row is not counted or named');
+    assert.ok(!text.includes('@fresh'), 'the first screen names nobody it was not asked about');
   } finally {
     t.restore();
   }
@@ -96,9 +99,8 @@ test('a room of only stale rows renders zero green, not a live room', async () =
   try {
     const res = await t.run({});
     const text = res.display;
-    assert.match(text, /🟢 0 online/, 'no recent heartbeat, no green count');
-    assert.ok(!text.includes('🟢 Online now:'), 'no green list without a live row');
-    assert.match(text, /○ 2 away/);
+    assert.match(text, /\b0 here\b/, 'no recent heartbeat, no one counted as here');
+    assert.ok(!/@\w+ \(/.test(text.split('vibe inbox')[0]), 'no roster rendered');
   } finally {
     t.restore();
   }

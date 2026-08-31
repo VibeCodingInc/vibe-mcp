@@ -56,7 +56,12 @@ const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_test', 'vibe_update
   // The people actions each end in ONE obvious next action; the ambient
   // footer would stack a second one AND name a specific recipient to reply
   // to — the choosing is the human's, so the footer stays off here.
-  'vibe_people', 'vibe_list_me', 'vibe_unlist_me'];
+  'vibe_people', 'vibe_list_me', 'vibe_unlist_me',
+  // The first screen states the unread count itself and shows ids rather than
+  // bodies. The footer would state that count a SECOND time from a different
+  // (cached) source — the two disagreed in a real session — and re-render the
+  // message bodies the screen deliberately withholds.
+  'vibe_start'];
 
 // Progressive disclosure: only these tools are visible before authentication
 // After auth, the full toolset is revealed via tools/list_changed notification

@@ -44,24 +44,29 @@ function kernelToolNames() {
   return names;
 }
 
-function tipLines(src) {
-  const start = src.indexOf('const tips = [');
-  assert.ok(start > 0, 'tips array found');
-  return src.slice(start, src.indexOf('];', start));
+// The rotating tips were removed with the first-screen rewrite (2026-08-31).
+// The honesty rule they existed to enforce did not go away — the screen still
+// advertises commands, now in one actions line — so the guard follows the
+// claim to where it actually ships.
+function advertisedCommands(src) {
+  const line = (src.match(/vibe inbox · vibe people · vibe dm[^`\n]*/) || [])[0];
+  assert.ok(line, 'the first screen prints an actions line');
+  return line;
 }
 
-test('the rotating tips never name the known phantom commands', () => {
-  const tips = tipLines(read('tools/start.js'));
+test('the first screen never advertises a known phantom command', () => {
+  const line = advertisedCommands(read('tools/start.js'));
   for (const phantom of PHANTOMS) {
-    assert.ok(!tips.includes(phantom), `tip advertises unregistered "${phantom}"`);
+    assert.ok(!line.includes(phantom), `the actions line advertises unregistered "${phantom}"`);
   }
 });
 
-test('every vibe_<tool> a tip names is registered in a DEFAULT session', () => {
+test('every command the first screen names is registered in a DEFAULT session', () => {
   const kernel = kernelToolNames();
-  const tips = tipLines(read('tools/start.js'));
-  for (const [, tool] of tips.matchAll(/\b(vibe_[a-z_]+)\b/g)) {
-    assert.ok(kernel.has(tool), `tip names ${tool}, which a default session does not register`);
+  const line = advertisedCommands(read('tools/start.js'));
+  // human form ("vibe inbox") maps to the tool name (vibe_inbox)
+  for (const [, word] of line.matchAll(/vibe ([a-z]+)/g)) {
+    assert.ok(kernel.has(`vibe_${word}`), `the screen names "vibe ${word}", which a default session does not register`);
   }
 });
 
