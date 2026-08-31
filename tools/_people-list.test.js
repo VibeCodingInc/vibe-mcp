@@ -181,7 +181,9 @@ test('NOTHING anywhere in the package lists a person except their own explicit a
   // onboarding, presence, init/start or any store function would have passed
   // the old tools-only scan.
   const root = path.join(__dirname, '..');
-  const skipDirs = new Set(['node_modules', '.git', 'test', 'docs', 'scripts', 'games']);
+  // scripts/ and games/ SHIP (they are in package.json files), so the
+  // invariant must cover them (review P2).
+  const skipDirs = new Set(['node_modules', '.git', 'test', 'docs']);
   const offenders = [];
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -209,24 +211,54 @@ test('NOTHING anywhere in the package lists a person except their own explicit a
 });
 
 // ── the review's own reproductions, pinned ───────────────────────────────
-test('a write the server does not echo back is NOT claimed as done', withStore({
-  setListed: async () => ({ ok: false, error: 'unconfirmed', message: 'the server did not say whether the change took' }),
+test('a plainly FAILED write says so; an unconfirmed one does not (see the unconfirmed pin)', withStore({
+  setListed: async () => ({ ok: false, error: 'transport_failed', message: 'network down' }),
 }, async () => {
   const off = await unlistMe.handler();
-  assert.match(off.display, /Still listed/);
-  assert.ok(!/off the people list/.test(off.display), 'no unconfirmed removal claim');
+  assert.match(off.display, /Still listed/, 'a definite failure may say the state is unchanged');
+  assert.ok(!/off the people list/.test(off.display), 'no removal claim');
 }));
 
-test('a server echo of the WRONG state is a failure, not a success', async () => {
-  const realRequest = store.getPeople; // untouched; exercise the real setListed against a stubbed transport
-  const api = require('../store/api.js');
-  const origFetchers = { ...api };
-  // drive the real helper through a stubbed request by module surgery
-  const src = fs.readFileSync(path.join(__dirname, '..', 'store', 'api.js'), 'utf8');
-  assert.match(src, /if \(echoed !== want\)/, 'setListed compares the echo to the request');
-  assert.match(src, /typeof echoed !== 'boolean'/, 'a missing echo is unconfirmed');
-  void realRequest; void origFetchers;
+test('the REAL response interpreters decide these outcomes (not a stub)', () => {
+  const { interpretListedResponse, interpretDirectoryResponse } = require('../store/api.js');
+  // a write the server does not echo
+  assert.equal(interpretListedResponse({ success: true, user: {} }, true).error, 'unconfirmed');
+  assert.equal(interpretListedResponse({ success: true }, true).error, 'unconfirmed');
+  // a write the server echoes as the OTHER value
+  assert.equal(interpretListedResponse({ success: true, user: { listed: false } }, true).error, 'unconfirmed');
+  assert.equal(interpretListedResponse({ success: true, user: { listed: true } }, false).error, 'unconfirmed');
+  // the honest success
+  assert.deepEqual(interpretListedResponse({ success: true, user: { listed: true } }, true), { ok: true, listed: true });
+  // explicit refusals keep their code
+  assert.equal(interpretListedResponse({ success: false, error: 'identity_not_attested' }, true).error, 'identity_not_attested');
+  // directory: malformed is a FAILURE, empty array is a legitimate empty list
+  assert.equal(interpretDirectoryResponse({ success: true }).error, 'malformed_response');
+  assert.equal(interpretDirectoryResponse({ success: true, listings: 'nope' }).error, 'malformed_response');
+  assert.deepEqual(interpretDirectoryResponse({ success: true, listings: [], count: 0 }).listings, []);
 });
+
+test('an unconfirmed write claims NEITHER success nor "nothing changed"', withStore({
+  setListed: async () => ({ ok: false, error: 'unconfirmed', message: 'the server did not say whether the change took' }),
+}, async () => {
+  const on = await listMe.handler({ building: 'x' });
+  assert.match(on.display, /can't tell whether you were listed/);
+  assert.ok(!/nothing changed/.test(on.display), 'never asserts the write did not happen');
+  assert.ok(!/You're on the people list/.test(on.display), 'never asserts it did');
+  const off = await unlistMe.handler();
+  assert.match(off.display, /can't tell whether you were taken off/);
+  assert.ok(!/nothing changed/.test(off.display));
+  assert.ok(!/off the people list/.test(off.display));
+}));
+
+test('paired Markdown emphasis cannot style foreign text; a lone underscore survives', withStore({
+  getPeople: async () => ({ ok: true, count: 1, listings: [{ handle: 'vibe_tester', kind: 'human', building: '__bold__ _it_ ~~gone~~' }] }),
+}, async () => {
+  const res = await people.handler();
+  assert.ok(!/__bold__|~~gone~~/.test(res.display), 'no bold/strike survives');
+  assert.ok(!/_it_/.test(res.display), 'no italic survives');
+  assert.ok(res.display.includes('@vibe_tester'), 'a legitimate single-underscore handle is untouched');
+  assert.ok(res.display.includes('bold') && res.display.includes('gone'), 'words preserved — defanged, not censored');
+}));
 
 test('a malformed directory response is a read FAILURE, never an empty list', withStore({
   getPeople: async () => ({ ok: false, error: 'malformed_response', message: 'the list came back without entries' }),

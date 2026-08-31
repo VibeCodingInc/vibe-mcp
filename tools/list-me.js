@@ -47,6 +47,15 @@ async function listHandler(args) {
           '_sign in with GitHub:_ `vibe start`',
       };
     }
+    if (result.error === 'unconfirmed') {
+      // The server did not tell us whether the change took. Saying "nothing
+      // changed" would be as false as claiming success (review P1).
+      return {
+        display:
+          `I can't tell whether you were listed — the server didn't confirm it${result.message ? ` (${inertMarkup(result.message, 80)})` : ''}.\n` +
+          '_read the list with_ `vibe people` _· take a listing back with_ `vibe unlist me`',
+      };
+    }
     return {
       display: `Not listed${result.message ? ` (${inertMarkup(result.message, 80)})` : ''} — nothing changed.`,
     };

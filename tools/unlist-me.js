@@ -24,6 +24,13 @@ async function handler() {
 
   const result = await store.setListed(false);
   if (!result.ok) {
+    if (result.error === 'unconfirmed') {
+      return {
+        display:
+          `I can't tell whether you were taken off — the server didn't confirm it${result.message ? ` (${inertMarkup(result.message, 80)})` : ''}.\n` +
+          '_read the list with_ `vibe people`',
+      };
+    }
     return {
       display: `Still listed${result.message ? ` (${inertMarkup(result.message, 80)})` : ''} — nothing changed.`,
     };

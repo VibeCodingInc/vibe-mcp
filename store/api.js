@@ -1320,6 +1320,34 @@ async function setNotificationPace(pace) {
  * flip your OWN listed flag, and read the people who chose to be findable.
  * Nothing here ranks, recommends, or lists anyone automatically.
  */
+/**
+ * The two decisions the people helpers make, as pure functions so the pins
+ * exercise the REAL logic rather than a stubbed result (review P2).
+ */
+function interpretListedResponse(result, want) {
+  if (!result || result.success === false) {
+    return { ok: false, error: result?.error || 'request_failed', message: result?.message };
+  }
+  const echoed = result?.user?.listed;
+  if (typeof echoed !== 'boolean') {
+    return { ok: false, error: 'unconfirmed', message: 'the server did not say whether the change took' };
+  }
+  if (echoed !== want) {
+    return { ok: false, error: 'unconfirmed', message: `the server reports listed=${echoed}` };
+  }
+  return { ok: true, listed: echoed };
+}
+
+function interpretDirectoryResponse(result) {
+  if (!result || result.success === false) {
+    return { ok: false, error: result?.error || 'request_failed', message: result?.message };
+  }
+  if (!Array.isArray(result.listings)) {
+    return { ok: false, error: 'malformed_response', message: 'the list came back without entries' };
+  }
+  return { ok: true, listings: result.listings, count: result.count, note: result.note };
+}
+
 async function setListed(listed, building) {
   const want = listed === true;
   const body = { listed: want };
@@ -1327,21 +1355,8 @@ async function setListed(listed, building) {
   // the platform's contained self-profile write owns both fields.
   if (typeof building === 'string' && building.trim()) body.building = building.trim();
   try {
-    const result = await request('POST', '/api/users', body, { auth: true });
-    if (!result || result.success === false) {
-      return { ok: false, error: result?.error || 'request_failed', message: result?.message };
-    }
     // The SERVER'S ECHO is the fact, not the absence of an error (review P1).
-    // A response that omits `listed`, or echoes the value we did not ask for,
-    // is an unconfirmed write — never rendered as success.
-    const echoed = result?.user?.listed;
-    if (typeof echoed !== 'boolean') {
-      return { ok: false, error: 'unconfirmed', message: 'the server did not say whether the change took' };
-    }
-    if (echoed !== want) {
-      return { ok: false, error: 'unconfirmed', message: `the server reports listed=${echoed}` };
-    }
-    return { ok: true, listed: echoed };
+    return interpretListedResponse(await request('POST', '/api/users', body, { auth: true }), want);
   } catch (e) {
     return { ok: false, error: 'transport_failed', message: e.message };
   }
@@ -1349,16 +1364,9 @@ async function setListed(listed, building) {
 
 async function getPeople() {
   try {
-    const result = await request('GET', '/api/directory');
-    if (!result || result.success === false) {
-      return { ok: false, error: result?.error || 'request_failed', message: result?.message };
-    }
     // A response without a listings ARRAY is malformed — reporting it as an
     // empty list would turn a read failure into "nobody is here" (review P2).
-    if (!Array.isArray(result.listings)) {
-      return { ok: false, error: 'malformed_response', message: 'the list came back without entries' };
-    }
-    return { ok: true, listings: result.listings, count: result.count, note: result.note };
+    return interpretDirectoryResponse(await request('GET', '/api/directory'));
   } catch (e) {
     return { ok: false, error: 'transport_failed', message: e.message };
   }
@@ -1369,6 +1377,8 @@ module.exports = {
   // People (opt-in discovery)
   setListed,
   getPeople,
+  interpretListedResponse,
+  interpretDirectoryResponse,
   // Session
   registerSession,
   setSessionId,

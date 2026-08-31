@@ -127,7 +127,13 @@ function inertMarkup(text, maxLen = 80) {
     .replaceAll('>', '\u203a')          // ›
     .replaceAll('*', '\u2217')          // ∗ — no bold/italic/bullet
     .replaceAll('|', '\u2502')          // │ — no table row
-    .replace(/^[\s\u2022•\-+#]+/, '');   // no forged list item or heading
+    .replace(/^[\s\u2022•\-+#]+/, '')    // no forged list item or heading
+    // Emphasis needs a PAIR to render, so pairs are what get defanged — a
+    // lone underscore in a legitimate handle (vibe_tester) survives intact
+    // while _italic_, __bold__ and ~~strike~~ cannot style foreign text
+    // (review P1).
+    .replace(/_/g, (m, i, str) => ((str.match(/_/g) || []).length >= 2 ? '\u2017' : m))
+    .replace(/~/g, (m, i, str) => ((str.match(/~/g) || []).length >= 2 ? '\u223c' : m));
 }
 
 module.exports = { renderIncoming, neutralize, scrub, inertField, inertMarkup, MSG_OPEN, MSG_CLOSE, MAX_BODY };
