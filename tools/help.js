@@ -45,7 +45,7 @@ The kernel: presence + messaging across terminal coding sessions
 
 ### Messaging
 - \`vibe dm @handle "message"\` — Send a direct message. Lands now if they're in a session, waits for their next turn if not
-- \`vibe reply "message"\` — Reply to your most recent unread (or a specific person)
+- \`vibe reply\` with reply_to: "#id" — Answer one specific message (ids show in \`vibe inbox\`)
 - \`vibe inbox\` — See unread messages and recent threads
 
 ### Setup

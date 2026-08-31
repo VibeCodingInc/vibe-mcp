@@ -24,7 +24,7 @@ const definition = {
       },
       to: {
         type: 'string',
-        description: 'Optional: reply to a specific person (e.g., @alex). If not provided, replies to most recent unread.'
+        description: 'Optional: continue a named thread unlinked (e.g., @alex). With neither `to` nor `reply_to`, nothing is sent — the visible #ids are listed instead.'
       },
       reply_to: {
         type: 'string',

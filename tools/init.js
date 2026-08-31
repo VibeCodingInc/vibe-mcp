@@ -370,7 +370,10 @@ async function createAuthFlow({ requestedHandle, one_liner }) {
     pendingAuth = null;
   }
   const oauth = await beginOAuth({ requestedHandle, actorAware: true });
-  const flow = { oauth, loginUrl: oauth.loginUrl, startedAt: Date.now(), browserOpened: false, expired: false, reused: false, replacedExpired };
+  // 'unknown' until the launcher actually answers: a staggered caller that
+  // finds the flow mid-launch must not report `false` for a browser that is
+  // still opening (review P2). The field is updated in place when known.
+  const flow = { oauth, loginUrl: oauth.loginUrl, startedAt: Date.now(), browserOpened: 'unknown', expired: false, reused: false, replacedExpired };
   pendingAuth = flow;
   // Background completion: nobody awaits this. Success persists the credential;
   // timeout marks the flow expired so the next start issues a fresh link.
@@ -378,7 +381,16 @@ async function createAuthFlow({ requestedHandle, one_liner }) {
     (result) => completeSignIn(result, one_liner).catch((e) => console.error('[vibe_init] sign-in completion failed:', e.message)).finally(() => { if (pendingAuth === flow) pendingAuth = null; }),
     (err) => { flow.expired = true; if (err?.message !== 'AUTH_TIMEOUT') console.error('[vibe_init] sign-in flow ended:', err?.message || err); }
   );
-  flow.browserOpened = await openBrowser(oauth.loginUrl);
+  // Kick the launcher off and report only what is known within a short
+  // budget — a slow launcher yields 'unknown', never a wait and never a lie.
+  flow.browserPromise = openBrowser(oauth.loginUrl).then((result) => {
+    flow.browserOpened = result;
+    return result;
+  });
+  await Promise.race([
+    flow.browserPromise,
+    new Promise((resolve) => setTimeout(resolve, 750)),
+  ]);
   return flow;
 }
 

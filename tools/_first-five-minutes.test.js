@@ -67,6 +67,49 @@ test('repeated start while waiting reuses the SAME flow and says it is still wai
 });
 
 // ── review-round pins (2e52785 → repaired) ───────────────────────────────
+test('P2: a staggered caller reports a browser state it actually knows', async () => {
+  const restore = quietStore();
+  try {
+    const first = init.handler({});
+    await new Promise((r) => setTimeout(r, 100)); // arrive mid-launch
+    const staggered = await init.handler({});
+    const a = await first;
+    assert.equal(a.data.login_url, staggered.data.login_url, 'same flow');
+    // On this test path SSH_CONNECTION is set, so the launcher resolves false
+    // immediately and both callers may legitimately say false — what must
+    // NEVER happen is a caller claiming false while the launcher is pending.
+    for (const r of [a, staggered]) {
+      assert.ok([true, false, 'unknown'].includes(r.data.browser_opened), `legal browser state: ${r.data.browser_opened}`);
+    }
+    assert.ok(!staggered.display.includes('A browser window is opening') || staggered.data.browser_opened === true,
+      'only claims a window is opening when it knows one is');
+  } finally { restore(); }
+});
+
+test('P2: a slow launcher yields "unknown", never a wait and never a false claim', async () => {
+  const restore = quietStore();
+  const saved = process.env.SSH_CONNECTION;
+  delete process.env.SSH_CONNECTION; // let it try to launch
+  const cp = require('node:child_process');
+  const origExec = cp.exec;
+  cp.exec = (_cmd, cb) => { setTimeout(() => cb(null, '', ''), 30_000); return { unref() {} }; }; // hangs
+  try {
+    delete require.cache[require.resolve('./init')];
+    const slowInit = require('./init');
+    const t0 = Date.now();
+    const res = await slowInit.handler({});
+    const ms = Date.now() - t0;
+    assert.ok(ms < 3000, `returned in ${ms}ms despite a hanging launcher`);
+    assert.equal(res.data.browser_opened, 'unknown');
+    assert.match(res.display, /A browser may be opening/);
+    await slowInit._resetPendingAuth();
+  } finally {
+    cp.exec = origExec;
+    if (saved !== undefined) process.env.SSH_CONNECTION = saved;
+    delete require.cache[require.resolve('./init')];
+  }
+});
+
 test('P1: concurrent signed-out starts share ONE flow (no second listener)', async () => {
   const restore = quietStore();
   try {
@@ -99,9 +142,10 @@ test('P2: replacing an expired flow cancels the old listener', async () => {
   try {
     const a = await init.handler({});
     const oldRedirect = new URL(new URL(a.data.login_url).searchParams.get('redirect'));
-    // force expiry the way a timeout would
-    const mod = require('./init');
-    mod._forceExpireForTest?.();
+    // force expiry the way a timeout would — on THIS module instance (the
+    // hanging-launcher pin reloads ./init, so a fresh require() here would
+    // expire an empty module and silently pass nothing)
+    init._forceExpireForTest();
     const b = await init.handler({});
     assert.ok(b.display.includes('expired'), 'says the earlier link expired');
     // The replacement may rebind the SAME default port, so "gone" is proven by
@@ -119,9 +163,14 @@ test('P2: the tool-list notification uses the MCP method name', () => {
 });
 
 test('P2: reply description and footer no longer advertise guessing', () => {
+  // The WHOLE file — the earlier pin stopped before inputSchema and missed
+  // the `to` description still promising the guess (review P2).
   const src = fs.readFileSync(path.join(__dirname, 'reply.js'), 'utf8');
-  assert.ok(!src.split('inputSchema')[0].includes('most recent unread'), 'description does not promise newest-unread guessing');
+  assert.ok(!/most recent unread/i.test(src), 'nothing in reply.js promises newest-unread guessing');
   assert.ok(!src.includes('vibe reply "message"'), 'footer does not recommend a target-less reply');
+  // …and the copy a person actually reads
+  const help = fs.readFileSync(path.join(__dirname, 'help.js'), 'utf8');
+  assert.ok(!/reply.*most recent unread/i.test(help), 'help does not promise newest-unread guessing');
 });
 
 // ── sign-in completion (signs the sandbox in — keep LAST among init pins) ──
