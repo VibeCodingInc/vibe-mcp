@@ -53,7 +53,7 @@ test('vibe_people renders the list AS SERVED — no ranking, no recommending, no
   }),
 }, async () => {
   const res = await people.handler();
-  const order = ['ada', 'zoe', 'botly'].map((h) => res.display.indexOf(`@${h}`));
+  const order = ['ada', 'zoe', 'botly'].map((h) => res.display.indexOf(`@${h}\``));
   assert.deepEqual(order, [...order].sort((a, b) => a - b), 'served order preserved');
   assert.ok(!/suggest|recommend|for you|top |best |match/i.test(res.display), 'no ranking or recommendation language');
   // exactly one next action, and it names no particular person
@@ -248,16 +248,31 @@ test('an unconfirmed write claims NEITHER success nor "nothing changed"', withSt
   assert.match(off.display, /can't tell whether you were taken off/);
   assert.ok(!/nothing changed/.test(off.display));
   assert.ok(!/off the people list/.test(off.display));
+  assert.match(off.display, /vibe list me/, 'the unknown-outcome branch names the reversal too');
 }));
 
-test('paired Markdown emphasis cannot style foreign text; a lone underscore survives', withStore({
-  getPeople: async () => ({ ok: true, count: 1, listings: [{ handle: 'vibe_tester', kind: 'human', building: '__bold__ _it_ ~~gone~~' }] }),
+test('foreign prose cannot emphasize ANYTHING — including by pairing with the surface\'s own markdown', withStore({
+  getPeople: async () => ({
+    ok: true, count: 2,
+    listings: [
+      // a LONE underscore: the review's reproduction — it must not close or
+      // open emphasis against the tool's own authored copy or the next row
+      { handle: 'vibe_tester', kind: 'human', building: '_attacker' },
+      { handle: 'ada', kind: 'human', building: '__bold__ _it_ ~~gone~~ trailing_' },
+    ],
+  }),
 }, async () => {
   const res = await people.handler();
-  assert.ok(!/__bold__|~~gone~~/.test(res.display), 'no bold/strike survives');
-  assert.ok(!/_it_/.test(res.display), 'no italic survives');
-  assert.ok(res.display.includes('@vibe_tester'), 'a legitimate single-underscore handle is untouched');
-  assert.ok(res.display.includes('bold') && res.display.includes('gone'), 'words preserved — defanged, not censored');
+  const rows = res.display.split('\n').filter((l) => l.startsWith('• '));
+  // no underscore or tilde survives anywhere in a rendered ROW
+  for (const row of rows) {
+    const prose = row.split(' — ')[1] || '';
+    assert.ok(!/[_~]/.test(prose), `no emphasis character survives in foreign prose: ${prose}`);
+  }
+  // identity is rendered EXACTLY, inside a code span where pairing is impossible
+  assert.ok(res.display.includes('`@vibe_tester`'), 'the handle is exact, fenced, unmangled');
+  assert.ok(res.display.includes('attacker') && res.display.includes('bold') && res.display.includes('gone'),
+    'words preserved — defanged, not censored');
 }));
 
 test('a malformed directory response is a read FAILURE, never an empty list', withStore({
@@ -278,7 +293,7 @@ test('HTML and Markdown in foreign text cannot forge a row, hide, or style', wit
   const res = await people.handler();
   assert.ok(!/<br>|<details>|<\/details>/.test(res.display), 'no HTML element survives');
   assert.ok(!/\*\*official\*\*/.test(res.display), 'no Markdown emphasis survives');
-  assert.equal((res.display.match(/^• @/gm) || []).length, 1, 'exactly one row rendered');
+  assert.equal((res.display.match(/^• `@/gm) || []).length, 1, 'exactly one row rendered');
   assert.ok(res.display.includes('forged'), 'the words are still shown — inert, not censored');
 }));
 
@@ -288,6 +303,7 @@ test('an equivalent served handle is recognized by the canonical contract', with
 }, async () => {
   const res = await listMe.handler({ building: 'a compiler' });
   assert.match(res.display, /You're on the people list as @me/, '@ME is the same person as me');
+  void 0;
 }));
 
 test('every list-me branch names the reversal', withStore({

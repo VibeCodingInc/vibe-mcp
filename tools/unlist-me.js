@@ -28,7 +28,7 @@ async function handler() {
       return {
         display:
           `I can't tell whether you were taken off — the server didn't confirm it${result.message ? ` (${inertMarkup(result.message, 80)})` : ''}.\n` +
-          '_read the list with_ `vibe people`',
+          '_read the list with_ `vibe people` _· put yourself back on with_ `vibe list me "what you\'re building"`',
       };
     }
     return {

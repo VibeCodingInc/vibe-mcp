@@ -13,7 +13,7 @@
 
 const store = require('../store');
 const { requireInit } = require('./_shared');
-const { inertField, inertMarkup } = require('../incoming');
+const { inertField, inertMarkup, inertIdentity } = require('../incoming');
 
 const definition = {
   name: 'vibe_people',
@@ -48,10 +48,11 @@ async function handler() {
   // inertMarkup defangs HTML and Markdown structure too, so nothing can forge
   // a row, hide itself, or style itself into looking official (review P1).
   const lines = listings.map((p) => {
-    const handle = inertMarkup(String(p.handle || ''), 40);
+    // identity rendered exactly (code span); their prose rendered inert
+    const handle = inertIdentity(`@${String(p.handle || '').replace(/^@/, '')}`, 41);
     const kind = p.kind === 'agent' ? ' 🤖' : '';
     const building = p.building ? ` — ${inertMarkup(String(p.building), 70)}` : '';
-    return `• @${handle}${kind}${building}`;
+    return `• ${handle}${kind}${building}`;
   });
 
   return {
