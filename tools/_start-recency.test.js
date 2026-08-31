@@ -81,7 +81,7 @@ test('green count and green list are gated on isHereNow, not the merged union', 
     const res = await t.run({});
     const text = res.display;
 
-    assert.match(text, /\b1 here\b/, 'the count includes recent heartbeats only');
+    assert.match(text, /\b1 other here\b/, 'the count includes recent heartbeats only, and excludes you');
     const greenSection = text.split('○')[0];
     assert.ok(!text.includes('@stale'), 'a 25m-old heartbeat is not counted or named');
     assert.ok(!text.includes('@resting'), 'an away row is not counted or named');
@@ -99,23 +99,28 @@ test('a room of only stale rows renders zero green, not a live room', async () =
   try {
     const res = await t.run({});
     const text = res.display;
-    assert.match(text, /\b0 here\b/, 'no recent heartbeat, no one counted as here');
+    assert.match(text, /\b0 others here\b/, 'no recent heartbeat, no one counted as here');
     assert.ok(!/@\w+ \(/.test(text.split('vibe inbox')[0]), 'no roster rendered');
   } finally {
     t.restore();
   }
 });
 
-test('enriched onlineUsers carries the hereNow verdict per row', async () => {
+// The enriched roster was REMOVED from vibe_start (2026-08-31): shipping a
+// list of unrequested people in the payload defeats the screen's own rule,
+// and vibe_who is the tool that answers "who is around". What survives of
+// this pin is the invariant that mattered — the isHereNow verdict decides the
+// count, and no unrequested person is named anywhere in the result.
+test('no roster ships from the first screen; the recency gate decides the count', async () => {
   const t = toolWith('start', { ...QUIET, getActiveUsers: async () => ROOM });
   try {
     const res = await t.run({});
-    const byHandle = Object.fromEntries(
-      (res.onlineUsers ?? []).map((u) => [u.handle, u.hereNow])
-    );
-    assert.equal(byHandle.fresh, true);
-    assert.equal(byHandle.stale, false);
-    assert.equal(byHandle.resting, false);
+    assert.equal(res.onlineUsers, undefined, 'no roster in the payload');
+    const all = JSON.stringify(res);
+    for (const h of ['fresh', 'stale', 'resting']) {
+      assert.ok(!all.includes(`"${h}"`), `@${h} is not named in the result`);
+    }
+    assert.equal(res.here, 1, 'exactly the one recent heartbeat is counted');
   } finally {
     t.restore();
   }

@@ -17,7 +17,6 @@ const { inertField } = require('../incoming');
 const store = require('../store');
 const memory = require('../memory');
 const patterns = require('../intelligence/patterns');
-const { actions, formatActions } = require('./_actions');
 const { isHereNow } = require('./_shared');
 const init = require('./init');
 const { gatherWithTimeout } = require('./_work-context');
@@ -185,16 +184,12 @@ async function handler(args) {
 
   // Step 2: User is authenticated - show dashboard
   const myHandle = config.getHandle();
-  let threads = [];
   let updateNotice = '';
 
   // If we just updated, show a notice
   if (updateResult?.updated) {
     updateNotice = `\n\n⬆️ **Updated v${updateResult.from} → v${updateResult.to}** — restart your coding agent to apply`;
   }
-
-  // Fetch version info early (non-blocking, cached)
-  const versionInfo = await getVersionInfo().catch(() => null);
 
   // ═══════════════════════════════════════════════════════════════════════
   // AMBIENT CONTEXT: Gather work context and auto-set presence
@@ -225,11 +220,6 @@ async function handler(args) {
   // Log session start for patterns
   patterns.logSessionStart(myHandle);
 
-  // Get threads for memory context
-  try {
-    threads = memory.listThreads();
-  } catch (e) {}
-
   // Step 2: Get who's around
   const users = await store.getActiveUsers();
   const others = users.filter(u => u.handle !== myHandle);
@@ -237,36 +227,26 @@ async function handler(args) {
   // dm use. getActiveUsers returns active+away merged; rendering that union
   // under 🟢 told users someone was live who last breathed 25 minutes ago.
   const hereNow = others.filter(isHereNow);
-  const away = others.filter(u => !isHereNow(u));
 
-  // Step 3: Check inbox
+  // Step 3: Check inbox. A FAILED read is not an empty inbox (review P1):
+  // getInbox swallows transport errors into [], so without this flag a
+  // network failure renders as "0 unread" and as "no messages yet" — two
+  // claims nothing supports.
   let unreadCount = 0;
   let inboxThreads = [];
+  let inboxRead = false;
   try {
-    // Fetch full inbox (not just count) so we can include summaries
     inboxThreads = await store.getInbox(myHandle);
+    inboxRead = Array.isArray(inboxThreads);
+    if (!inboxRead) inboxThreads = [];
     unreadCount = inboxThreads.reduce((sum, t) => sum + (t.unread || 0), 0);
-  } catch (e) {}
+  } catch (e) {
+    inboxThreads = [];
+  }
 
-  // Step 3b: Check for guest session messages + pair status (multiplayer)
-  let guestMessages = [];
-  let pairStatus = null;
-  try {
-    const apiUrl = config.getApiUrl();
-    const headers = apiHeaders();
-    const [guestResp, pairResp] = await Promise.all([
-      fetch(`${apiUrl}/api/session/guest?handle=${encodeURIComponent(myHandle)}`, { headers }),
-      fetch(`${apiUrl}/api/pair?handle=${encodeURIComponent(myHandle)}`, { headers }),
-    ]);
-    const guestData = await guestResp.json();
-    if (guestData.success && guestData.messages && guestData.messages.length > 0) {
-      guestMessages = guestData.messages;
-    }
-    const pairData = await pairResp.json();
-    if (pairData.success && pairData.paired) {
-      pairStatus = pairData;
-    }
-  } catch (e) {}
+  // Step 3b removed with the first-screen rewrite: the guest/pair fetches
+  // cost two HTTP round trips on every start and fed blocks this screen no
+  // longer renders. vibe_guest still owns that surface.
 
   // Step 4 used to fetch /api/suggestions and render "Suggested connections" — three
   // strangers proposed on every session start, in the DEFAULT surface rather than behind
@@ -288,11 +268,20 @@ async function handler(args) {
   // and what can I say next.
   const hereCount = hereNow.length;
   const unreadSenders = inboxThreads.filter((t) => t.unread > 0);
+  // Server-supplied strings on a single line: a long handle or id would wrap
+  // and blow the line budget, and a control character would add literal lines
+  // (review P2).
+  const cell = (v, max) => inertField(String(v || ''), max);
 
-  let display = `/vibe @${myHandle}`;
-  const counts = [];
-  if (unreadCount > 0) counts.push(`${unreadCount} unread`);
-  counts.push(`${hereCount} here`);
+  let display = `/vibe @${cell(myHandle, 39)}`;
+  // ONE authoritative live-presence count: store.getActiveUsers(), filtered by
+  // the same isHereNow gate who and dm use, EXCLUDING the signed-in person.
+  // "N here" could be read as the room including you; "N others here" states
+  // exactly what was counted.
+  const counts = [
+    inboxRead ? `${unreadCount} unread` : "couldn't read your inbox",
+    `${hereCount} other${hereCount === 1 ? '' : 's'} here`,
+  ];
   display += `\n${counts.join(' · ')}`;
 
   if (unreadSenders.length > 0) {
@@ -301,15 +290,15 @@ async function handler(args) {
     // until the person opens it.
     display += '\n';
     unreadSenders.slice(0, 5).forEach((t) => {
-      const id = t.lastMessageId ? ` · #${t.lastMessageId}` : '';
-      display += `\n@${t.handle} (${t.unread})${id}`;
+      const id = t.lastMessageId ? ` · #${cell(t.lastMessageId, 40)}` : '';
+      display += `\n@${cell(t.handle, 39)} (${t.unread})${id}`;
     });
     if (unreadSenders.length > 5) {
       display += `\n_+${unreadSenders.length - 5} more_`;
     }
-  } else if (inboxThreads.length === 0) {
-    // A genuinely new arrival: land them on whoever brought them here, if
-    // anyone has written. No randomly chosen stranger, ever.
+  } else if (inboxRead && inboxThreads.length === 0) {
+    // Only a PROVEN-empty inbox may be called a fresh arrival. Land them on
+    // whoever brought them here; no randomly chosen stranger, ever.
     display += '\n\n_no messages yet — whoever invited you is the place to start_';
   }
 
@@ -317,94 +306,22 @@ async function handler(args) {
 
   display += `\n\nvibe inbox · vibe people · vibe dm @handle "…"`;
 
-  // Build response with hints for structured dashboard flow
+  // ── THE RESPONSE ────────────────────────────────────────────────────
+  // The payload obeys the SAME contracts as the screen (review P1): a host
+  // and a model read this, so a body withheld from the display but shipped
+  // here is not withheld at all, and a handle chosen here is still a chosen
+  // handle. What ships is what the screen states — counts, and the threads
+  // waiting with the id needed to answer one exactly. Whoever is online is
+  // vibe_who's answer; whoever to talk to is the person's decision.
   const response = { display };
 
-  // === ENRICHED DATA ===
-  // Include full online users list so Claude doesn't need to call vibe_who
-  response.onlineUsers = others.map(u => ({
-    handle: u.handle,
-    hereNow: isHereNow(u),
-    building: (u.one_liner || u.note) ? inertField(u.one_liner || u.note) : null,
-    status: u.status ? inertField(u.status, 30) : null,
-    lastActive: u.lastSeen ? new Date(u.lastSeen).toISOString() : null
-  }));
-
-  // Include unread thread summaries so Claude doesn't need to call vibe_inbox
-  response.unreadThreads = unreadSenders.map(t => ({
+  response.unread = inboxRead ? unreadCount : null;   // null = not read, never 0
+  response.here = hereCount;
+  response.waiting = unreadSenders.slice(0, 5).map((t) => ({
     handle: t.handle,
     unread: t.unread,
-    preview: t.lastMessage ? t.lastMessage.slice(0, 80) : null,
-    isAgent: t.isAgent || false
+    lastMessageId: t.lastMessageId || null,
   }));
-
-  // Include guest session messages (multiplayer)
-  if (guestMessages.length > 0) {
-    response.guestMessages = guestMessages.map(m => ({
-      from: m.from,
-      message: m.message,
-      timestamp: m.timestamp,
-      id: m.id
-    }));
-  }
-
-  // Include pair status if paired
-  if (pairStatus) {
-    response.pairStatus = {
-      paired: true,
-      partner: pairStatus.partner,
-      mode: pairStatus.mode,
-      startedAt: pairStatus.startedAt
-    };
-  }
-
-
-  // Determine session state and suggest appropriate flow
-  let suggestion = null;
-
-  if (unreadCount >= 5) {
-    // Many unread - suggest triage
-    response.hint = 'structured_triage_recommended';
-    response.unread_count = unreadCount;
-  } else if (others.length === 0 && unreadCount === 0) {
-    // Empty room - suggest discovery or invite
-    response.hint = 'suggest_discovery';
-    response.reason = 'empty_room';
-  } else if (others.length > 0) {
-    // People around - check for interesting ones
-    const interesting = hereNow.find(u => {
-      const age = Date.now() - u.lastSeen;
-      return age < 5 * 60 * 1000; // Active in last 5 min
-    });
-    if (interesting) {
-      suggestion = {
-        handle: interesting.handle,
-        reason: 'active_now',
-        context: interesting.note || interesting.one_liner || 'Building something'
-      };
-      response.hint = 'surprise_suggestion';
-      response.suggestion = suggestion;
-    }
-  }
-
-  // Add guided mode actions for AskUserQuestion rendering
-  const onlineHandles = others.map(u => u.handle);
-  let actionList;
-
-  if (others.length === 0 && unreadCount === 0) {
-    // Empty room
-    actionList = actions.emptyRoom({ workContext });
-  } else {
-    // Normal dashboard
-    actionList = actions.dashboard({
-      unreadCount,
-      onlineUsers: onlineHandles,
-      suggestion,
-      workContext
-    });
-  }
-
-  response.actions = formatActions(actionList);
 
   // ═══════════════════════════════════════════════════════════════════════
   // WORK CONTEXT: Include in response for Claude to use
