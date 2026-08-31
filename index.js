@@ -586,16 +586,21 @@ class VibeMCPServer {
               global.vibeNotifier?.emitImmediate();
             }
 
-            return {
-              jsonrpc: '2.0',
-              id,
-              result: {
-                content: [{
-                  type: 'text',
-                  text: `> _You tried to **${actionName}** — signing you in first._\n\n${initDisplay}\n\n---\n💡 **You're in!** Try your \`${actionName}\` command again.`
-                }]
-              }
+            // Sign-in is non-blocking now: init returns auth_required and the
+            // person finishes in a browser. Only claim "You're in!" when the
+            // credential actually exists (review P1) — otherwise relay init's
+            // honest state and its structured mirror.
+            const signedIn = isAuthed();
+            const gateResult = {
+              content: [{
+                type: 'text',
+                text: signedIn
+                  ? `> _You tried to **${actionName}** — signing you in first._\n\n${initDisplay}\n\n---\n💡 **You're in!** Try your \`${actionName}\` command again.`
+                  : `> _You tried to **${actionName}** — sign in first._\n\n${initDisplay}\n\n---\n_Then say \`${actionName}\` again._`
+              }]
             };
+            if (initResult.structured) gateResult.structuredContent = initResult.structured;
+            return { jsonrpc: '2.0', id, result: gateResult };
           } catch (e) {
             return {
               jsonrpc: '2.0',

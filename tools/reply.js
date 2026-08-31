@@ -1,5 +1,5 @@
 /**
- * vibe reply — Quick reply to the most recent unread message
+ * vibe reply — reply to a specific message by its visible #id (linked), or continue a named thread unlinked; never guesses the newest.
  *
  * Streamlined flow: one command instead of inbox → open → dm
  */
@@ -14,7 +14,7 @@ const { actions, formatActions } = require('./_actions');
 
 const definition = {
   name: 'vibe_reply',
-  description: 'Quick reply to your most recent unread message, or to a specific person. Streamlined: one command instead of inbox → open → dm.',
+  description: 'Reply to a specific message by its visible #id (reply_to) — the reply is linked to exactly that message. Or continue a named thread unlinked with `to`. Never guesses: with neither, it lists the visible ids instead of sending.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -24,7 +24,7 @@ const definition = {
       },
       to: {
         type: 'string',
-        description: 'Optional: reply to a specific person (e.g., @alex). If not provided, replies to most recent unread.'
+        description: 'Optional: continue a named thread unlinked (e.g., @alex). With neither `to` nor `reply_to`, nothing is sent — the visible #ids are listed instead.'
       },
       reply_to: {
         type: 'string',
@@ -49,38 +49,48 @@ async function handler(args) {
   let targetHandle;
   let threadContext = null;
 
-  // If specific recipient provided, use that
+  // THE TARGET IS NAMED, NEVER GUESSED (first-five-minutes repair). A reply
+  // consumes the visible #id exactly; `to` alone continues a named thread
+  // unlinked; nothing at all is refused WITH the candidates — the old
+  // "first unread thread wins" default was the guess this verb's own schema
+  // forbids.
   if (to) {
     targetHandle = normalizeHandle(to);
+  } else if (reply_to) {
+    // Resolve the thread that holds this id from the inbox (newest message
+    // per thread is served with its id); fall back to a bounded scan of the
+    // most recent threads for an older id.
+    const threads = (await store.getInbox(myHandle)) || [];
+    let owner = threads.find((t) => t.lastMessageId === reply_to);
+    if (!owner) {
+      for (const t of threads.slice(0, 5)) {
+        try {
+          const full = await store.getThread(myHandle, t.handle);
+          if ((full || []).some((m) => m.id === reply_to)) { owner = t; break; }
+        } catch {}
+      }
+    }
+    if (!owner) {
+      return {
+        display: `Not sent — no message #${reply_to} in your recent threads, and I won't guess. Say \`vibe inbox\` to see the ids.`,
+      };
+    }
+    targetHandle = owner.handle;
   } else {
-    // Find most recent unread thread
-    const threads = await store.getInbox(myHandle);
-
-    if (!threads || threads.length === 0) {
+    const threads = (await store.getInbox(myHandle)) || [];
+    if (threads.length === 0) {
       return {
         display: '📭 No messages to reply to.\n\nUse `vibe dm @someone "message"` to start a conversation.',
         actions: formatActions(actions.recommendedConnections([]))
       };
     }
-
-    // Find first thread with unread messages
-    const unreadThread = threads.find(t => t.unread > 0);
-
-    if (!unreadThread) {
-      // No unread, show most recent thread
-      // "--to" was CLI-flag syntax for a flag that doesn't exist — the actual
-      // way to continue a read thread is a plain dm.
-      const mostRecent = threads[0];
-      return {
-        display: `📭 nothing unread. Most recent thread: @${mostRecent.handle}\n\n_continue it with_ \`vibe dm @${mostRecent.handle} "your message"\``,
-        actions: formatActions(actions.afterInboxCompact([{ handle: mostRecent.handle, unread: 0 }]))
-      };
-    }
-
-    targetHandle = unreadThread.handle;
-    threadContext = {
-      unreadCount: unreadThread.unread,
-      preview: unreadThread.lastMessage ? truncate(unreadThread.lastMessage, 50) : null
+    const candidates = threads
+      .filter((t) => t.lastMessageId)
+      .slice(0, 6)
+      .map((t) => `  #${t.lastMessageId} — @${t.handle}${t.unread ? ` (${t.unread} unread)` : ''}: "${truncate(t.lastMessage || '', 48)}"`)
+      .join('\n');
+    return {
+      display: `Not sent — which message are you answering? I won't pick the newest for you.\n${candidates || '  (no ids in the loaded inbox)'}\n\n_reply exactly with_ reply_to: "<id>" _— or continue a thread unlinked with_ to: "@handle"`,
     };
   }
 
@@ -222,7 +232,10 @@ async function handler(args) {
     const nextHandle = stillUnread[0].handle;
     const totalUnread = stillUnread.reduce((sum, t) => sum + t.unread, 0);
     display += `\n\n📬 ${totalUnread} more unread from ${stillUnread.map(t => `@${t.handle}`).slice(0, 3).join(', ')}`;
-    display += `\n_Say \`vibe reply "message"\` to reply to @${nextHandle}_`;
+    const nextId = stillUnread[0].lastMessageId;
+    display += nextId
+      ? `\n_Reply to @${nextHandle} exactly: \`vibe reply\` with reply_to: "${nextId}"_`
+      : `\n_Open @${nextHandle}'s thread with \`vibe inbox @${nextHandle}\` to reply to a specific message_`;
   }
 
   // Build response with actions

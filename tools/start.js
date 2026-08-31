@@ -190,17 +190,18 @@ const definition = {
 };
 
 async function handler(args) {
-  // Step 0: Auto-update check (runs git pull if behind)
-  const updateResult = await autoUpdate();
-
-  // Step 1: Check if properly authenticated with OAuth
-  // If not, redirect to init for GitHub auth flow (shows pre-auth banner + OAuth)
+  // Step 0: signed out? Go straight to the (non-blocking) sign-in. The
+  // auto-update git work below can take tens of seconds and must never sit
+  // between a stranger and their first actionable output (review P1).
   if (!config.hasOAuth()) {
     return init.handler({
       handle: args.handle,
       one_liner: args.building
     });
   }
+
+  // Step 1: Auto-update check (runs git pull if behind) — signed-in only
+  const updateResult = await autoUpdate();
 
   // Step 2: User is authenticated - show dashboard
   const myHandle = config.getHandle();

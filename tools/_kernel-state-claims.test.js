@@ -97,7 +97,10 @@ test('reply: a falsy store result is a failure, not "✓ Replied"', async () => 
     sendMessage: async () => null,
   });
   try {
-    const r = await h.run({ message: 'hello' });
+    // The first-five-minutes repair made a target-less reply REFUSE before
+    // any send (never guess the newest) — so this falsy-result pin names its
+    // thread explicitly to reach the store, which is the path under test.
+    const r = await h.run({ message: 'hello', to: 'rune' });
     assert.ok(!/Replied to/i.test(r.display), 'must not claim the reply succeeded');
     assert.ok(!/marked as read/i.test(r.display), 'must not claim the thread state changed');
     assert.match(r.display, /didn't send|not.*deliver/i);
