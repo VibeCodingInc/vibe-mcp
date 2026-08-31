@@ -12,7 +12,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const VERBS = ['vibe_capabilities', 'vibe_remember', 'vibe_reflect', 'vibe_call', 'vibe_dm', 'vibe_inbox', 'vibe_reply'];
+const VERBS = ['vibe_capabilities', 'vibe_remember', 'vibe_reflect', 'vibe_call', 'vibe_dm', 'vibe_inbox', 'vibe_reply', 'vibe_people', 'vibe_list_me', 'vibe_unlist_me'];
 const LEGAL = new Set(['granted', 'available', 'off', 'unavailable']);
 
 function rpc(child, msg) {

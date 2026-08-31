@@ -40,6 +40,8 @@ const EXPECTED_KERNEL = [
   // The four verbs of the communications runtime (canon PR #333 / epic #329):
   // the manifest plus remember/reflect/call; message is dm/inbox/reply above.
   'vibe_capabilities', 'vibe_call', 'vibe_reflect', 'vibe_remember',
+  // Opt-in people list (vibe-mcp#28): browse, list yourself, unlist yourself.
+  'vibe_people', 'vibe_list_me', 'vibe_unlist_me',
 ].sort();
 const EXPECTED_EXTRAS = [
   'vibe_corpse', 'vibe_email', 'vibe_fable', 'vibe_feed', 'vibe_game',

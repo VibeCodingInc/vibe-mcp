@@ -111,4 +111,43 @@ function inertField(text, maxLen = 80) {
   return flat.length > maxLen ? flat.slice(0, maxLen - 1) + '\u2026' : flat;
 }
 
-module.exports = { renderIncoming, neutralize, scrub, inertField, MSG_OPEN, MSG_CLOSE, MAX_BODY };
+/**
+ * inertField, plus the markup a rendered surface can act on.
+ *
+ * inertField defangs terminal/agent structure (control chars, bidi, backticks,
+ * brackets). It deliberately leaves HTML and Markdown alone, which is fine for
+ * a plain terminal line and NOT fine anywhere a client renders markup: `<br>`
+ * forges a new row, `<details>` hides text, `**x**` and a leading bullet fake
+ * structure (review P1 on the people list). This makes those inert while
+ * keeping every word visible — defanged, never censored.
+ */
+function inertMarkup(text, maxLen = 80) {
+  return inertField(text, maxLen)
+    .replaceAll('<', '\u2039')          // ‹ — no HTML element can form
+    .replaceAll('>', '\u203a')          // ›
+    .replaceAll('*', '\u2217')          // ∗ — no bold/italic/bullet
+    .replaceAll('|', '\u2502')          // │ — no table row
+    .replace(/^[\s\u2022•\-+#]+/, '')    // no forged list item or heading
+    // Emphasis pairs across the WHOLE rendered document, not within one field
+    // (review P1): a lone `_` here can close an emphasis the surface itself
+    // opened, or pair with another row. So every `_` and `~` in foreign PROSE
+    // is defanged unconditionally. Identity is handled separately — see
+    // inertIdentity, which preserves a handle exactly by other means.
+    .replace(/_/g, '\u2017')
+    .replace(/~/g, '\u223c');
+}
+
+/**
+ * A handle must render EXACTLY — mangling someone's identity to defang markup
+ * is its own dishonesty. So it is emitted inside an inline code span, where
+ * no emphasis, HTML or bullet can form, and where the fence itself cannot be
+ * broken (inertField has already neutralized backticks in foreign text).
+ */
+function inertIdentity(text, maxLen = 40) {
+  return '`' + inertField(text, maxLen)
+    .replaceAll('<', '\u2039')
+    .replaceAll('>', '\u203a')
+    .replace(/^[\s\u2022•\-+#]+/, '') + '`';
+}
+
+module.exports = { renderIncoming, neutralize, scrub, inertField, inertMarkup, inertIdentity, MSG_OPEN, MSG_CLOSE, MAX_BODY };
