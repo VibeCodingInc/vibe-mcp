@@ -1,13 +1,13 @@
 {
-  "version": "0.8.20",
+  "version": "0.8.21",
   "updated": "2026-08-31",
-  "changelog": "Signing in no longer makes you wait. Say vibe start and you get the login link immediately with one sentence telling you what to do \u2014 no hung command, no blank screen, and it works over SSH or anywhere a browser cannot open. Finish in the browser whenever you like; the next vibe start picks it up. And replies now name their target: every thread in your inbox shows the id of its newest message, and vibe reply answers that exact message instead of guessing the newest one.",
+  "changelog": "People. You can now put yourself on a list of people who chose to be findable \u2014 say vibe list me \"what you're building\" \u2014 and browse it with vibe people. It is opt-in, it is not the same as vibe who (who's present this moment), and you can take yourself off any time with vibe unlist me. Nothing lists you automatically, nothing ranks or recommends anyone, and nothing picks who you message: you choose someone because their work makes you curious.",
   "features": [
-    "vibe start signed out returns immediately with the login URL and one instruction \u2014 never blocks on the browser",
-    "Works headless: over SSH or with no browser, the link IS the next step (and it says so honestly)",
-    "Sign-in completes in the background; the next vibe start recognizes it and unlocks the full toolset",
-    "vibe inbox shows each thread's newest message id (#msg_\u2026) so a reply can name it exactly",
-    "vibe reply answers that exact message \u2014 with no target it lists the ids instead of guessing"
+    "vibe people \u2014 everyone who chose to be findable, online or not; flat list, no ranking, no suggestions",
+    "vibe list me \"building \u2026\" \u2014 put yourself on the list with what you're working on; says plainly that anyone signed in can then find and DM you",
+    "vibe unlist me \u2014 take yourself off; conversations untouched",
+    "Listing reads the list back before claiming it worked, and says which actually happened",
+    "Other people's words render inert: no HTML, no markdown styling, no forged rows \u2014 and no censoring either"
   ],
   "deprecated": [],
   "breaking": false,
