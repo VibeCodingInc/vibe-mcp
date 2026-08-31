@@ -1315,8 +1315,44 @@ async function setNotificationPace(pace) {
   }
 }
 
+/**
+ * The people list (opt-in discovery, platform#345). Two contained calls:
+ * flip your OWN listed flag, and read the people who chose to be findable.
+ * Nothing here ranks, recommends, or lists anyone automatically.
+ */
+async function setListed(listed, building) {
+  const body = { listed: listed === true };
+  // `building` rides along ONLY when the person supplied it with the action —
+  // the platform's contained self-profile write owns both fields.
+  if (typeof building === 'string' && building.trim()) body.building = building.trim();
+  try {
+    const result = await request('POST', '/api/users', body, { auth: true });
+    if (result && result.success === false) {
+      return { ok: false, error: result.error || 'request_failed', message: result.message };
+    }
+    return { ok: true, listed: result?.user?.listed };
+  } catch (e) {
+    return { ok: false, error: 'transport_failed', message: e.message };
+  }
+}
+
+async function getPeople() {
+  try {
+    const result = await request('GET', '/api/directory');
+    if (!result || result.success === false) {
+      return { ok: false, error: result?.error || 'request_failed', message: result?.message };
+    }
+    return { ok: true, listings: Array.isArray(result.listings) ? result.listings : [], count: result.count, note: result.note };
+  } catch (e) {
+    return { ok: false, error: 'transport_failed', message: e.message };
+  }
+}
+
 module.exports = {
   setNotificationPace,
+  // People (opt-in discovery)
+  setListed,
+  getPeople,
   // Session
   registerSession,
   setSessionId,

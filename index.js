@@ -52,7 +52,11 @@ const SERVER_CAPABILITIES = {
 // ambient footer performs platform requests, so remember/reflect/call and
 // the manifest never carry it.
 const SKIP_FOOTER_TOOLS = ['vibe_init', 'vibe_doctor', 'vibe_test', 'vibe_update',
-  'vibe_capabilities', 'vibe_remember', 'vibe_reflect', 'vibe_call'];
+  'vibe_capabilities', 'vibe_remember', 'vibe_reflect', 'vibe_call',
+  // The people actions each end in ONE obvious next action; the ambient
+  // footer would stack a second one AND name a specific recipient to reply
+  // to — the choosing is the human's, so the footer stays off here.
+  'vibe_people', 'vibe_list_me', 'vibe_unlist_me'];
 
 // Progressive disclosure: only these tools are visible before authentication
 // After auth, the full toolset is revealed via tools/list_changed notification
@@ -326,6 +330,14 @@ const kernelTools = {
   vibe_remember: require('./tools/remember'),
   vibe_reflect: require('./tools/reflect'),
   vibe_call: require('./tools/call'),
+
+  // ── People (opt-in discovery, platform#345 / vibe-mcp#28) ──────────────
+  // `vibe who` is who is present NOW; `vibe people` is who chose to be
+  // findable, online or not. Listing is always the person's own act — no
+  // path anywhere may set it for them.
+  vibe_people: require('./tools/people'),
+  vibe_list_me: require('./tools/list-me'),
+  vibe_unlist_me: require('./tools/unlist-me'),
 };
 
 // ─── Extras ──────────────────────────────────────────────────────────────
