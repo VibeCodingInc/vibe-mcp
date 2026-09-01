@@ -502,3 +502,153 @@ test('token: bad-token guidance matches the real handle-less init flow', async (
     assert.ok(!/@yourhandle/.test(r.display), 'init takes no handle — your GitHub username becomes it');
   } finally { h.restore(); }
 });
+
+test('init (#320): a sign-in that could not be saved never claims it was', async () => {
+  // config.save/saveSessionData can REFUSE. "The refreshed credential was
+  // saved" is a claim about disk and must be answered by disk (round-2 review).
+  const cfgPath = path.join(HOME, 'config.json');
+  const keep = fs.readFileSync(cfgPath, 'utf8');
+  const cfg = JSON.parse(keep);
+  cfg.authToken = `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+  const config = require('../config');
+  const realSave = config.save;
+  const realSaveToken = config.saveAuthToken;
+  const restoreOauth = stubOauth();
+  const h = toolWith('init', { ...QUIET_STORE, verifyAuthToken: async () => ({ definitive: true, valid: true }) });
+  const initPath = require.resolve('./init.js');
+  try {
+    config.save = () => false;            // the disk refuses
+    config.saveAuthToken = () => false;
+    const tool = require(initPath);
+    await tool._completeSignInForTest({ token: cfg.authToken, handle: 'ada' }, 'x');
+    config.save = realSave;
+    config.saveAuthToken = realSaveToken;
+    const r = await h.run({});
+    const display = r?.display || '';
+    assert.ok(!/refreshed credential was saved/.test(display),
+      'claimed a saved credential on a path where nothing was written');
+    assert.match(display, /could not be saved/, 'the failure must be named, not swallowed');
+  } finally {
+    config.save = realSave;
+    config.saveAuthToken = realSaveToken;
+    require(initPath)._resetMintStateForTest();
+    restoreOauth();
+    h.restore();
+    fs.writeFileSync(cfgPath, keep);
+    clearSessionToken();
+  }
+});
+
+test('init (#320): a mint record never outlives the credential it is about', async () => {
+  // Sign out, then load a legacy token under the SAME handle: the old record
+  // must not attach itself to a credential it was never part of.
+  const cfgPath = path.join(HOME, 'config.json');
+  const keep = fs.readFileSync(cfgPath, 'utf8');
+  const initPath = require.resolve('./init.js');
+  const restoreOauth = stubOauth();
+  const h = toolWith('init', { ...QUIET_STORE, verifyAuthToken: async () => ({ definitive: true, valid: true }) });
+  const authStore = require('../auth-store');
+  try {
+    const tool = require(initPath);
+    await tool._completeSignInForTest({ token: `h.${b64({ sub: 'ada' })}.sig`, handle: 'ada' }, 'x');
+    // …signed out, then a DIFFERENT legacy token, same handle.
+    const later = `h.${b64({ sub: 'ada', iat: 1, exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    cfg.username = 'ada';
+    cfg.authToken = later;
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+    clearSessionToken();
+    authStore.setToken(later);
+    authStore.setHandle('ada');
+    const r = await h.run({});
+    assert.ok(!/server-side minting issue/.test(r?.display || ''),
+      'a record about an old credential was applied to a new one');
+  } finally {
+    require(initPath)._resetMintStateForTest();
+    restoreOauth();
+    h.restore();
+    fs.writeFileSync(cfgPath, keep);
+    clearSessionToken();
+    const restored = JSON.parse(keep);
+    authStore.setToken(restored.authToken);
+    authStore.setHandle(restored.username);
+  }
+});
+
+test('principalFromToken: a malformed JWT proves nothing', () => {
+  const authStore = require('../auth-store');
+  const H = b64({ alg: 'ES256', typ: 'JWT' });
+  const P = b64({ principal_id: 'prin_ok' });
+  assert.equal(authStore.principalFromToken(`${H}.${P}.sig`), 'prin_ok');
+  for (const [name, tok] of [
+    ['bad signature', `${H}.${P}.!!!`],
+    ['impossible header', `A.${P}.sig`],
+    ['non-JSON header', `aGVsbG8.${P}.sig`],
+    ['missing signature', `${H}.${P}`],
+    ['empty signature', `${H}.${P}.`],
+    ['missing header', `.${P}.sig`],
+    ['extra segment', `${H}.${P}.sig.x`],
+    ['non-string', { toString() { return `${H}.${P}.sig`; } }],
+    ['numeric pid', `${H}.${b64({ principal_id: 1 })}.sig`],
+    ['null', null],
+  ]) {
+    assert.equal(authStore.principalFromToken(tok), null, `${name} reported a principal it did not prove`);
+  }
+});
+
+test('vibe token: unreachable is not invalid', async () => {
+  // The same defect as init's: {valid:false, definitive:false} is a timeout,
+  // and telling that person to start a fresh sign-in cannot help them.
+  const t = toolWith('token', {
+    ...QUIET_STORE,
+    verifyAuthToken: async () => ({ valid: false, definitive: false, error: 'connect ETIMEDOUT' }),
+  });
+  try {
+    const r = await t.run({ token: `h.${b64({ sub: 'ada' })}.sig` });
+    const display = r?.display || '';
+    assert.ok(!/verification failed/i.test(display), 'a timeout was reported as a failed token');
+    assert.ok(!/Start a fresh sign-in/.test(display), 'a timeout must not send the person to re-auth');
+    assert.match(display, /couldn't reach|could not reach/i);
+  } finally {
+    t.restore();
+  }
+});
+
+test('init (#320): an auth flow is never shared with a different identity', async () => {
+  // Ada starts a flow; Bob starts one. Bob must not receive Ada's login URL —
+  // completing it would have signed Bob in as Ada.
+  const initPath = require.resolve('./init.js');
+  const oauthPath = require.resolve('../oauth-callback');
+  const realOauth = require.cache[oauthPath];
+  const issued = [];
+  require.cache[oauthPath] = {
+    id: oauthPath, filename: oauthPath, loaded: true,
+    exports: {
+      ...(realOauth ? realOauth.exports : {}),
+      beginOAuth: async ({ requestedHandle }) => {
+        const url = `https://example.invalid/login?who=${requestedHandle}`;
+        issued.push(requestedHandle);
+        return { loginUrl: url, waitForCallback: () => new Promise(() => {}), cancel: async () => {} };
+      },
+    },
+  };
+  const priorCI = process.env.CI;
+  process.env.CI = '1';
+  delete require.cache[initPath];
+  const tool = require(initPath);
+  try {
+    tool._resetPendingAuth();
+    const a = await tool._ensureAuthFlowForTest({ requestedHandle: 'ada' });
+    const b = await tool._ensureAuthFlowForTest({ requestedHandle: 'bob' });
+    assert.notEqual(a.loginUrl, b.loginUrl, "Bob was handed Ada's login URL");
+    assert.deepEqual(issued, ['ada', 'bob'], 'a flow was reused across identities');
+    const again = await tool._ensureAuthFlowForTest({ requestedHandle: 'bob' });
+    assert.equal(again.loginUrl, b.loginUrl, 'the same identity must still share one flow');
+  } finally {
+    tool._resetPendingAuth();
+    if (priorCI === undefined) delete process.env.CI; else process.env.CI = priorCI;
+    if (realOauth) require.cache[oauthPath] = realOauth; else delete require.cache[oauthPath];
+    delete require.cache[initPath];
+  }
+});

@@ -46,6 +46,21 @@ If you haven't signed in yet:
   // Verify token with server
   const verification = await store.verifyAuthToken(token.trim());
 
+  // UNREACHABLE IS NOT INVALID (#320 sweep). `{valid:false, definitive:false}`
+  // is what a network timeout looks like, and this branch turned that into
+  // "verification failed" plus an instruction to sign in again — sending a
+  // person with a perfectly good token around a loop that cannot help them.
+  if (!verification.valid && verification.definitive === false) {
+    return {
+      display: `⚠️ **Couldn't reach the server to check this token**
+
+${verification.error || 'The check timed out.'}
+
+This says nothing about the token — only that we couldn't ask. Try again when
+you're back online. Your existing session is untouched.`
+    };
+  }
+
   if (!verification.valid) {
     return {
       display: `❌ **Token verification failed**

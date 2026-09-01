@@ -73,8 +73,17 @@ function principalFromToken(token) {
   if (!header || !payload || !signature) return null;
   // base64url alphabet only: Buffer.from is lenient and silently skips the
   // characters that would tell us this is not a token at all.
-  if (!/^[A-Za-z0-9_-]+$/.test(header) || !/^[A-Za-z0-9_-]+$/.test(payload)) return null;
+  // ALL THREE segments must be base64url — a signature of `!!!` is not a
+  // signature, and validating only the payload let malformed tokens through.
+  const b64url = /^[A-Za-z0-9_-]+$/;
+  if (!b64url.test(header) || !b64url.test(payload) || !b64url.test(signature)) return null;
   try {
+    // The header must decode to a JSON object too. `A` is not a possible
+    // base64url encoding of anything, and a non-JSON header means this is not
+    // a token whose payload we should be reading claims out of.
+    const rawHeader = Buffer.from(header, 'base64url').toString('utf8');
+    const head = JSON.parse(rawHeader);
+    if (!head || typeof head !== 'object' || Array.isArray(head)) return null;
     const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (!claims || typeof claims !== 'object' || Array.isArray(claims)) return null;
     const pid = Object.prototype.hasOwnProperty.call(claims, 'principal_id')

@@ -325,11 +325,23 @@ const AUTH_SENTENCE = 'Open this, sign in with GitHub, then say vibe start.';
 let pendingAuth = null; // { oauth, loginUrl, startedAt, browserOpened, expired }
 let pendingAuthCreation = null; // in-flight ensureAuthFlow, so concurrent starts share ONE flow (review P1)
 
-// WHOSE mint came back proving only the handle — a handle, not a boolean.
-// Under the blocking flow this was a return value; the flow is non-blocking
-// now, so the fact has to outlive the call that learned it, and a process can
-// serve more than one identity. A bare boolean told Bob about Ada's mint.
-let lastMintLackedPrincipalFor = null;
+// WHICH CREDENTIAL the record is about — a fingerprint of the token, not a
+// boolean and not a handle. Under the blocking flow this was a return value;
+// the flow is non-blocking now, so the fact has to outlive the call that
+// learned it. A bare boolean told Bob about Ada's mint. A handle was better but
+// still outlived the credential: sign out, then load a legacy token under the
+// same handle, and it inherited a complaint about a mint it was never part of.
+// Binding to the credential makes both cases the same rule — a record is only
+// ever about the exact token it was recorded for.
+const tokenFingerprint = (token) => {
+  if (typeof token !== 'string' || !token) return null;
+  return require('node:crypto').createHash('sha256').update(token).digest('hex').slice(0, 16);
+};
+let lastMintLackedPrincipalForToken = null;
+// Set when a completed sign-in could not be written to disk at all. Distinct
+// from a handle-only mint: there, the credential exists and lacks a claim;
+// here, there may be no new credential at all.
+let lastSignInFailedToPersistForToken = null;
 
 async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) {
   // VERIFY BEFORE CLAIMING (#320): the point of reauth is a credential that
@@ -339,8 +351,10 @@ async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) 
   const mintLackedPrincipal = !authStore.principalFromToken(token);
   if (actor) await actorSession.installOAuthSession(actor);
   else await actorSession.clearActorSession();
-  config.saveAuthToken(token);
-  config.setSessionIdentity(finalHandle, one_liner || '');
+  // Each of these can REFUSE rather than throw. "The refreshed credential was
+  // saved" is a claim about disk, so it has to be answered by disk.
+  const tokenSaved = config.saveAuthToken(token) !== false;
+  const identitySaved = config.setSessionIdentity(finalHandle, one_liner || '') !== false;
   authStore.setToken(token);
   authStore.setHandle(finalHandle);
   authStore.setOneLiner(one_liner || '');
@@ -352,10 +366,17 @@ async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) 
   if (one_liner) authConfig.one_liner = one_liner;
   authConfig.authMethod = 'browser';
   authConfig.pendingAuth = false;
-  config.save(authConfig);
-  // Now the credential is on disk, so the record — and the message it drives,
-  // which says the refreshed credential was saved — is true.
-  lastMintLackedPrincipalFor = mintLackedPrincipal ? normalizeHandle(finalHandle) : null;
+  const configSaved = config.save(authConfig) !== false;
+  // Only a credential that actually reached disk may drive the message that
+  // says so. If nothing was written, the honest state is "not saved", not a
+  // minting complaint about a credential the person does not have.
+  const credentialPersisted = tokenSaved && identitySaved && configSaved;
+  const fp = tokenFingerprint(token);
+  lastMintLackedPrincipalForToken = (credentialPersisted && mintLackedPrincipal) ? fp : null;
+  lastSignInFailedToPersistForToken = credentialPersisted ? null : fp;
+  if (!credentialPersisted) {
+    console.error(`[vibe] sign-in for @${finalHandle} did not persist — token:${tokenSaved} identity:${identitySaved} config:${configSaved}`);
+  }
   // The toolset just changed — tell the host now, not on the next call.
   global.vibeNotifier?.emitImmediate();
   // Presence + welcome are best-effort and must never block or throw here.
@@ -365,22 +386,39 @@ async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) 
   try { await Promise.race([sendPersonalizedWelcome(finalHandle, one_liner), new Promise((r) => setTimeout(r, 2500))]); } catch {}
 }
 
+// A flow is only shareable with a caller asking for the SAME identity. The
+// sharing exists so concurrent signed-out starts don't each bind a listener —
+// but it was unconditional, so Ada starting a flow and Bob starting one handed
+// Bob Ada's login URL, and completing it would have signed Bob in as Ada.
+const flowKey = (opts) => normalizeHandle((opts && opts.requestedHandle) || '');
+
 async function ensureAuthFlow(opts) {
-  if (pendingAuth && !pendingAuth.expired) {
+  const key = flowKey(opts);
+  if (pendingAuth && !pendingAuth.expired && pendingAuth.key === key) {
     return { ...pendingAuth, reused: true };
   }
   // Concurrent signed-out starts must not each bind a listener: the FIRST
-  // caller's creation promise is shared until pendingAuth exists.
-  if (pendingAuthCreation) {
-    const flow = await pendingAuthCreation;
+  // caller's creation promise is shared until pendingAuth exists — but only
+  // among callers asking for the same identity.
+  if (pendingAuthCreation && pendingAuthCreation.key === key) {
+    const flow = await pendingAuthCreation.promise;
     return { ...flow, reused: true };
   }
-  pendingAuthCreation = createAuthFlow(opts).finally(() => { pendingAuthCreation = null; });
-  return pendingAuthCreation;
+  const promise = createAuthFlow(opts).finally(() => {
+    if (pendingAuthCreation && pendingAuthCreation.key === key) pendingAuthCreation = null;
+  });
+  pendingAuthCreation = { key, promise };
+  return promise;
 }
 
 async function createAuthFlow({ requestedHandle, one_liner }) {
   const replacedExpired = Boolean(pendingAuth && pendingAuth.expired);
+  // Replacing a live flow that belongs to a DIFFERENT identity: cancel its
+  // listener rather than leaving two bound to the same callback port.
+  if (pendingAuth && !pendingAuth.expired && pendingAuth.key !== flowKey({ requestedHandle })) {
+    try { await pendingAuth.oauth.cancel(); } catch {}
+    pendingAuth = null;
+  }
   if (replacedExpired) {
     // The expired listener must not linger through its grace period beside
     // the replacement (review P2).
@@ -391,7 +429,7 @@ async function createAuthFlow({ requestedHandle, one_liner }) {
   // 'unknown' until the launcher actually answers: a staggered caller that
   // finds the flow mid-launch must not report `false` for a browser that is
   // still opening (review P2). The field is updated in place when known.
-  const flow = { oauth, loginUrl: oauth.loginUrl, startedAt: Date.now(), browserOpened: 'unknown', expired: false, reused: false, replacedExpired };
+  const flow = { oauth, loginUrl: oauth.loginUrl, startedAt: Date.now(), browserOpened: 'unknown', expired: false, reused: false, replacedExpired, key: flowKey({ requestedHandle }) };
   pendingAuth = flow;
   // Background completion: nobody awaits this. Success persists the credential;
   // timeout marks the flow expired so the next start issues a fresh link.
@@ -509,8 +547,18 @@ async function handler(args) {
       console.error(`[vibe] @${existingHandle}'s saved session proves the handle but not the principal — refreshing sign-in (server action: reauth).`);
       // …unless the last completed sign-in ALREADY came back handle-only. Then
       // reauth is not a fix, it is a loop, and the honest thing is to say so.
-      if (lastMintLackedPrincipalFor
-          && lastMintLackedPrincipalFor === normalizeHandle(existingHandle)) {
+      const currentFp = tokenFingerprint(config.getAuthToken());
+      if (lastSignInFailedToPersistForToken && currentFp
+          && lastSignInFailedToPersistForToken === currentFp) {
+        return {
+          display: `## Signed in as @${existingHandle} — but the credential could not be saved\n\n`
+            + `The sign-in itself worked; writing it to disk did not, so this session is still `
+            + `using the old credential and a restart will lose the new one. Check that `
+            + `~/.vibe is writable, then say \`vibe init\` again.`,
+        };
+      }
+      if (lastMintLackedPrincipalForToken && currentFp
+          && lastMintLackedPrincipalForToken === currentFp) {
         return {
           display: `## Signed in as @${existingHandle} — but this session still proves only your handle\n\n`
             + `The server did not mint a principal claim into your last sign-in, so principal-gated actions `
@@ -698,4 +746,5 @@ _Say "vibe onboarding" anytime to check your progress_`
   };
 }
 
-module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE, _completeSignInForTest: completeSignIn, _resetMintStateForTest: () => { lastMintLackedPrincipalFor = null; } };
+module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE, _completeSignInForTest: completeSignIn, _resetMintStateForTest: () => { lastMintLackedPrincipalForToken = null; lastSignInFailedToPersistForToken = null; },
+  _ensureAuthFlowForTest: ensureAuthFlow };
