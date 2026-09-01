@@ -114,10 +114,17 @@ function save(config) {
     authToken: config.authToken || config.privyToken || existing.authToken || existing.privyToken || null,
     authMethod: config.authMethod || existing.authMethod || null
   };
+  // Fields this function does not enumerate — x_credentials, firstDmSent,
+  // pendingAuth, visible — used to vanish on every save, because the object
+  // above is built field by field. Spreading `existing` underneath keeps them:
+  // each key in `data` already falls back to its existing value, so the overlay
+  // never replaces a real value with a null it invented.
+  const merged = { ...existing, ...data };
+
   // 0600: this file carries the auth token — it is a credential, not a preference.
   const tmp = `${PRIMARY_CONFIG}.${process.pid}.${Date.now()}.tmp`;
   try {
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+    fs.writeFileSync(tmp, JSON.stringify(merged, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, PRIMARY_CONFIG);
   } catch (e) {
     try { fs.unlinkSync(tmp); } catch {}
@@ -248,7 +255,15 @@ function saveSessionData(data) {
     console.error('Refusing to write session data: the file on disk could not be read.');
     return false;
   }
-  fs.writeFileSync(SESSION_FILE, JSON.stringify(data, null, 2));
+  const tmp = `${SESSION_FILE}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, SESSION_FILE);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch {}
+    console.error('Failed to save session data:', e.message);
+    return false;
+  }
   return true;
 }
 

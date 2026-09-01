@@ -470,7 +470,13 @@ async function getActiveUsersResult() {
     if (!Array.isArray(users)) return { ok: false, users: [], error: 'malformed_response' };
     // Signed out is not an empty room either — the server told us it would not
     // say who is here. A caller rendering a count must not treat that as zero.
-    if (users.anonymous) return { ok: false, users: [], error: 'unauthenticated' };
+    //
+    // The ARRAY ITSELF is returned, not a fresh []: it carries `anonymous` and
+    // `counts` as non-enumerable properties, and who.js reads them to say "4
+    // people are here, sign in to see who". Substituting a bare [] there turned
+    // that back into "Quiet right now — you're the only one here", the exact
+    // sentence those properties exist to prevent.
+    if (users.anonymous) return { ok: false, users, error: 'unauthenticated' };
     return { ok: true, users };
   } catch (e) {
     return { ok: false, users: [], error: e?.code || 'transport_failed', message: e?.message };

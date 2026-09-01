@@ -198,7 +198,7 @@ test('a REAL transport failure is never rendered as an empty inbox', async () =>
     });
   `;
   const out = execFileSync('node', ['-e', script], {
-    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_API_URL: 'http://127.0.0.1:9', VIBE_SETUP_NO_AUTORUN: '1' },
+    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_API_URL: 'http://127.0.0.1:9', VIBE_SETUP_NO_AUTORUN: '1', CI: '1' },
     encoding: 'utf8', timeout: 30000,
   });
   const r = JSON.parse(out);
@@ -272,7 +272,7 @@ test('local mode reports a real read, not a failure', async () => {
     });
   `;
   const out = execFileSync('node', ['-e', script], {
-    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_LOCAL: 'true', VIBE_SETUP_NO_AUTORUN: '1' },
+    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_LOCAL: 'true', VIBE_SETUP_NO_AUTORUN: '1', CI: '1' },
     encoding: 'utf8', timeout: 30000,
   });
   const r = JSON.parse(out);
@@ -298,7 +298,7 @@ test('a CORRUPT local messages file is a failed read, not an empty inbox', async
     });
   `;
   const out = execFileSync('node', ['-e', script], {
-    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_LOCAL: 'true', VIBE_SETUP_NO_AUTORUN: '1' },
+    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_LOCAL: 'true', VIBE_SETUP_NO_AUTORUN: '1', CI: '1' },
     encoding: 'utf8', timeout: 30000,
   });
   const r = JSON.parse(out);
@@ -323,7 +323,7 @@ test('a MISSING local messages file is a genuine empty inbox, not a failure', as
     });
   `;
   const out = execFileSync('node', ['-e', script], {
-    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_LOCAL: 'true', VIBE_SETUP_NO_AUTORUN: '1' },
+    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_LOCAL: 'true', VIBE_SETUP_NO_AUTORUN: '1', CI: '1' },
     encoding: 'utf8', timeout: 30000,
   });
   const r = JSON.parse(out);
@@ -510,7 +510,7 @@ test('a REAL presence failure is never rendered as an empty room', async () => {
     });
   `;
   const out = execFileSync('node', ['-e', script], {
-    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_API_URL: 'http://127.0.0.1:9', VIBE_SETUP_NO_AUTORUN: '1' },
+    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_API_URL: 'http://127.0.0.1:9', VIBE_SETUP_NO_AUTORUN: '1', CI: '1' },
     encoding: 'utf8', timeout: 30000,
   });
   const r = JSON.parse(out);
@@ -559,6 +559,104 @@ test('a readable config still saves, keeping the fields it is not updating', () 
     assert.equal(after.authToken, 'KEEP-CREDENTIAL', 'the credential was lost on a good write');
     assert.equal(after.guided_mode, false, 'the update did not land');
   } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+  }
+});
+
+test('a corrupt session file is never overwritten — the token in it survives', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-sess-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  delete require.cache[require.resolve('../config')];
+  try {
+    const cfg = require('../config');
+    // The session file is per-process, so its name is only knowable from here.
+    const file = path.join(home, `.session_${process.pid}`);
+    const corrupt = '{"sessionId":"sess_x","authToken":"KEEP-SESSION-TOKEN" TRUNCATED';
+    fs.writeFileSync(file, corrupt);
+    cfg.setAuthToken('a-new-token');
+    assert.equal(fs.readFileSync(file, 'utf8'), corrupt, 'the session file was rewritten over a failed read');
+    assert.deepEqual(fs.readdirSync(home).filter((f) => f.endsWith('.tmp')), []);
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+  }
+});
+
+test('a config write keeps fields it knows nothing about', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-cfg3-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  const file = path.join(home, 'config.json');
+  fs.writeFileSync(file, JSON.stringify({
+    username: 'ada',
+    authToken: 'KEEP-CREDENTIAL',
+    x_credentials: { token: 'KEEP-X' },   // written by another tool entirely
+    firstDmSent: true,
+    visible: false,
+  }, null, 2));
+  delete require.cache[require.resolve('../config')];
+  try {
+    const cfg = require('../config');
+    cfg.setGuidedMode(false);
+    const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(after.guided_mode, false, 'the update did not land');
+    assert.equal(after.authToken, 'KEEP-CREDENTIAL');
+    assert.deepEqual(after.x_credentials, { token: 'KEEP-X' }, 'another tool’s credential was dropped');
+    assert.equal(after.firstDmSent, true, 'an unenumerated field was dropped');
+    assert.equal(after.visible, false, 'an unenumerated field was dropped');
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+  }
+});
+
+test('local mode: a corrupt presence file is a failed read, not an empty room', async () => {
+  const { execFileSync } = require('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-localpres-'));
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
+    username: 'ada', authMethod: 'github',
+    authToken: `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`,
+  }));
+  fs.writeFileSync(path.join(home, 'presence.json'), '{"zoe":{"handle":"zoe"} TRUNCATED');
+  const script = `
+    const store = require(${JSON.stringify(path.join(__dirname, '..', 'store', 'local.js'))});
+    store.getInboxResult = async () => ({ ok: true, threads: [] });
+    require(${JSON.stringify(path.join(__dirname, 'start.js'))}).handler({}).then((r) => {
+      process.stdout.write(JSON.stringify({ display: r.display, here: r.here }));
+    });
+  `;
+  const out = execFileSync('node', ['-e', script], {
+    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_LOCAL: 'true', VIBE_SETUP_NO_AUTORUN: '1', CI: '1' },
+    encoding: 'utf8', timeout: 30000,
+  });
+  const r = JSON.parse(out);
+  assert.match(r.display, /couldn't see who's here/, 'a corrupt presence file rendered as a room');
+  assert.ok(!/\b0 others here\b/.test(r.display));
+  assert.equal(r.here, null);
+});
+
+test('a config write that cannot complete leaves the original intact and no .tmp', () => {
+  // Forces the rename to fail. With a direct writeFileSync onto the credential
+  // file there is no rename to fail — the file is truncated and rewritten in
+  // place, which is the failure mode temp-and-rename exists to prevent.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-cfg4-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  const file = path.join(home, 'config.json');
+  const before = JSON.stringify({ username: 'ada', authToken: 'KEEP-CREDENTIAL' }, null, 2);
+  fs.writeFileSync(file, before);
+  delete require.cache[require.resolve('../config')];
+  const realRename = fs.renameSync;
+  fs.renameSync = () => { const e = new Error('EACCES'); e.code = 'EACCES'; throw e; };
+  try {
+    const cfg = require('../config');
+    cfg.setGuidedMode(false);
+    assert.equal(fs.readFileSync(file, 'utf8'), before, 'the credential file was damaged by a failed write');
+    assert.deepEqual(fs.readdirSync(home).filter((f) => f.endsWith('.tmp')), [], 'a temp file was orphaned');
+  } finally {
+    fs.renameSync = realRename;
     if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
     delete require.cache[require.resolve('../config')];
   }
