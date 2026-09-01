@@ -275,3 +275,54 @@ test('local mode reports a real read, not a failure', async () => {
   assert.ok(!/couldn't read your inbox/.test(r.display), `local mode must not claim a failed read: ${r.display}`);
   assert.equal(typeof r.unread, 'number', 'local mode reports a real count');
 });
+
+test('a CORRUPT local messages file is a failed read, not an empty inbox', async () => {
+  const { execFileSync } = require('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-corrupt-'));
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
+    username: 'ada', authMethod: 'github',
+    authToken: `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`,
+  }));
+  // the local store keeps messages.jsonl beside the config
+  fs.writeFileSync(path.join(home, 'messages.jsonl'), '{"to":"ada","body":"ok"}\n{ this is not json\n');
+  const script = `
+    const store = require(${JSON.stringify(path.join(__dirname, '..', 'store', 'index.js'))});
+    store.getActiveUsers = async () => [];
+    store.heartbeat = async () => ({}); store.registerSession = async () => ({});
+    require(${JSON.stringify(path.join(__dirname, 'start.js'))}).handler({}).then((r) => {
+      process.stdout.write(JSON.stringify({ display: r.display, unread: r.unread }));
+    });
+  `;
+  const out = execFileSync('node', ['-e', script], {
+    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_LOCAL: 'true', VIBE_SETUP_NO_AUTORUN: '1' },
+    encoding: 'utf8', timeout: 30000,
+  });
+  const r = JSON.parse(out);
+  assert.match(r.display, /couldn't read your inbox/, 'a corrupt file is reported as a failed read');
+  assert.ok(!/no messages yet/.test(r.display), 'never claims a fresh arrival from a corrupt file');
+  assert.equal(r.unread, null, 'and the payload says not-read, not zero');
+});
+
+test('a MISSING local messages file is a genuine empty inbox, not a failure', async () => {
+  const { execFileSync } = require('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-nofile-'));
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
+    username: 'ada', authMethod: 'github',
+    authToken: `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`,
+  }));
+  const script = `
+    const store = require(${JSON.stringify(path.join(__dirname, '..', 'store', 'index.js'))});
+    store.getActiveUsers = async () => [];
+    store.heartbeat = async () => ({}); store.registerSession = async () => ({});
+    require(${JSON.stringify(path.join(__dirname, 'start.js'))}).handler({}).then((r) => {
+      process.stdout.write(JSON.stringify({ display: r.display, unread: r.unread }));
+    });
+  `;
+  const out = execFileSync('node', ['-e', script], {
+    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_LOCAL: 'true', VIBE_SETUP_NO_AUTORUN: '1' },
+    encoding: 'utf8', timeout: 30000,
+  });
+  const r = JSON.parse(out);
+  assert.equal(r.unread, 0, 'no file yet is a real, readable zero');
+  assert.ok(!/couldn't read/.test(r.display), 'and is never reported as a failure');
+});

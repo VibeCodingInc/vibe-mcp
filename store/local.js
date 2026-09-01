@@ -87,16 +87,38 @@ async function setVisibility(handle, visible) {
 
 // ============ MESSAGES ============
 
+/**
+ * The messages file, with failures preserved.
+ *
+ * A file that does not exist yet IS an empty inbox — that is a real answer.
+ * A file that cannot be read, or whose lines do not parse, is NOT: it is a
+ * failed read, and flattening it to [] makes "nothing has happened" and
+ * "something is wrong" the same value (review P1 — the same swallow the API
+ * store had, two layers down).
+ */
+function loadMessagesStrict() {
+  if (!fs.existsSync(MESSAGES_FILE)) return [];
+  const content = fs.readFileSync(MESSAGES_FILE, 'utf8');
+  return content.trim().split('\n')
+    .filter(line => line.length > 0)
+    .map((line, i) => {
+      try {
+        return JSON.parse(line);
+      } catch (e) {
+        const err = new Error(`messages.jsonl line ${i + 1} is not valid JSON`);
+        err.code = 'local_corrupt';
+        throw err;
+      }
+    });
+}
+
+// Unchanged contract for every caller that only wants the list.
 function loadMessages() {
   try {
-    if (fs.existsSync(MESSAGES_FILE)) {
-      const content = fs.readFileSync(MESSAGES_FILE, 'utf8');
-      return content.trim().split('\n')
-        .filter(line => line.length > 0)
-        .map(line => JSON.parse(line));
-    }
-  } catch (e) {}
-  return [];
+    return loadMessagesStrict();
+  } catch (e) {
+    return [];
+  }
 }
 
 function appendMessage(msg) {
@@ -139,7 +161,14 @@ async function getInbox(handle) {
  */
 async function getInboxResult(handle) {
   try {
-    return { ok: true, threads: await getInbox(handle) };
+    // The STRICT loader: getInbox() flattens a corrupt or unreadable file to
+    // [], which is exactly the fact this wrapper exists to preserve.
+    const messages = loadMessagesStrict();
+    const h = handle.toLowerCase().replace('@', '');
+    const threads = messages
+      .filter((m) => m.to === h)
+      .sort((a, b) => b.timestamp - a.timestamp);
+    return { ok: true, threads };
   } catch (e) {
     return { ok: false, threads: [], error: e?.code || 'local_read_failed', message: e?.message };
   }
