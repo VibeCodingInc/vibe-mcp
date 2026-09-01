@@ -334,7 +334,10 @@ async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) 
   authStore.setOneLiner(one_liner || '');
   const authConfig = config.load();
   authConfig.handle = finalHandle;
-  authConfig.one_liner = one_liner || '';
+  // Only when we were actually given one. save() can now express a clear, and
+  // `one_liner || ''` would make signing in erase the line you set last week —
+  // an instruction nobody gave.
+  if (one_liner) authConfig.one_liner = one_liner;
   authConfig.authMethod = 'browser';
   authConfig.pendingAuth = false;
   config.save(authConfig);
@@ -535,7 +538,7 @@ Heading out? \`vibe bye\` ends presence for this session — you stay @${existin
     // Save one_liner for the completion handler
     const cfg = config.load();
     if (h) cfg.handle = h;
-    cfg.one_liner = one_liner || '';
+    if (one_liner) cfg.one_liner = one_liner;
     cfg.pendingAuth = true;
     config.save(cfg);
 
@@ -578,7 +581,7 @@ Heading out? \`vibe bye\` ends presence for this session — you stay @${existin
 
   const cfg = config.load();
   cfg.handle = h;
-  cfg.one_liner = one_liner || '';
+  if (one_liner) cfg.one_liner = one_liner;   // same: absent is not "clear it"
   cfg.visible = true;
   cfg.authMethod = 'legacy';
   config.save(cfg);

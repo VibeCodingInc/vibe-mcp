@@ -354,10 +354,20 @@ async function getTypingUsers(forHandle) {
   }
 }
 
-async function getActiveUsers() {
+async function getActiveUsersInner() {
   try {
     const endpoint = USE_V2_PRESENCE ? '/api/v2/presence' : '/api/presence';
     const result = await request('GET', endpoint);
+
+    // request() RESOLVES on transport failure ({success:false, network:true}),
+    // so without this the lists below are simply absent and a dead network maps
+    // to a successful empty room. 401 is deliberately excluded: that is the
+    // "signed out, here are public counts" path handled below, not a failure.
+    if (result?.success === false && result.statusCode !== 401) {
+      const err = new Error(result.error || 'presence request failed');
+      err.code = result.network ? 'transport_failed' : `http_${result.statusCode || 'error'}`;
+      throw err;
+    }
 
     // Combine active + away, plus any AGENTS currently live in a room (e.g.
     // @coltrane hosting the cantina). Agents live in their own array; without
@@ -446,8 +456,36 @@ async function getActiveUsers() {
     return mappedUsers;
   } catch (e) {
     console.error('Who failed:', e.message);
-    return [];
+    const err = new Error(e?.message || 'presence read failed');
+    err.code = e?.code || 'transport_failed';
+    throw err;
   }
+}
+
+// The same outcome-preserving shape the inbox uses: flattening a failed
+// presence read to [] made "0 others here" a claim nobody verified.
+async function getActiveUsersResult() {
+  try {
+    const users = await getActiveUsersInner();
+    if (!Array.isArray(users)) return { ok: false, users: [], error: 'malformed_response' };
+    // Signed out is not an empty room either — the server told us it would not
+    // say who is here. A caller rendering a count must not treat that as zero.
+    //
+    // The ARRAY ITSELF is returned, not a fresh []: it carries `anonymous` and
+    // `counts` as non-enumerable properties, and who.js reads them to say "4
+    // people are here, sign in to see who". Substituting a bare [] there turned
+    // that back into "Quiet right now — you're the only one here", the exact
+    // sentence those properties exist to prevent.
+    if (users.anonymous) return { ok: false, users, error: 'unauthenticated' };
+    return { ok: true, users };
+  } catch (e) {
+    return { ok: false, users: [], error: e?.code || 'transport_failed', message: e?.message };
+  }
+}
+
+// Named callers keep the old shape: an empty list on failure, as before.
+async function getActiveUsers() {
+  return (await getActiveUsersResult()).users;
 }
 
 async function setVisibility(handle, visible) {
@@ -600,7 +638,30 @@ async function sendMessage(from, to, body, type = 'dm', payload = null, options 
   }
 }
 
+/**
+ * The inbox, and whether it was actually read.
+ *
+ * getInbox() swallows transport failures into [] for its many callers, which
+ * makes "no threads" and "could not ask" the same value — and a caller that
+ * renders a claim from that (vibe_start did) states a fact nobody has
+ * (review P1). This is the same call with the outcome kept:
+ *   { ok: true,  threads }  the server answered
+ *   { ok: false, threads: [], error }  nobody answered, or the API refused
+ */
+async function getInboxResult(handle) {
+  try {
+    const threads = await getInboxInner(handle);
+    return Array.isArray(threads) ? { ok: true, threads } : { ok: false, threads: [], error: 'malformed_response' };
+  } catch (e) {
+    return { ok: false, threads: [], error: e?.code || 'transport_failed', message: e?.message };
+  }
+}
+
 async function getInbox(handle) {
+  return (await getInboxResult(handle)).threads;
+}
+
+async function getInboxInner(handle) {
   try {
     // V2: Use threads endpoint (Postgres-backed, cross-client sync)
     if (USE_V2_MESSAGES) {
@@ -629,8 +690,10 @@ async function getInbox(handle) {
     // V1 fallback
     return getInboxV1(handle);
   } catch (e) {
+    // Rethrow: getInboxResult owns the outcome now, and getInbox() still
+    // presents [] to every caller that only wants the list.
     console.error('Inbox failed:', e.message);
-    return [];
+    throw e;
   }
 }
 
@@ -640,10 +703,15 @@ async function getInboxV1(handle) {
     // /api/messages now returns V2 format: { threads, total_unread }
     const result = await request('GET', `/api/messages?user=${handle}`);
 
-    // Check for API errors (auth failures, etc.)
+    // An API-level refusal (auth failure, server error) is a FAILED read, not
+    // an empty inbox. Returning [] here made "the server said no" and "you
+    // have no threads" the same value — the same swallow the transport path
+    // had, one layer down (review P1).
     if (result.success === false) {
       console.error('[getInbox] API error:', result.error, result.message);
-      return [];
+      const err = new Error(result.message || result.error || 'inbox_refused');
+      err.code = result.error || 'inbox_refused';
+      throw err;
     }
 
     // V2 format: map threads to expected format
@@ -678,7 +746,7 @@ async function getInboxV1(handle) {
     }));
   } catch (e) {
     console.error('Inbox v1 failed:', e.message);
-    return [];
+    throw e;
   }
 }
 
@@ -1387,6 +1455,7 @@ module.exports = {
   // Presence
   heartbeat,
   getActiveUsers,
+  getActiveUsersResult,
   setVisibility,
   sendTypingIndicator,
   getTypingUsers,
@@ -1394,6 +1463,7 @@ module.exports = {
   // Messages
   sendMessage,
   getInbox,
+  getInboxResult,
   getRawInbox,
   getUnreadCount,
   getThread,

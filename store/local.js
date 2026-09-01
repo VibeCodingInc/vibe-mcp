@@ -38,8 +38,33 @@ function loadPresence() {
   return {};
 }
 
+function presenceIsReadable() {
+  if (!fs.existsSync(PRESENCE_FILE)) return true;   // absent = a real first write
+  try {
+    JSON.parse(fs.readFileSync(PRESENCE_FILE, 'utf8'));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 function savePresence(presence) {
-  fs.writeFileSync(PRESENCE_FILE, JSON.stringify(presence, null, 2));
+  // loadPresence() turns an unreadable file into {}, so an unguarded save would
+  // drop every other person's presence record.
+  if (!presenceIsReadable()) {
+    console.error('Refusing to write presence: the file on disk could not be read.');
+    return false;
+  }
+  const tmp = `${PRESENCE_FILE}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(presence, null, 2));
+    fs.renameSync(tmp, PRESENCE_FILE);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch {}
+    console.error('Failed to save presence:', e.message);
+    return false;
+  }
+  return true;
 }
 
 async function heartbeat(handle, one_liner) {
@@ -51,6 +76,11 @@ async function heartbeat(handle, one_liner) {
     visible: true
   };
   savePresence(presence);
+}
+
+async function getActiveUsersResult() {
+  if (!presenceIsReadable()) return { ok: false, users: [], error: 'local_corrupt' };
+  return { ok: true, users: await getActiveUsers() };
 }
 
 async function getActiveUsers() {
@@ -87,16 +117,38 @@ async function setVisibility(handle, visible) {
 
 // ============ MESSAGES ============
 
+/**
+ * The messages file, with failures preserved.
+ *
+ * A file that does not exist yet IS an empty inbox — that is a real answer.
+ * A file that cannot be read, or whose lines do not parse, is NOT: it is a
+ * failed read, and flattening it to [] makes "nothing has happened" and
+ * "something is wrong" the same value (review P1 — the same swallow the API
+ * store had, two layers down).
+ */
+function loadMessagesStrict() {
+  if (!fs.existsSync(MESSAGES_FILE)) return [];
+  const content = fs.readFileSync(MESSAGES_FILE, 'utf8');
+  return content.trim().split('\n')
+    .filter(line => line.length > 0)
+    .map((line, i) => {
+      try {
+        return JSON.parse(line);
+      } catch (e) {
+        const err = new Error(`messages.jsonl line ${i + 1} is not valid JSON`);
+        err.code = 'local_corrupt';
+        throw err;
+      }
+    });
+}
+
+// Unchanged contract for every caller that only wants the list.
 function loadMessages() {
   try {
-    if (fs.existsSync(MESSAGES_FILE)) {
-      const content = fs.readFileSync(MESSAGES_FILE, 'utf8');
-      return content.trim().split('\n')
-        .filter(line => line.length > 0)
-        .map(line => JSON.parse(line));
-    }
-  } catch (e) {}
-  return [];
+    return loadMessagesStrict();
+  } catch (e) {
+    return [];
+  }
 }
 
 function appendMessage(msg) {
@@ -127,6 +179,31 @@ async function getInbox(handle) {
     .sort((a, b) => b.timestamp - a.timestamp);
 }
 
+/**
+ * The inbox, and whether it was actually read — the same contract the API
+ * store provides (store/api.js). Both implementations must answer it, or a
+ * caller that distinguishes "empty" from "could not ask" silently gets the
+ * wrong answer in the other mode (review P1: with VIBE_LOCAL=true, a missing
+ * method made every start claim the read had failed).
+ *
+ * A local file read either produces the list or throws; there is no partial
+ * or refused outcome to represent.
+ */
+async function getInboxResult(handle) {
+  try {
+    // The STRICT loader: getInbox() flattens a corrupt or unreadable file to
+    // [], which is exactly the fact this wrapper exists to preserve.
+    const messages = loadMessagesStrict();
+    const h = handle.toLowerCase().replace('@', '');
+    const threads = messages
+      .filter((m) => m.to === h)
+      .sort((a, b) => b.timestamp - a.timestamp);
+    return { ok: true, threads };
+  } catch (e) {
+    return { ok: false, threads: [], error: e?.code || 'local_read_failed', message: e?.message };
+  }
+}
+
 async function getUnreadCount(handle) {
   const inbox = await getInbox(handle);
   return inbox.filter(m => !m.read_at).length;
@@ -152,7 +229,19 @@ async function getThread(myHandle, theirHandle) {
 }
 
 async function markThreadRead(myHandle, theirHandle) {
-  const messages = loadMessages();
+  // A READ-MODIFY-WRITE over the whole file must never run on a swallowed
+  // read (review P1 — DATA LOSS): loadMessages() returns [] for a corrupt or
+  // unreadable file, and the rewrite below would then replace every message,
+  // including the valid ones, with an empty file. A read that did not succeed
+  // is not permission to write; the mark is abandoned and the file is left
+  // exactly as it is.
+  let messages;
+  try {
+    messages = loadMessagesStrict();
+  } catch (e) {
+    console.error('[local] not marking read — the messages file could not be read:', e.message);
+    return { success: false, error: e.code || 'local_read_failed' };
+  }
   const me = myHandle.toLowerCase().replace('@', '');
   const them = theirHandle.toLowerCase().replace('@', '');
   const now = Date.now();
@@ -165,8 +254,21 @@ async function markThreadRead(myHandle, theirHandle) {
     return m;
   });
 
-  // Rewrite the file
-  fs.writeFileSync(MESSAGES_FILE, updated.map(m => JSON.stringify(m)).join('\n') + '\n');
+  // Rewrite the file. Reached only from a read that actually succeeded, and
+  // written via a temp file + rename so an interrupted write cannot leave a
+  // half-file behind either.
+  // A per-write temp name: a fixed one collides between concurrent marks, and
+  // a failed rename would leave it behind (review P2).
+  const tmp = `${MESSAGES_FILE}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, updated.map(m => JSON.stringify(m)).join('\n') + '\n');
+    fs.renameSync(tmp, MESSAGES_FILE);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch {}
+    console.error('[local] mark-read write failed; the file is unchanged:', e.message);
+    return { success: false, error: e.code || 'local_write_failed' };
+  }
+  return { success: true };
 }
 
 // ============ SKILL EXCHANGES ============
@@ -239,10 +341,12 @@ module.exports = {
   // Presence
   heartbeat,
   getActiveUsers,
+  getActiveUsersResult,
   setVisibility,
 
   // Messages
   sendMessage,
+  getInboxResult,
   getInbox,
   getRawInbox,
   getUnreadCount,

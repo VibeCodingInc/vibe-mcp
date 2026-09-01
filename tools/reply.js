@@ -173,7 +173,11 @@ async function handler(args) {
 
   // Mark the thread as read since we're replying
   try {
-    await store.markThreadRead(myHandle, targetHandle);
+    // A refusal is not an exception, so `catch` alone could not see it.
+    const marked = await store.markThreadRead(myHandle, targetHandle);
+    if (marked && marked.success === false) {
+      console.warn('[reply] thread not marked read:', marked.error);
+    }
   } catch (e) {
     // Non-fatal - continue
     console.warn('[reply] Failed to mark thread as read:', e.message);

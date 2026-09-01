@@ -82,9 +82,12 @@ hands you a new token, paste it here.`
   // Remove old keypair (security improvement). Remember whether one existed:
   // the success copy below claims "old local keys removed" and must only say
   // that when it actually happened.
-  const removedKeypair = config.hasKeypair();
-  if (removedKeypair) {
+  // Checked AFTER, not before: "they existed and we called remove" is not the
+  // same fact as "they are gone", and until this round they were not gone.
+  let removedKeypair = false;
+  if (config.hasKeypair()) {
     config.removeKeypair();
+    removedKeypair = !config.hasKeypair();
   }
 
   // Send initial heartbeat

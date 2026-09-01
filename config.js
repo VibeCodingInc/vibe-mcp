@@ -82,22 +82,40 @@ function load() {
 
 function save(config) {
   ensureDir();
-  // Load existing to preserve fields we're not updating
+  // Load existing to preserve fields we're not updating.
+  //
+  // Every field below falls back to `existing`, so a file that failed to parse
+  // does not merge into this write — it VANISHES from it, and the auth token
+  // with it. Signing someone out is not a repair for a file we could not read.
   let existing = {};
-  try {
-    if (fs.existsSync(PRIMARY_CONFIG)) {
+  if (fs.existsSync(PRIMARY_CONFIG)) {
+    try {
       existing = JSON.parse(fs.readFileSync(PRIMARY_CONFIG, 'utf8'));
+    } catch (e) {
+      console.error('Refusing to write config: the file on disk could not be read.', e.message);
+      return false;
     }
-  } catch (e) {}
+  }
+
+  // "Did the caller mention this field?" — distinct from "is its value truthy".
+  // The fallbacks below are truthy-or-existing, which cannot express a removal:
+  // removeKeypair() deleted the keys and save() restored them from disk, so
+  // vibe_token's "old local keys removed" was never true. For the fields where
+  // an explicit empty value is a real instruction, presence decides.
+  const has = (k) => !!config && Object.prototype.hasOwnProperty.call(config, k);
 
   // Save to primary config (~/.vibe/config.json)
   const data = {
     username: config.handle || config.username || existing.username,
-    workingOn: config.one_liner || config.workingOn || existing.workingOn,
+    // An empty one_liner is a person clearing what they're working on, not an
+    // absent update; the truthy chain kept showing the previous line forever.
+    workingOn: has('one_liner') ? config.one_liner
+      : has('workingOn') ? config.workingOn
+      : existing.workingOn,
     createdAt: config.createdAt || existing.createdAt || new Date().toISOString().split('T')[0],
     // AIRC keypair (persisted across sessions)
-    publicKey: config.publicKey || existing.publicKey || null,
-    privateKey: config.privateKey || existing.privateKey || null,
+    publicKey: has('publicKey') ? (config.publicKey ?? null) : (existing.publicKey || null),
+    privateKey: has('privateKey') ? (config.privateKey ?? null) : (existing.privateKey || null),
     // Guided mode (AskUserQuestion menus)
     guided_mode: config.guided_mode !== undefined ? config.guided_mode : existing.guided_mode,
     // GitHub Activity settings
@@ -107,8 +125,43 @@ function save(config) {
     authToken: config.authToken || config.privyToken || existing.authToken || existing.privyToken || null,
     authMethod: config.authMethod || existing.authMethod || null
   };
+  // Fields this function does not enumerate — x_credentials, firstDmSent,
+  // pendingAuth, visible — used to vanish on every save, because the object
+  // above is built field by field.
+  //
+  // Two layers are needed, not one. Spreading `existing` keeps what was already
+  // on disk (each key in `data` already falls back to its existing value, so the
+  // overlay never replaces a real value with a null it invented). But callers
+  // also SET these fields — `cfg.pendingAuth = true`, `cfg.visible = true`,
+  // `save({firstDmSent: true})` — and those writes were dropped just as
+  // silently. Keeping only `existing` would preserve the old value and still
+  // ignore the update, which reads as working and isn't. So the caller's own
+  // non-translated keys go on top of `existing` and under `data`.
+  //
+  // TRANSLATED names are excluded because they are aliases the block above
+  // already resolved; passing them through would write both spellings.
+  const TRANSLATED = new Set([
+    'handle', 'one_liner', 'username', 'workingOn', 'createdAt',
+    'publicKey', 'privateKey', 'guided_mode', 'authToken', 'privyToken',
+    'authMethod', 'github_activity_enabled', 'github_activity_privacy',
+  ]);
+  const fromCaller = {};
+  for (const [k, v] of Object.entries(config || {})) {
+    if (!TRANSLATED.has(k)) fromCaller[k] = v;
+  }
+  const merged = { ...existing, ...fromCaller, ...data };
+
   // 0600: this file carries the auth token — it is a credential, not a preference.
-  fs.writeFileSync(PRIMARY_CONFIG, JSON.stringify(data, null, 2), { mode: 0o600 });
+  const tmp = `${PRIMARY_CONFIG}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(merged, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, PRIMARY_CONFIG);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch {}
+    console.error('Failed to save config:', e.message);
+    return false;
+  }
+  return true;
 }
 
 function getHandle() {
@@ -198,6 +251,19 @@ function generateSessionId() {
   return 'sess_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 10);
 }
 
+// Distinguishes "no session yet" (absent) from "unreadable" (present, corrupt),
+// which getSessionData() cannot: both come back as null.
+function sessionFileIsReadable() {
+  if (!fs.existsSync(SESSION_FILE)) return true;
+  try {
+    const content = fs.readFileSync(SESSION_FILE, 'utf8').trim();
+    if (content.startsWith('{')) JSON.parse(content);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 function getSessionData() {
   try {
     if (fs.existsSync(SESSION_FILE)) {
@@ -215,7 +281,20 @@ function getSessionData() {
 
 function saveSessionData(data) {
   ensureDir();
-  fs.writeFileSync(SESSION_FILE, JSON.stringify(data, null, 2));
+  if (!sessionFileIsReadable()) {
+    console.error('Refusing to write session data: the file on disk could not be read.');
+    return false;
+  }
+  const tmp = `${SESSION_FILE}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, SESSION_FILE);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch {}
+    console.error('Failed to save session data:', e.message);
+    return false;
+  }
+  return true;
 }
 
 function getSessionId() {
@@ -375,9 +454,11 @@ const hasPrivyAuth = hasOAuth;
  */
 function removeKeypair() {
   const cfg = load();
-  delete cfg.publicKey;
-  delete cfg.privateKey;
-  save(cfg);
+  // Explicitly null, not deleted: an absent key means "no instruction" to
+  // save(), and the old value came straight back off disk.
+  cfg.publicKey = null;
+  cfg.privateKey = null;
+  const saved = save(cfg);
 
   // Also clear from session
   const data = getSessionData();
@@ -386,6 +467,7 @@ function removeKeypair() {
     delete data.privateKey;
     saveSessionData(data);
   }
+  return saved;
 }
 
 /**

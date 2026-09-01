@@ -28,10 +28,38 @@ function loadProfiles() {
   return {};
 }
 
+// True only when the store on disk is absent (a legitimate first write) or
+// parses. A present-but-unreadable file loaded as {}, so writing over it would
+// delete every profile it holds.
+function storeIsReadable() {
+  if (!fs.existsSync(PROFILES_FILE)) return true;
+  try {
+    JSON.parse(fs.readFileSync(PROFILES_FILE, 'utf8'));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 // Save all profiles to disk
 function saveProfiles(profiles) {
+  // Every mutator above is a read-modify-write over the whole store, and
+  // loadProfiles() cannot tell "no profiles" from "unreadable". A read that did
+  // not succeed is not permission to write.
+  if (!storeIsReadable()) {
+    console.error('Refusing to write profiles: the store on disk could not be read.');
+    return false;
+  }
   try {
-    fs.writeFileSync(PROFILES_FILE, JSON.stringify(profiles, null, 2));
+    const tmp = `${PROFILES_FILE}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(profiles, null, 2));
+      fs.renameSync(tmp, PROFILES_FILE);
+    } catch (e) {
+      try { fs.unlinkSync(tmp); } catch {}
+      throw e;
+    }
+    return true;
   } catch (e) {
     console.error('Failed to save profiles:', e.message);
   }

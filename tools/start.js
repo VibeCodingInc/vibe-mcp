@@ -17,9 +17,7 @@ const { inertField } = require('../incoming');
 const store = require('../store');
 const memory = require('../memory');
 const patterns = require('../intelligence/patterns');
-const { actions, formatActions } = require('./_actions');
-const { firstDmNudge, isHereNow } = require('./_shared');
-const { weaveMoment } = require('./weave');
+const { isHereNow, normalizeHandle } = require('./_shared');
 const init = require('./init');
 const { gatherWithTimeout } = require('./_work-context');
 
@@ -151,25 +149,6 @@ function compareVersions(v1, v2) {
   return 0;
 }
 
-/**
- * Generate ASCII welcome card - matches init.js format
- * Format: logo | handle + unread | tagline + online
- */
-function generateWelcomeCard({ handle, onlineCount, unreadCount, versionInfo }) {
-  // Match init.js generateAuthBanner format for consistency
-  const handleCol = `@${handle}`.padEnd(16);
-  const unreadCol = unreadCount > 0 ? `📬 ${unreadCount} unread`.padEnd(14) : `📬 0 messages`.padEnd(14);
-
-  // Add version badge if available
-  let versionSuffix = '';
-  if (versionInfo?.hasUpdate) {
-    versionSuffix = ' ⬆️';
-  }
-
-  return `  █░█ █ █▄▄ █▀▀   ${handleCol}  ask here · answer there
-  ▀▄▀ █ █▄█ ██▄   ${unreadCol}  🟢 ${onlineCount} online${versionSuffix}
-  ──────────────────────────────────────────────────`;
-}
 
 const definition = {
   name: 'vibe_start',
@@ -205,16 +184,12 @@ async function handler(args) {
 
   // Step 2: User is authenticated - show dashboard
   const myHandle = config.getHandle();
-  let threads = [];
   let updateNotice = '';
 
   // If we just updated, show a notice
   if (updateResult?.updated) {
     updateNotice = `\n\n⬆️ **Updated v${updateResult.from} → v${updateResult.to}** — restart your coding agent to apply`;
   }
-
-  // Fetch version info early (non-blocking, cached)
-  const versionInfo = await getVersionInfo().catch(() => null);
 
   // ═══════════════════════════════════════════════════════════════════════
   // AMBIENT CONTEXT: Gather work context and auto-set presence
@@ -245,48 +220,42 @@ async function handler(args) {
   // Log session start for patterns
   patterns.logSessionStart(myHandle);
 
-  // Get threads for memory context
-  try {
-    threads = memory.listThreads();
-  } catch (e) {}
-
   // Step 2: Get who's around
-  const users = await store.getActiveUsers();
-  const others = users.filter(u => u.handle !== myHandle);
+  // A presence request that FAILED is not an empty room (round-7 review):
+  // getActiveUsers flattens transport failure to [], so without this outcome
+  // "0 others here" is a claim nobody verified.
+  const presence = await store.getActiveUsersResult();
+  const presenceRead = presence.ok;
+  const users = presence.users;
+  // Compared normalized: an exact !== lets a differently-cased or @-prefixed
+  // copy of your own handle through, and then "N others here" counts you.
+  const me = normalizeHandle(myHandle || '');
+  const others = users.filter(u => normalizeHandle(u.handle || '') !== me);
   // GREEN MEANS A RECENT CONFIRMED HEARTBEAT — the same isHereNow gate who and
   // dm use. getActiveUsers returns active+away merged; rendering that union
   // under 🟢 told users someone was live who last breathed 25 minutes ago.
   const hereNow = others.filter(isHereNow);
-  const away = others.filter(u => !isHereNow(u));
 
-  // Step 3: Check inbox
+  // Step 3: Check inbox. A FAILED read is not an empty inbox (review P1):
+  // getInbox swallows transport errors into [], so without this flag a
+  // network failure renders as "0 unread" and as "no messages yet" — two
+  // claims nothing supports.
   let unreadCount = 0;
   let inboxThreads = [];
+  let inboxRead = false;
   try {
-    // Fetch full inbox (not just count) so we can include summaries
-    inboxThreads = await store.getInbox(myHandle);
+    // getInboxResult keeps the outcome that getInbox() flattens away.
+    const read = await store.getInboxResult(myHandle);
+    inboxRead = read.ok === true;
+    inboxThreads = read.threads || [];
     unreadCount = inboxThreads.reduce((sum, t) => sum + (t.unread || 0), 0);
-  } catch (e) {}
+  } catch (e) {
+    inboxThreads = [];
+  }
 
-  // Step 3b: Check for guest session messages + pair status (multiplayer)
-  let guestMessages = [];
-  let pairStatus = null;
-  try {
-    const apiUrl = config.getApiUrl();
-    const headers = apiHeaders();
-    const [guestResp, pairResp] = await Promise.all([
-      fetch(`${apiUrl}/api/session/guest?handle=${encodeURIComponent(myHandle)}`, { headers }),
-      fetch(`${apiUrl}/api/pair?handle=${encodeURIComponent(myHandle)}`, { headers }),
-    ]);
-    const guestData = await guestResp.json();
-    if (guestData.success && guestData.messages && guestData.messages.length > 0) {
-      guestMessages = guestData.messages;
-    }
-    const pairData = await pairResp.json();
-    if (pairData.success && pairData.paired) {
-      pairStatus = pairData;
-    }
-  } catch (e) {}
+  // Step 3b removed with the first-screen rewrite: the guest/pair fetches
+  // cost two HTTP round trips on every start and fed blocks this screen no
+  // longer renders. vibe_guest still owns that surface.
 
   // Step 4 used to fetch /api/suggestions and render "Suggested connections" — three
   // strangers proposed on every session start, in the DEFAULT surface rather than behind
@@ -298,211 +267,77 @@ async function handler(args) {
   // nobody to say anything about. NOTE: `workContext.suggestions` elsewhere in this file
   // is unrelated — that is local work context, not people.
 
-  // Generate the ASCII welcome card (matches init.js format)
-  const welcomeCard = generateWelcomeCard({
-    handle: myHandle,
-    onlineCount: hereNow.length,
-    unreadCount,
-    versionInfo
-  });
+  // ── THE FIRST SCREEN ────────────────────────────────────────────────
+  // One authoritative count, no message bodies, no chosen person, and the
+  // three things a person can actually do. Everything that used to live here
+  // — the presence list, message previews, the ambient footer's copy of the
+  // same messages, rotating tips, weave/guest/pair/memory blocks — either
+  // duplicated a fact stated elsewhere or made a claim this screen cannot
+  // verify. What a person needs on arrival is: who am I, what is waiting,
+  // and what can I say next.
+  const hereCount = hereNow.length;
+  const unreadSenders = inboxThreads.filter((t) => t.unread > 0);
+  // Server-supplied strings on a single line: a long handle or id would wrap
+  // and blow the line budget, and a control character would add literal lines
+  // (review P2).
+  const cell = (v, max) => inertField(String(v || ''), max);
 
-  // Build display with card + any additional info
-  let display = welcomeCard;
-
-  // Add who's online section (top 5 with what they're building).
-  // Only isHereNow rows may sit under 🟢; everyone else is ○ away, in words.
-  if (hereNow.length > 0) {
-    const top5 = hereNow.slice(0, 5);
-    display += `\n\n**🟢 Online now:**`;
-    top5.forEach(u => {
-      // status/one_liner/note are written by other users — inert before they
-      // land in this session's context (codex F8 coverage).
-      const status = u.status ? ` (${inertField(u.status, 30)})` : '';
-      const truncated = inertField(u.one_liner || u.note || '', 40);
-      display += `\n• @${u.handle}${status}${truncated ? ' — ' + truncated : ''}`;
-    });
-    if (hereNow.length > 5) {
-      display += `\n• _+${hereNow.length - 5} more..._`;
-    }
-  }
-  if (away.length > 0) {
-    display += `\n${hereNow.length > 0 ? '' : '\n'}○ ${away.length} away`;
-  }
-
-  // First-DM activation nudge (dormant users only): if this user has never sent
-  // a DM, point them at a real human who's around right now with a ready opener.
-  // Gated inside firstDmNudge so we never nag people who already message.
-  display += firstDmNudge(hereNow, threads);
-
-  // Add unread messages section (if any)
-  if (unreadCount > 0) {
-    const unreadSenders = inboxThreads.filter(t => t.unread > 0);
-    display += `\n\n**📬 Unread (${unreadCount}):**`;
-    unreadSenders.slice(0, 3).forEach(t => {
-      const truncated = inertField(t.lastMessage || '', 50);
-      display += `\n• @${t.handle} (${t.unread}) — "${truncated}"`;
-    });
-    if (unreadSenders.length > 3) {
-      display += `\n• _+${unreadSenders.length - 3} more threads..._`;
-    }
-  }
-
-  // The Weave — "Fable holds your half": if someone replied to a thread and you
-  // haven't answered, surface the moment so the in-session model can draft your
-  // reply in your voice and send it with one word. Best-effort, never blocks start.
-  try {
-    display += await weaveMoment(myHandle);
-  } catch (e) {
-    // weave is additive magic — a failure here must never break vibe_start
-  }
-
-  // Add guest session messages (multiplayer — someone typed into your session)
-  if (guestMessages.length > 0) {
-    display += `\n\n**🎤 ${guestMessages.length} guest message${guestMessages.length > 1 ? 's' : ''} in your session:**`;
-    guestMessages.forEach(m => {
-      const time = new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      display += `\n• [${time}] @${inertField(m.from, 40)}: ${inertField(m.message, 80)}`;
-    });
-    display += `\n_Use vibe_guest with action "ack" to clear after reading._`;
-  }
-
-  // Show pair status if paired with someone
-  if (pairStatus) {
-    const mode = pairStatus.mode || 'coding';
-    display += `\n\n**🔗 Paired with @${pairStatus.partner}** (${mode})`;
-    display += `\n_Session sharing active. Use vibe_guest to exchange messages._`;
-  }
-
-  // Add memory context for returning users
-  if (threads.length > 0) {
-    const recentThreads = threads.slice(0, 3);
-    const names = recentThreads.map(t => `@${t.handle}`).join(', ');
-    display += `\n\n💭 **${threads.length}** people in memory · ${names}`;
-  }
-
-  // Add update notice if we just auto-updated
-  if (updateNotice) {
-    display += updateNotice;
-  }
-
-  // Step 6: Show rotating tips about features.
-  // A tip may only name a tool REGISTERED in a default session (#9.2) — the
-  // old set advertised "vibe stuck" / "vibe available" / "vibe context" /
-  // "start presence monitor", none of which exist, so every rotating tip
-  // told users to run a command that fails. If a tip's tool ever moves
-  // behind VIBE_EXTRAS, the tip moves with it.
-  const tips = [
-    '💡 **Tip:** Say "who\'s around?" — vibe_who shows who has a live heartbeat right now.',
-    '💡 **Tip:** Say "message @handle ..." to DM someone — replies land in your inbox across sessions.',
-    '💡 **Tip:** Say "check my vibe inbox" any time — messages wait for you between sessions.',
-    '💡 **Tip:** Run "npx slashvibe-mcp hook install" so waiting messages appear when your next Claude session starts.'
+  let display = `/vibe @${cell(myHandle, 39)}`;
+  // ONE authoritative live-presence count: store.getActiveUsers(), filtered by
+  // the same isHereNow gate who and dm use, EXCLUDING the signed-in person.
+  // "N here" could be read as the room including you; "N others here" states
+  // exactly what was counted.
+  const counts = [
+    inboxRead ? `${unreadCount} unread` : "couldn't read your inbox",
+    presenceRead
+      ? `${hereCount} other${hereCount === 1 ? '' : 's'} here`
+      : "couldn't see who's here",
   ];
-  const tipIndex = Math.floor(Date.now() / 60000) % tips.length; // Rotate every minute
-  display += `\n\n---\n${tips[tipIndex]}`;
+  display += `\n${counts.join(' · ')}`;
 
-  // Build response with hints for structured dashboard flow
+  if (unreadSenders.length > 0) {
+    // Handle, count, and the STABLE id of the newest message — enough to
+    // reply to exactly that message. The words themselves stay in the thread
+    // until the person opens it.
+    display += '\n';
+    unreadSenders.slice(0, 5).forEach((t) => {
+      const id = t.lastMessageId ? ` · #${cell(t.lastMessageId, 40)}` : '';
+      display += `\n@${cell(t.handle, 39)} (${t.unread})${id}`;
+    });
+    if (unreadSenders.length > 5) {
+      display += `\n_+${unreadSenders.length - 5} more_`;
+    }
+  } else if (inboxRead && inboxThreads.length === 0) {
+    // Only a PROVEN-empty inbox may be called a fresh arrival. Land them on
+    // whoever brought them here; no randomly chosen stranger, ever.
+    display += '\n\n_no messages yet — whoever invited you is the place to start_';
+  }
+
+  if (updateNotice) display += updateNotice;
+
+  display += `\n\nvibe inbox · vibe people · vibe dm @handle "…"`;
+
+  // ── THE RESPONSE ────────────────────────────────────────────────────
+  // The payload obeys the SAME contracts as the screen (review P1): a host
+  // and a model read this, so a body withheld from the display but shipped
+  // here is not withheld at all, and a handle chosen here is still a chosen
+  // handle. What ships is what the screen states — counts, and the threads
+  // waiting with the id needed to answer one exactly. Whoever is online is
+  // vibe_who's answer; whoever to talk to is the person's decision.
   const response = { display };
 
-  // === ENRICHED DATA ===
-  // Include full online users list so Claude doesn't need to call vibe_who
-  response.onlineUsers = others.map(u => ({
-    handle: u.handle,
-    hereNow: isHereNow(u),
-    building: (u.one_liner || u.note) ? inertField(u.one_liner || u.note) : null,
-    status: u.status ? inertField(u.status, 30) : null,
-    lastActive: u.lastSeen ? new Date(u.lastSeen).toISOString() : null
-  }));
-
-  // Include unread thread summaries so Claude doesn't need to call vibe_inbox
-  const unreadSenders = inboxThreads.filter(t => t.unread > 0);
-  response.unreadThreads = unreadSenders.map(t => ({
+  response.unread = inboxRead ? unreadCount : null;   // null = not read, never 0
+  response.here = presenceRead ? hereCount : null;   // null = not read, never 0
+  response.waiting = unreadSenders.slice(0, 5).map((t) => ({
     handle: t.handle,
     unread: t.unread,
-    preview: t.lastMessage ? t.lastMessage.slice(0, 80) : null,
-    isAgent: t.isAgent || false
+    lastMessageId: t.lastMessageId || null,
   }));
 
-  // Include guest session messages (multiplayer)
-  if (guestMessages.length > 0) {
-    response.guestMessages = guestMessages.map(m => ({
-      from: m.from,
-      message: m.message,
-      timestamp: m.timestamp,
-      id: m.id
-    }));
-  }
-
-  // Include pair status if paired
-  if (pairStatus) {
-    response.pairStatus = {
-      paired: true,
-      partner: pairStatus.partner,
-      mode: pairStatus.mode,
-      startedAt: pairStatus.startedAt
-    };
-  }
-
-
-  // Determine session state and suggest appropriate flow
-  let suggestion = null;
-
-  if (unreadCount >= 5) {
-    // Many unread - suggest triage
-    response.hint = 'structured_triage_recommended';
-    response.unread_count = unreadCount;
-  } else if (others.length === 0 && unreadCount === 0) {
-    // Empty room - suggest discovery or invite
-    response.hint = 'suggest_discovery';
-    response.reason = 'empty_room';
-  } else if (others.length > 0) {
-    // People around - check for interesting ones
-    const interesting = hereNow.find(u => {
-      const age = Date.now() - u.lastSeen;
-      return age < 5 * 60 * 1000; // Active in last 5 min
-    });
-    if (interesting) {
-      suggestion = {
-        handle: interesting.handle,
-        reason: 'active_now',
-        context: interesting.note || interesting.one_liner || 'Building something'
-      };
-      response.hint = 'surprise_suggestion';
-      response.suggestion = suggestion;
-    }
-  }
-
-  // Add guided mode actions for AskUserQuestion rendering
-  const onlineHandles = others.map(u => u.handle);
-  let actionList;
-
-  if (others.length === 0 && unreadCount === 0) {
-    // Empty room
-    actionList = actions.emptyRoom({ workContext });
-  } else {
-    // Normal dashboard
-    actionList = actions.dashboard({
-      unreadCount,
-      onlineUsers: onlineHandles,
-      suggestion,
-      workContext
-    });
-  }
-
-  response.actions = formatActions(actionList);
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // WORK CONTEXT: Include in response for Claude to use
-  // ═══════════════════════════════════════════════════════════════════════
-  if (workContext?.suggestions?.brief) {
-    response.workContext = {
-      summary: workContext.suggestions.brief,
-      detailed: workContext.suggestions.detailed,
-      project: workContext.project?.name,
-      branch: workContext.git?.branch,
-      recentCommit: workContext.git?.recentCommits?.[0]?.message || null,
-      hasUncommitted: workContext.git?.hasUncommitted || false
-    };
-  }
+  // Work context is deliberately NOT returned here (review P1): the response
+  // is exactly what the screen states. The local context still does its real
+  // job above — it sets this session's presence note so other people see what
+  // you are working on — which is a side effect, not a payload.
 
   return response;
 }
