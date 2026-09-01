@@ -326,3 +326,53 @@ test('a MISSING local messages file is a genuine empty inbox, not a failure', as
   assert.equal(r.unread, 0, 'no file yet is a real, readable zero');
   assert.ok(!/couldn't read/.test(r.display), 'and is never reported as a failure');
 });
+
+test('a failed read NEVER authorizes a write — a corrupt file is not destroyed', async () => {
+  // review P1 (data loss): markThreadRead read through the swallowing loader
+  // and rewrote the whole file, so one malformed line erased every valid
+  // message in it.
+  const local = require('../store/local.js');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-nodestroy-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  const file = path.join(home, 'messages.jsonl');
+  const original = '{"from":"zoe","to":"ada","body":"keep me","timestamp":1}\n{ not json\n';
+  fs.writeFileSync(file, original);
+  // VIBE_DIR is bound when config loads, so the config module must be
+  // reloaded too or the store writes to the previous home.
+  delete require.cache[require.resolve('../config')];
+  delete require.cache[require.resolve('../store/local.js')];
+  try {
+    const fresh = require('../store/local.js');
+    const res = await fresh.markThreadRead('ada', 'zoe');
+    assert.equal(res?.success, false, 'the mark is refused');
+    assert.equal(fs.readFileSync(file, 'utf8'), original, 'the file is byte-for-byte untouched');
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+    delete require.cache[require.resolve('../store/local.js')];
+    void local;
+  }
+});
+
+test('a good read still marks and rewrites correctly', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-markok-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  const file = path.join(home, 'messages.jsonl');
+  fs.writeFileSync(file, '{"from":"zoe","to":"ada","body":"hi","timestamp":1}\n');
+  delete require.cache[require.resolve('../config')];
+  delete require.cache[require.resolve('../store/local.js')];
+  try {
+    const fresh = require('../store/local.js');
+    const res = await fresh.markThreadRead('ada', 'zoe');
+    assert.equal(res?.success, true);
+    const after = fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.equal(after.length, 1, 'no message lost');
+    assert.ok(after[0].read_at, 'and the mark landed');
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+    delete require.cache[require.resolve('../store/local.js')];
+  }
+});

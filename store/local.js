@@ -199,7 +199,19 @@ async function getThread(myHandle, theirHandle) {
 }
 
 async function markThreadRead(myHandle, theirHandle) {
-  const messages = loadMessages();
+  // A READ-MODIFY-WRITE over the whole file must never run on a swallowed
+  // read (review P1 — DATA LOSS): loadMessages() returns [] for a corrupt or
+  // unreadable file, and the rewrite below would then replace every message,
+  // including the valid ones, with an empty file. A read that did not succeed
+  // is not permission to write; the mark is abandoned and the file is left
+  // exactly as it is.
+  let messages;
+  try {
+    messages = loadMessagesStrict();
+  } catch (e) {
+    console.error('[local] not marking read — the messages file could not be read:', e.message);
+    return { success: false, error: e.code || 'local_read_failed' };
+  }
   const me = myHandle.toLowerCase().replace('@', '');
   const them = theirHandle.toLowerCase().replace('@', '');
   const now = Date.now();
@@ -212,8 +224,13 @@ async function markThreadRead(myHandle, theirHandle) {
     return m;
   });
 
-  // Rewrite the file
-  fs.writeFileSync(MESSAGES_FILE, updated.map(m => JSON.stringify(m)).join('\n') + '\n');
+  // Rewrite the file. Reached only from a read that actually succeeded, and
+  // written via a temp file + rename so an interrupted write cannot leave a
+  // half-file behind either.
+  const tmp = `${MESSAGES_FILE}.tmp`;
+  fs.writeFileSync(tmp, updated.map(m => JSON.stringify(m)).join('\n') + '\n');
+  fs.renameSync(tmp, MESSAGES_FILE);
+  return { success: true };
 }
 
 // ============ SKILL EXCHANGES ============
