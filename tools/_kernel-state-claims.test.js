@@ -579,6 +579,13 @@ test('init (#320): a mint record never outlives the credential it is about', asy
 // A segment that decodes to the SAME bytes but is spelled differently — the
 // trailing pad bits are unused, so more than one encoding exists and only one
 // of them is canonical.
+// Canonical base64url whose decoded bytes are not valid UTF-8.
+function invalidUtf8Payload() {
+  return Buffer.concat([
+    Buffer.from('{"principal_id":"prin_'), Buffer.from([0xFF]), Buffer.from('"}'),
+  ]).toString('base64url');
+}
+
 function nonCanonicalTwin(seg) {
   const target = Buffer.from(seg, 'base64url');
   for (const c of 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_') {
@@ -613,6 +620,13 @@ test('principalFromToken: a malformed JWT proves nothing', () => {
     // the JSON still parses and every other guard passes it — it is simply not
     // the encoding it claims to be. Found by searching the alphabet for a twin.
     ['non-canonical twin', `${H}.${nonCanonicalTwin(P)}.sig`],
+    // Only the FATAL utf-8 decode catches this: canonical base64url carrying an
+    // invalid byte, which toString('utf8') would repair into U+FFFD and hand
+    // back as a principal no server ever issued.
+    ['invalid utf-8 payload', `${H}.${invalidUtf8Payload()}.sig`],
+    // Only the header/claims shape checks catch these.
+    ['array claims', `${H}.${b64([1, 2, 3])}.sig`],
+    ['array header', `${b64([1])}.${P}.sig`],
   ]) {
     assert.equal(authStore.principalFromToken(tok), null, `${name} reported a principal it did not prove`);
   }
@@ -811,6 +825,72 @@ test('verifyAuthToken: a 200 that says no is still an answer', async () => {
   }
 });
 
+for (const [label, failing] of [
+  ['identity write', 'setSessionIdentity'],
+  ['final config write', 'save'],
+]) {
+  test(`init (#320): a failed ${label} alone still reports the failure`, async () => {
+    // Each writer is pinned separately: dropping any ONE of them from the
+    // persisted check left every existing pin green (round-5 review).
+    const cfgPath = path.join(HOME, 'config.json');
+    const keep = fs.readFileSync(cfgPath, 'utf8');
+    const cfg = JSON.parse(keep);
+    cfg.authToken = `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+    const config = require('../config');
+    const real = config[failing];
+    const restoreOauth = stubOauth();
+    const h = toolWith('init', { ...QUIET_STORE, verifyAuthToken: async () => ({ definitive: true, valid: true }) });
+    const initPath = require.resolve('./init.js');
+    try {
+      config[failing] = () => false;
+      await require(initPath)._completeSignInForTest({ token: cfg.authToken, handle: 'ada' }, 'x');
+      config[failing] = real;
+      assert.match((await h.run({}))?.display || '', /could not be saved/,
+        `a failed ${label} was not reported`);
+    } finally {
+      config[failing] = real;
+      require(initPath)._resetMintStateForTest();
+      restoreOauth();
+      h.restore();
+      fs.writeFileSync(cfgPath, keep);
+      clearSessionToken();
+    }
+  });
+}
+
+test('init (#320): a successful sign-in clears an earlier persist complaint', async () => {
+  const cfgPath = path.join(HOME, 'config.json');
+  const keep = fs.readFileSync(cfgPath, 'utf8');
+  const token = `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
+  const cfg = JSON.parse(keep);
+  cfg.username = 'ada';
+  cfg.authToken = token;
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+  const config = require('../config');
+  const realSave = config.save;
+  const restoreOauth = stubOauth();
+  const h = toolWith('init', { ...QUIET_STORE, verifyAuthToken: async () => ({ definitive: true, valid: true }) });
+  const initPath = require.resolve('./init.js');
+  try {
+    config.save = () => false;
+    await require(initPath)._completeSignInForTest({ token, handle: 'ada' }, 'x');
+    config.save = realSave;
+    assert.match((await h.run({}))?.display || '', /could not be saved/, 'setup: the complaint must exist first');
+    // A later sign-in that DOES persist must retire it.
+    await require(initPath)._completeSignInForTest({ token, handle: 'ada' }, 'x');
+    assert.ok(!/could not be saved/.test((await h.run({}))?.display || ''),
+      'a successful sign-in left the old complaint standing');
+  } finally {
+    config.save = realSave;
+    require(initPath)._resetMintStateForTest();
+    restoreOauth();
+    h.restore();
+    fs.writeFileSync(cfgPath, keep);
+    clearSessionToken();
+  }
+});
+
 test('init (#320): a stale persist complaint never attaches to a different credential', async () => {
   // Round-4 confirmed the handle-only key reintroduced the round-2 defect.
   // The record now names the person AND the credential they still hold.
@@ -857,6 +937,44 @@ test('init (#320): a stale persist complaint never attaches to a different crede
   }
 });
 
+test('init (#320): starting a flow never cancels someone else\'s live one', async () => {
+  // Sequentially, so the second creation sees the first already in the map —
+  // the concurrent pin starts both before either lands, so it could not observe
+  // a cancellation (round-5 review).
+  const initPath = require.resolve('./init.js');
+  const oauthPath = require.resolve('../oauth-callback');
+  const realOauth = require.cache[oauthPath];
+  const cancelled = [];
+  require.cache[oauthPath] = {
+    id: oauthPath, filename: oauthPath, loaded: true,
+    exports: {
+      ...(realOauth ? realOauth.exports : {}),
+      beginOAuth: async ({ requestedHandle }) => ({
+        loginUrl: `https://example.invalid/login?who=${requestedHandle}`,
+        waitForCallback: () => new Promise(() => {}),   // stays live
+        cancel: async () => { cancelled.push(requestedHandle); },
+      }),
+    },
+  };
+  const priorCI = process.env.CI;
+  process.env.CI = '1';
+  delete require.cache[initPath];
+  const tool = require(initPath);
+  try {
+    await tool._resetPendingAuth();
+    await tool._ensureAuthFlowForTest({ requestedHandle: 'ada' });
+    assert.equal(tool._flowCountForTest(), 1);
+    await tool._ensureAuthFlowForTest({ requestedHandle: 'bob' });
+    assert.deepEqual(cancelled, [], "Ada's live flow was cancelled when Bob started one");
+    assert.equal(tool._flowCountForTest(), 2, "Ada's flow was dropped from the map");
+  } finally {
+    await tool._resetPendingAuth();
+    if (priorCI === undefined) delete process.env.CI; else process.env.CI = priorCI;
+    if (realOauth) require.cache[oauthPath] = realOauth; else delete require.cache[oauthPath];
+    delete require.cache[initPath];
+  }
+});
+
 test('init (#320): expired flows do not accumulate', async () => {
   const initPath = require.resolve('./init.js');
   const oauthPath = require.resolve('../oauth-callback');
@@ -867,7 +985,8 @@ test('init (#320): expired flows do not accumulate', async () => {
       ...(realOauth ? realOauth.exports : {}),
       beginOAuth: async ({ requestedHandle }) => ({
         loginUrl: `https://example.invalid/login?who=${requestedHandle}`,
-        waitForCallback: () => new Promise(() => {}),
+        // Rejects like a real timeout, which is what marks a flow expired.
+        waitForCallback: () => Promise.reject(new Error('AUTH_TIMEOUT')),
         cancel: async () => {},
       }),
     },
@@ -882,7 +1001,10 @@ test('init (#320): expired flows do not accumulate', async () => {
       await tool._ensureAuthFlowForTest({ requestedHandle: `person${i}` });
     }
     assert.equal(tool._flowCountForTest(), 20);
-    tool._forceExpireForTest();
+    // Expire through the PRODUCTION path — a rejected waitForCallback — rather
+    // than a seam that stamps expiredAt itself. The seam was supplying the very
+    // assignment the pin claimed to protect, so removing it stayed green.
+    await tool._expireViaCallbackForTest();
     tool._ageOutFlowsForTest();
     await tool._ensureAuthFlowForTest({ requestedHandle: 'someone-new' });
     assert.equal(tool._flowCountForTest(), 1,

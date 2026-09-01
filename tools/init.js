@@ -791,8 +791,13 @@ _Say "vibe onboarding" anytime to check your progress_`
 module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE, _completeSignInForTest: completeSignIn, _resetMintStateForTest: () => { lastMintLackedPrincipalForToken = null; lastSignInFailedToPersist = null; },
   _ensureAuthFlowForTest: ensureAuthFlow,
   _flowCountForTest: () => authFlows.size,
+  // Lets a test wait for the rejection handler that marks a flow expired, so
+  // the pin exercises production's own assignment rather than stamping it.
+  _expireViaCallbackForTest: async () => { await new Promise((r) => setImmediate(r)); },
   _ageOutFlowsForTest: () => {
     for (const flow of authFlows.values()) {
-      if (flow.expired) flow.expiredAt = Date.now() - (EXPIRED_RETENTION_MS + 1000);
+      // SHIFTS an existing stamp; it must never create one, or it supplies the
+      // very assignment production is meant to make and the pin cannot fail.
+      if (flow.expired && flow.expiredAt) flow.expiredAt -= (EXPIRED_RETENTION_MS + 1000);
     }
   } };

@@ -95,10 +95,14 @@ function principalFromToken(token) {
     // The header must decode to a JSON object too. `A` is not a possible
     // base64url encoding of anything, and a non-JSON header means this is not
     // a token whose payload we should be reading claims out of.
-    const rawHeader = Buffer.from(header, 'base64url').toString('utf8');
+    // FATAL utf-8: Buffer.toString('utf8') replaces an invalid byte with U+FFFD
+    // rather than failing, which turned `prin_<FF>` into the synthesized
+    // principal `prin_\uFFFD` — a value no server ever issued.
+    const utf8 = new TextDecoder('utf-8', { fatal: true });
+    const rawHeader = utf8.decode(Buffer.from(header, 'base64url'));
     const head = JSON.parse(rawHeader);
     if (!head || typeof head !== 'object' || Array.isArray(head)) return null;
-    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    const claims = JSON.parse(utf8.decode(Buffer.from(payload, 'base64url')));
     if (!claims || typeof claims !== 'object' || Array.isArray(claims)) return null;
     const pid = Object.prototype.hasOwnProperty.call(claims, 'principal_id')
       ? claims.principal_id : null;
