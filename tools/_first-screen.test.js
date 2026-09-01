@@ -44,7 +44,14 @@ const withStore = (stubs, fn) => async () => {
     registerSession: async () => ({}),
     getLiveBroadcastCount: async () => 0,
   };
-  for (const [k, v] of Object.entries({ ...base, ...stubs })) { orig[k] = store[k]; store[k] = v; }
+  const merged = { ...base, ...stubs };
+  // start reads getInboxResult (which keeps the read OUTCOME); a test that
+  // supplies inbox data means "the server answered with this".
+  if (stubs.getInbox && !stubs.getInboxResult) {
+    merged.getInboxResult = async (h) => ({ ok: true, threads: await stubs.getInbox(h) });
+  }
+  if (!merged.getInboxResult) merged.getInboxResult = async () => ({ ok: true, threads: [] });
+  for (const [k, v] of Object.entries(merged)) { orig[k] = store[k]; store[k] = v; }
   try { return await fn(); } finally { for (const [k, v] of Object.entries(orig)) store[k] = v; }
 };
 
@@ -167,15 +174,43 @@ test('DEFECT 2 (dispatcher half) — the first screen carries no ambient footer'
   assert.ok(block.includes("'vibe_start'"), 'vibe_start is in SKIP_FOOTER_TOOLS');
 });
 
-test('a FAILED inbox read is never rendered as an empty one', withStore({
+test('a REAL transport failure is never rendered as an empty inbox', async () => {
+  // A CHILD PROCESS with the API pointed at an unreachable host: the store
+  // binds its base URL at module load, and stubbing a throw proves nothing
+  // because getInbox catches internally. This exercises the production path
+  // end to end (review P1 — the previous pin passed for the wrong reason).
+  const { execFileSync } = require('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-realfail-'));
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
+    username: 'ada', authMethod: 'github',
+    authToken: `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`,
+  }));
+  const script = `
+    const store = require(${JSON.stringify(path.join(__dirname, '..', 'store', 'api.js'))});
+    store.getActiveUsers = async () => [{ handle: 'zoe', status: 'active', lastSeen: Date.now() - 60000 }];
+    store.heartbeat = async () => ({}); store.registerSession = async () => ({});
+    require(${JSON.stringify(path.join(__dirname, 'start.js'))}).handler({}).then((r) => {
+      process.stdout.write(JSON.stringify({ display: r.display, unread: r.unread }));
+    });
+  `;
+  const out = execFileSync('node', ['-e', script], {
+    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_API_URL: 'http://127.0.0.1:9', VIBE_SETUP_NO_AUTORUN: '1' },
+    encoding: 'utf8', timeout: 30000,
+  });
+  const r = JSON.parse(out);
+  assert.match(r.display, /couldn't read your inbox/, 'says the read failed');
+  assert.ok(!/\b0 unread\b/.test(r.display), 'never claims zero unread from a failed read');
+  assert.ok(!/no messages yet/.test(r.display), 'never claims a fresh arrival from a failed read');
+  assert.equal(r.unread, null, 'the payload says not-read, not zero');
+});
+
+test('the response has EXACTLY the promised keys — nothing rides along', withStore({
   getActiveUsers: async () => [here('zoe')],
-  getInbox: async () => { throw new Error('network down'); },
+  getInbox: async () => INBOX,
 }, async () => {
-  const { text, res } = await run();
-  assert.match(text, /couldn't read your inbox/, 'says the read failed');
-  assert.ok(!/\b0 unread\b/.test(text), 'never claims zero unread from a failed read');
-  assert.ok(!/no messages yet/.test(text), 'never claims a fresh arrival from a failed read');
-  assert.equal(res.unread, null, 'the payload says not-read, not zero');
+  const { res } = await run();
+  assert.deepEqual(Object.keys(res).sort(), ['display', 'here', 'unread', 'waiting'],
+    `unexpected keys: ${Object.keys(res).join(', ')}`);
 }));
 
 test('a genuinely empty inbox states zero explicitly', withStore({

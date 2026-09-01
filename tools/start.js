@@ -236,9 +236,10 @@ async function handler(args) {
   let inboxThreads = [];
   let inboxRead = false;
   try {
-    inboxThreads = await store.getInbox(myHandle);
-    inboxRead = Array.isArray(inboxThreads);
-    if (!inboxRead) inboxThreads = [];
+    // getInboxResult keeps the outcome that getInbox() flattens away.
+    const read = await store.getInboxResult(myHandle);
+    inboxRead = read.ok === true;
+    inboxThreads = read.threads || [];
     unreadCount = inboxThreads.reduce((sum, t) => sum + (t.unread || 0), 0);
   } catch (e) {
     inboxThreads = [];
@@ -323,19 +324,10 @@ async function handler(args) {
     lastMessageId: t.lastMessageId || null,
   }));
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // WORK CONTEXT: Include in response for Claude to use
-  // ═══════════════════════════════════════════════════════════════════════
-  if (workContext?.suggestions?.brief) {
-    response.workContext = {
-      summary: workContext.suggestions.brief,
-      detailed: workContext.suggestions.detailed,
-      project: workContext.project?.name,
-      branch: workContext.git?.branch,
-      recentCommit: workContext.git?.recentCommits?.[0]?.message || null,
-      hasUncommitted: workContext.git?.hasUncommitted || false
-    };
-  }
+  // Work context is deliberately NOT returned here (review P1): the response
+  // is exactly what the screen states. The local context still does its real
+  // job above — it sets this session's presence note so other people see what
+  // you are working on — which is a side effect, not a payload.
 
   return response;
 }
