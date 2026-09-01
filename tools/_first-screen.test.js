@@ -756,3 +756,15 @@ test('a session write that cannot complete leaves the original intact and no .tm
     delete require.cache[require.resolve('../config')];
   }
 });
+
+test('signing in does not erase the line you set earlier', () => {
+  // The reverse hazard of making a clear expressible: the sign-in paths passed
+  // `one_liner || ''`, which save() would now honour as "clear it".
+  const init = fs.readFileSync(path.join(__dirname, 'init.js'), 'utf8');
+  assert.ok(
+    !/^\s*(cfg|authConfig)\.one_liner = one_liner \|\| '';/m.test(init),
+    'a sign-in path still passes an empty one_liner as though it were an instruction'
+  );
+  assert.equal([...init.matchAll(/if \(one_liner\) (cfg|authConfig)\.one_liner = one_liner;/g)].length, 3,
+    'all three sign-in call sites must guard the assignment');
+});
