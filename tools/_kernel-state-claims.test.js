@@ -33,7 +33,11 @@ const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 fs.writeFileSync(path.join(HOME, 'config.json'), JSON.stringify({
   username: 'ada',
   authMethod: 'github',
-  authToken: `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`,
+  // principal_id matters too (#320): a handle-only token now correctly REFUSES
+  // the already-signed-in short-circuit (it falls through to reauth), so the
+  // fixture must prove a principal for every test that expects the signed-in
+  // surface. The handle-only shape gets its own pin below.
+  authToken: `h.${b64({ sub: 'ada', principal_id: 'prin_ada_1', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`,
   one_liner: 'migration cleanup',
 }));
 
@@ -294,6 +298,71 @@ test('isHereNow: one rule for green, shared by who and dm', () => {
 });
 
 // ── 3c. Signing off ends presence, not identity ────────────────────────────
+
+// getAuthToken() reads the per-process session file BEFORE config.json, so a
+// pin that plants a handle-only credential must clear both or it leaks forward.
+function clearSessionToken() {
+  try { fs.unlinkSync(path.join(HOME, `.session_${process.pid}`)); } catch {}
+}
+
+test('init (#320): a handle-only session never claims "already signed in"', async () => {
+  // The trap this pins shut: web reauth minted a principal-bearing cookie, but
+  // ~/.vibe/auth.json kept the Aug-13 handle-only token and vibe_init
+  // short-circuited — leaving the terminal with NO path to the server's reauth
+  // action. A valid handle-only credential must fall through instead.
+  const cfgPath = path.join(HOME, 'config.json');
+  const keep = fs.readFileSync(cfgPath, 'utf8');
+  const cfg = JSON.parse(keep);
+  cfg.authToken = `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+  const h = toolWith('init', {
+    ...QUIET_STORE,
+    verifyAuthToken: async () => ({ definitive: false }),
+  });
+  try {
+    const r = await h.run({});
+    const display = r?.display || '';
+    assert.ok(!/Already signed in/.test(display),
+      'a handle-only session must not short-circuit — it has no principal to be signed in AS');
+  } finally {
+    h.restore();
+    fs.writeFileSync(cfgPath, keep);
+    clearSessionToken();
+  }
+});
+
+test('init (#320): a second handle-only mint says so instead of looping', async () => {
+  // Falling through is right ONCE. If the sign-in that just completed came back
+  // handle-only too, sending the person around again is a loop, not a fix.
+  const cfgPath = path.join(HOME, 'config.json');
+  const keep = fs.readFileSync(cfgPath, 'utf8');
+  const cfg = JSON.parse(keep);
+  cfg.authToken = `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+  const initPath = require.resolve('./init.js');
+  const h = toolWith('init', {
+    ...QUIET_STORE,
+    verifyAuthToken: async () => ({ definitive: false }),
+  });
+  try {
+    // Complete a sign-in whose token proves only the handle.
+    const tool = require(initPath);
+    await tool._completeSignInForTest(
+      { token: `h.${b64({ sub: 'ada' })}.sig`, handle: 'ada' }, 'migration cleanup'
+    );
+    const r = await h.run({});
+    const display = r?.display || '';
+    assert.match(display, /still proves only your handle/,
+      'a repeat handle-only mint must be named, not retried silently');
+    assert.match(display, /server-side minting issue/);
+    assert.ok(!/Already signed in/.test(display));
+  } finally {
+    require(initPath)._resetMintStateForTest();   // module state must not leak
+    h.restore();
+    fs.writeFileSync(cfgPath, keep);
+    clearSessionToken();
+  }
+});
 
 test('init (already signed in): bye keeps your identity — no logout, no re-init', async () => {
   const h = toolWith('init', {

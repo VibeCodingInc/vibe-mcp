@@ -54,6 +54,25 @@ function handleFromToken(token) {
   }
 }
 
+/**
+ * The principal a token PROVES, from its own claim — or null for the legacy
+ * handle-only shape. Decode, not verify (same posture as handleFromToken):
+ * the server checks the signature on every call; this answers the narrower
+ * local question "does this credential carry principal authority at all?"
+ * A handle is a mutable label; only the principal claim is authority (#300).
+ */
+function principalFromToken(token) {
+  try {
+    const part = String(token).split('.')[1];
+    if (!part) return null;
+    const claims = JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
+    const pid = claims.principal_id;
+    return typeof pid === 'string' && pid ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
 function hydrate() {
   if (_hydrated) return; // Only hydrate once
 
@@ -346,6 +365,7 @@ module.exports = {
   getHandle,
   hasRejectedCredential,
   inspectToken,
+  principalFromToken,
   setOneLiner,
   getOneLiner,
   isAuthenticated,

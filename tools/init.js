@@ -324,7 +324,18 @@ const AUTH_SENTENCE = 'Open this, sign in with GitHub, then say vibe start.';
 let pendingAuth = null; // { oauth, loginUrl, startedAt, browserOpened, expired }
 let pendingAuthCreation = null; // in-flight ensureAuthFlow, so concurrent starts share ONE flow (review P1)
 
+// Set when a completed sign-in came back proving only the handle. Under the
+// blocking flow this was a return value; the flow is non-blocking now, so the
+// fact has to outlive the call that learned it — otherwise the fall-through
+// above sends the person around the same loop forever.
+let lastMintLackedPrincipal = false;
+
 async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) {
+  // VERIFY BEFORE CLAIMING (#320): the point of reauth is a credential that
+  // PROVES the principal. Decode the claim before anything reports success — a
+  // fresh token without principal_id is still saved (it is the newer valid
+  // credential) but nothing may describe it as principal-bearing.
+  lastMintLackedPrincipal = !authStore.principalFromToken(token);
   if (actor) await actorSession.installOAuthSession(actor);
   else await actorSession.clearActorSession();
   config.saveAuthToken(token);
@@ -473,7 +484,28 @@ async function handler(args) {
         console.error(`[vibe] Saved session for @${existingHandle} was rejected by the server — reconnecting.`);
       }
     }
-    if (existingHandle && !sessionDead) {
+    // #320: a session that proves only a HANDLE cannot exercise principal
+    // authority (thought-bearing invitations refuse it with principal_required).
+    // The server mints principal-bearing sessions on every fresh OAuth — but
+    // this short-circuit was the trap: "Already signed in" left the legacy
+    // credential in place with no path to the server's reauth action. A valid
+    // handle-only token therefore falls through to re-auth; offline/timeout
+    // still short-circuits, because unreachable is not invalid.
+    const provesPrincipal = !!authStore.principalFromToken(config.getAuthToken());
+    if (existingHandle && !sessionDead && !provesPrincipal) {
+      console.error(`[vibe] @${existingHandle}'s saved session proves the handle but not the principal — refreshing sign-in (server action: reauth).`);
+      // …unless the last completed sign-in ALREADY came back handle-only. Then
+      // reauth is not a fix, it is a loop, and the honest thing is to say so.
+      if (lastMintLackedPrincipal) {
+        return {
+          display: `## Signed in as @${existingHandle} — but this session still proves only your handle\n\n`
+            + `The server did not mint a principal claim into your last sign-in, so principal-gated actions `
+            + `will still refuse with \`principal_required\`. The refreshed credential was saved. `
+            + `Signing in again will not change this — it is a server-side minting issue, not something you did.`,
+        };
+      }
+    }
+    if (existingHandle && !sessionDead && provesPrincipal) {
       // Enrich the returning-user surface — this fires on every `vibe` for an
       // already-authed user, so it's our highest-frequency touchpoint. Surface
       // unread (the reason to come back) and, if we have no email on file, nudge
@@ -652,4 +684,4 @@ _Say "vibe onboarding" anytime to check your progress_`
   };
 }
 
-module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE };
+module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE, _completeSignInForTest: completeSignIn, _resetMintStateForTest: () => { lastMintLackedPrincipal = false; } };
