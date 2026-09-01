@@ -471,3 +471,18 @@ test('a corrupt presence file is never overwritten by a heartbeat', async () => 
     delete require.cache[require.resolve('../store/local.js')];
   }
 });
+
+test('"N others here" never counts the signed-in person, whatever the casing', withStore(
+  {
+    getActiveUsers: async () => [
+      { handle: '@Ada', status: 'active', lastSeen: now - 60_000 },   // me, differently cased
+      here('zoe'),
+      here('ren'),
+    ],
+  },
+  async () => {
+    const { res } = await run();
+    assert.equal(res.here, 2, 'the signed-in person leaked into the "others" count');
+    assert.match(res.display, /2 others here/);
+  }
+));

@@ -17,7 +17,7 @@ const { inertField } = require('../incoming');
 const store = require('../store');
 const memory = require('../memory');
 const patterns = require('../intelligence/patterns');
-const { isHereNow } = require('./_shared');
+const { isHereNow, normalizeHandle } = require('./_shared');
 const init = require('./init');
 const { gatherWithTimeout } = require('./_work-context');
 
@@ -222,7 +222,10 @@ async function handler(args) {
 
   // Step 2: Get who's around
   const users = await store.getActiveUsers();
-  const others = users.filter(u => u.handle !== myHandle);
+  // Compared normalized: an exact !== lets a differently-cased or @-prefixed
+  // copy of your own handle through, and then "N others here" counts you.
+  const me = normalizeHandle(myHandle || '');
+  const others = users.filter(u => normalizeHandle(u.handle || '') !== me);
   // GREEN MEANS A RECENT CONFIRMED HEARTBEAT — the same isHereNow gate who and
   // dm use. getActiveUsers returns active+away merged; rendering that union
   // under 🟢 told users someone was live who last breathed 25 minutes ago.
