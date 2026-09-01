@@ -1,13 +1,13 @@
 {
-  "version": "0.8.21",
+  "version": "0.8.22",
   "updated": "2026-08-31",
-  "changelog": "People. You can now put yourself on a list of people who chose to be findable \u2014 say vibe list me \"what you're building\" \u2014 and browse it with vibe people. It is opt-in, it is not the same as vibe who (who's present this moment), and you can take yourself off any time with vibe unlist me. Nothing lists you automatically, nothing ranks or recommends anyone, and nothing picks who you message: you choose someone because their work makes you curious.",
+  "changelog": "The first screen. vibe start is now seven lines: who you are, what's waiting, how many others are here, and where to go next. No message bodies, no chosen person, no drafted DM, no rotating tips. And it only says what it actually read — if your inbox or the room can't be reached it says so, instead of showing you a confident zero.",
   "features": [
-    "vibe people \u2014 everyone who chose to be findable, online or not; flat list, no ranking, no suggestions",
-    "vibe list me \"building \u2026\" \u2014 put yourself on the list with what you're working on; says plainly that anyone signed in can then find and DM you",
-    "vibe unlist me \u2014 take yourself off; conversations untouched",
-    "Listing reads the list back before claiming it worked, and says which actually happened",
-    "Other people's words render inert: no HTML, no markdown styling, no forged rows \u2014 and no censoring either"
+    "vibe start is seven lines and states the unread count exactly once",
+    "A failed read is never rendered as an empty inbox or an empty room",
+    "No message bodies on the first screen, and nobody is chosen for you",
+    "A read that did not succeed can no longer authorize a write — six places where one corrupt line destroyed messages, profiles, presence or your credential",
+    "vibe token no longer says “old local keys removed” unless they are gone"
   ],
   "deprecated": [],
   "breaking": false,
