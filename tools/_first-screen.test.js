@@ -768,3 +768,32 @@ test('signing in does not erase the line you set earlier', () => {
   assert.equal([...init.matchAll(/if \(one_liner\) (cfg|authConfig)\.one_liner = one_liner;/g)].length, 3,
     'all three sign-in call sites must guard the assignment');
 });
+
+test('vibe_start({}) with no building value never erases an existing work status', async () => {
+  // The round-10 reproduction, at the production boundary: start passes
+  // building=undefined into the auth path, which used to become one_liner: ''.
+  const { execFileSync } = require('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-keepwork-'));
+  const file = path.join(home, 'config.json');
+  fs.writeFileSync(file, JSON.stringify({ username: 'ada', workingOn: 'KEEP-WORK' }, null, 2));
+  const script = `
+    require(${JSON.stringify(path.join(__dirname, 'start.js'))}).handler({}).then(() => {
+      process.stdout.write('done');
+    }).catch(() => process.stdout.write('done'));
+  `;
+  // The auth path parks a callback listener that outlives the tool call, so the
+  // child does not exit on its own. The write under test happens before that,
+  // when pendingAuth is persisted, so the kill is expected and not a result.
+  try {
+    execFileSync('node', ['-e', script], {
+      env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_API_URL: 'http://127.0.0.1:9',
+             VIBE_SETUP_NO_AUTORUN: '1', CI: '1' },
+      encoding: 'utf8', timeout: 8000,
+    });
+  } catch (e) {
+    if (e.code !== 'ETIMEDOUT' && e.signal !== 'SIGTERM') throw e;
+  }
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(after.pendingAuth, true, 'the child never reached the write under test');
+  assert.equal(after.workingOn, 'KEEP-WORK', 'an omitted input erased the work status');
+});
