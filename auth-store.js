@@ -62,11 +62,23 @@ function handleFromToken(token) {
  * A handle is a mutable label; only the principal claim is authority (#300).
  */
 function principalFromToken(token) {
+  // Only a well-formed JWT answers this question. Reading segment [1] out of
+  // whatever String() produced accepted `h.<payload>`, `.<payload>.sig`,
+  // `h.<payload>.sig.extra` and an object whose toString() returned a token —
+  // every one of them then reported principal authority it had not proven.
+  if (typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const [header, payload, signature] = parts;
+  if (!header || !payload || !signature) return null;
+  // base64url alphabet only: Buffer.from is lenient and silently skips the
+  // characters that would tell us this is not a token at all.
+  if (!/^[A-Za-z0-9_-]+$/.test(header) || !/^[A-Za-z0-9_-]+$/.test(payload)) return null;
   try {
-    const part = String(token).split('.')[1];
-    if (!part) return null;
-    const claims = JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
-    const pid = claims.principal_id;
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!claims || typeof claims !== 'object' || Array.isArray(claims)) return null;
+    const pid = Object.prototype.hasOwnProperty.call(claims, 'principal_id')
+      ? claims.principal_id : null;
     return typeof pid === 'string' && pid ? pid : null;
   } catch {
     return null;

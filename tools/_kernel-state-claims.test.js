@@ -301,6 +301,30 @@ test('isHereNow: one rule for green, shared by who and dm', () => {
 
 // getAuthToken() reads the per-process session file BEFORE config.json, so a
 // pin that plants a handle-only credential must clear both or it leaks forward.
+// The principal fall-through lands in the REAL OAuth flow. A test must never
+// reach it: an earlier version of this pin actually opened a sign-in window on
+// the developer's machine, and left a callback listener running afterwards.
+function stubOauth() {
+  // Belt: CI is what openBrowser itself checks, so this holds even if the
+  // module stub below is defeated by require ordering.
+  const priorCI = process.env.CI;
+  process.env.CI = '1';
+  const oauthPath = require.resolve('../oauth-callback');
+  const real = require.cache[oauthPath];
+  require.cache[oauthPath] = {
+    id: oauthPath, filename: oauthPath, loaded: true,
+    exports: {
+      ...(real ? real.exports : {}),
+      beginOAuth: async () => { throw new Error('reauth-flow-reached'); },
+    },
+  };
+  return () => {
+    if (priorCI === undefined) delete process.env.CI; else process.env.CI = priorCI;
+    if (real) require.cache[oauthPath] = real; else delete require.cache[oauthPath];
+    try { require('./init.js')._resetPendingAuth(); } catch {}
+  };
+}
+
 function clearSessionToken() {
   try { fs.unlinkSync(path.join(HOME, `.session_${process.pid}`)); } catch {}
 }
@@ -315,9 +339,13 @@ test('init (#320): a handle-only session never claims "already signed in"', asyn
   const cfg = JSON.parse(keep);
   cfg.authToken = `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
   fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+  // definitive AND valid: the fall-through is only correct about a session the
+  // server confirmed alive. Stubbing `definitive: false` here pinned the exact
+  // opposite of the offline invariant (round-1 review of #35).
+  const restoreOauth = stubOauth();
   const h = toolWith('init', {
     ...QUIET_STORE,
-    verifyAuthToken: async () => ({ definitive: false }),
+    verifyAuthToken: async () => ({ definitive: true, valid: true }),
   });
   try {
     const r = await h.run({});
@@ -325,9 +353,81 @@ test('init (#320): a handle-only session never claims "already signed in"', asyn
     assert.ok(!/Already signed in/.test(display),
       'a handle-only session must not short-circuit — it has no principal to be signed in AS');
   } finally {
+    restoreOauth();
     h.restore();
     fs.writeFileSync(cfgPath, keep);
     clearSessionToken();
+  }
+});
+
+test('init (#320): offline is not a missing principal — it still short-circuits', async () => {
+  // The regression this guards: falling through on a handle-only token
+  // REGARDLESS of reachability rebuilds the #91 sign-in loop for anyone whose
+  // server is slow or unreachable. Unreachable is not invalid.
+  const cfgPath = path.join(HOME, 'config.json');
+  const keep = fs.readFileSync(cfgPath, 'utf8');
+  const cfg = JSON.parse(keep);
+  cfg.authToken = `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+  for (const verification of [
+    { definitive: false },                       // server could not say
+    null,                                        // raced the 2.5s timeout
+  ]) {
+    const h = toolWith('init', { ...QUIET_STORE, verifyAuthToken: async () => verification });
+    const restoreOauth = stubOauth();
+    try {
+      const r = await h.run({});
+      assert.match(r?.display || '', /Already signed in/,
+        `an unreachable server (${JSON.stringify(verification)}) forced a sign-in instead of short-circuiting`);
+    } finally {
+      restoreOauth();
+      h.restore();
+      clearSessionToken();
+    }
+  }
+  fs.writeFileSync(cfgPath, keep);
+});
+
+test('init (#320): one identity\'s handle-only mint is never reported to another', async () => {
+  // The flag was a process-global boolean: Ada's mint told Bob he had a
+  // server-side minting problem.
+  const cfgPath = path.join(HOME, 'config.json');
+  const keep = fs.readFileSync(cfgPath, 'utf8');
+  const initPath = require.resolve('./init.js');
+  const restoreOauth = stubOauth();
+  const h = toolWith('init', {
+    ...QUIET_STORE,
+    verifyAuthToken: async () => ({ definitive: true, valid: true }),
+  });
+  try {
+    const tool = require(initPath);
+    // Ada's sign-in comes back handle-only.
+    await tool._completeSignInForTest({ token: `h.${b64({ sub: 'ada' })}.sig`, handle: 'ada' }, 'x');
+    // Now the process is serving Bob, who also holds a handle-only token. The
+    // credential names us (auth-store is the authority), so switching the file
+    // alone would leave the session still being Ada.
+    const bobToken = `h.${b64({ sub: 'bob', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    cfg.username = 'bob';
+    cfg.authToken = bobToken;
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+    clearSessionToken();
+    const authStore = require('../auth-store');
+    authStore.setToken(bobToken);
+    authStore.setHandle('bob');
+    const r = await h.run({});
+    assert.ok(!/server-side minting issue/.test(r?.display || ''),
+      "Ada's mint was reported to Bob");
+  } finally {
+    require(initPath)._resetMintStateForTest();
+    restoreOauth();
+    h.restore();
+    fs.writeFileSync(cfgPath, keep);
+    clearSessionToken();
+    const authStore = require('../auth-store');
+    const restored = JSON.parse(keep);
+    authStore.setToken(restored.authToken);
+    authStore.setHandle(restored.username);
   }
 });
 
@@ -340,9 +440,10 @@ test('init (#320): a second handle-only mint says so instead of looping', async 
   cfg.authToken = `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
   fs.writeFileSync(cfgPath, JSON.stringify(cfg));
   const initPath = require.resolve('./init.js');
+  const restoreOauth = stubOauth();
   const h = toolWith('init', {
     ...QUIET_STORE,
-    verifyAuthToken: async () => ({ definitive: false }),
+    verifyAuthToken: async () => ({ definitive: true, valid: true }),
   });
   try {
     // Complete a sign-in whose token proves only the handle.
@@ -358,6 +459,7 @@ test('init (#320): a second handle-only mint says so instead of looping', async 
     assert.ok(!/Already signed in/.test(display));
   } finally {
     require(initPath)._resetMintStateForTest();   // module state must not leak
+    restoreOauth();
     h.restore();
     fs.writeFileSync(cfgPath, keep);
     clearSessionToken();

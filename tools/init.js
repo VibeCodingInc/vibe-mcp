@@ -13,6 +13,7 @@ const { exec, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { normalizeHandle } = require('./_shared');
 const store = require('../store');
 const discord = require('../discord');
 const authStore = require('../auth-store');
@@ -324,18 +325,18 @@ const AUTH_SENTENCE = 'Open this, sign in with GitHub, then say vibe start.';
 let pendingAuth = null; // { oauth, loginUrl, startedAt, browserOpened, expired }
 let pendingAuthCreation = null; // in-flight ensureAuthFlow, so concurrent starts share ONE flow (review P1)
 
-// Set when a completed sign-in came back proving only the handle. Under the
-// blocking flow this was a return value; the flow is non-blocking now, so the
-// fact has to outlive the call that learned it — otherwise the fall-through
-// above sends the person around the same loop forever.
-let lastMintLackedPrincipal = false;
+// WHOSE mint came back proving only the handle — a handle, not a boolean.
+// Under the blocking flow this was a return value; the flow is non-blocking
+// now, so the fact has to outlive the call that learned it, and a process can
+// serve more than one identity. A bare boolean told Bob about Ada's mint.
+let lastMintLackedPrincipalFor = null;
 
 async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) {
   // VERIFY BEFORE CLAIMING (#320): the point of reauth is a credential that
-  // PROVES the principal. Decode the claim before anything reports success — a
-  // fresh token without principal_id is still saved (it is the newer valid
-  // credential) but nothing may describe it as principal-bearing.
-  lastMintLackedPrincipal = !authStore.principalFromToken(token);
+  // PROVES the principal. Decoded here, but RECORDED only after the credential
+  // is actually persisted below — recording it first claimed a saved
+  // credential on a path where saving had not happened yet.
+  const mintLackedPrincipal = !authStore.principalFromToken(token);
   if (actor) await actorSession.installOAuthSession(actor);
   else await actorSession.clearActorSession();
   config.saveAuthToken(token);
@@ -352,6 +353,9 @@ async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) 
   authConfig.authMethod = 'browser';
   authConfig.pendingAuth = false;
   config.save(authConfig);
+  // Now the credential is on disk, so the record — and the message it drives,
+  // which says the refreshed credential was saved — is true.
+  lastMintLackedPrincipalFor = mintLackedPrincipal ? normalizeHandle(finalHandle) : null;
   // The toolset just changed — tell the host now, not on the next call.
   global.vibeNotifier?.emitImmediate();
   // Presence + welcome are best-effort and must never block or throw here.
@@ -472,6 +476,7 @@ async function handler(args) {
   if (config.hasOAuth()) {
     const existingHandle = config.getHandle();
     let sessionDead = false;
+    let verifiedAlive = false;
     if (existingHandle) {
       try {
         const verification = await Promise.race([
@@ -479,6 +484,12 @@ async function handler(args) {
           new Promise(resolve => setTimeout(() => resolve(null), 2500))
         ]);
         sessionDead = !!(verification && verification.definitive && !verification.valid);
+        // A DEFINITIVE "yes" is a different fact from the absence of a "no".
+        // The principal fall-through below may only fire on a confirmed-alive
+        // session; a timeout or an unreachable server is not evidence about
+        // the credential, and treating it as such rebuilds the #91 sign-in
+        // loop for anyone offline.
+        verifiedAlive = !!(verification && verification.definitive && verification.valid);
       } catch (e) {}
       if (sessionDead) {
         console.error(`[vibe] Saved session for @${existingHandle} was rejected by the server — reconnecting.`);
@@ -489,14 +500,17 @@ async function handler(args) {
     // The server mints principal-bearing sessions on every fresh OAuth — but
     // this short-circuit was the trap: "Already signed in" left the legacy
     // credential in place with no path to the server's reauth action. A valid
-    // handle-only token therefore falls through to re-auth; offline/timeout
-    // still short-circuits, because unreachable is not invalid.
+    // handle-only token therefore falls through to re-auth — but ONLY when the
+    // server confirmed the session is alive. Offline and timeout keep the
+    // short-circuit, because unreachable is not invalid.
     const provesPrincipal = !!authStore.principalFromToken(config.getAuthToken());
-    if (existingHandle && !sessionDead && !provesPrincipal) {
+    const needsReauthForPrincipal = existingHandle && !sessionDead && verifiedAlive && !provesPrincipal;
+    if (needsReauthForPrincipal) {
       console.error(`[vibe] @${existingHandle}'s saved session proves the handle but not the principal — refreshing sign-in (server action: reauth).`);
       // …unless the last completed sign-in ALREADY came back handle-only. Then
       // reauth is not a fix, it is a loop, and the honest thing is to say so.
-      if (lastMintLackedPrincipal) {
+      if (lastMintLackedPrincipalFor
+          && lastMintLackedPrincipalFor === normalizeHandle(existingHandle)) {
         return {
           display: `## Signed in as @${existingHandle} — but this session still proves only your handle\n\n`
             + `The server did not mint a principal claim into your last sign-in, so principal-gated actions `
@@ -505,7 +519,7 @@ async function handler(args) {
         };
       }
     }
-    if (existingHandle && !sessionDead && provesPrincipal) {
+    if (existingHandle && !sessionDead && !needsReauthForPrincipal) {
       // Enrich the returning-user surface — this fires on every `vibe` for an
       // already-authed user, so it's our highest-frequency touchpoint. Surface
       // unread (the reason to come back) and, if we have no email on file, nudge
@@ -684,4 +698,4 @@ _Say "vibe onboarding" anytime to check your progress_`
   };
 }
 
-module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE, _completeSignInForTest: completeSignIn, _resetMintStateForTest: () => { lastMintLackedPrincipal = false; } };
+module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE, _completeSignInForTest: completeSignIn, _resetMintStateForTest: () => { lastMintLackedPrincipalFor = null; } };
