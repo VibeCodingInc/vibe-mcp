@@ -422,6 +422,12 @@ const authFlowCreations = new Map(); // key -> promise
 // report that it replaced one; beyond that it is garbage. Without this, every
 // timed-out sign-in for a distinct handle stayed in the map forever.
 const EXPIRED_RETENTION_MS = 5 * 60 * 1000;
+// A hard ceiling as well as an age-out. Pruning bounds flows over TIME but not
+// over cardinality: 2,000 concurrently live identities stayed resident (round-6
+// review). One process is one person's coding session; a number this size means
+// something is wrong, and the oldest live flow is the one least likely to still
+// have someone waiting on it.
+const MAX_LIVE_FLOWS = 32;
 
 function pruneExpiredFlows() {
   const now = Date.now();
@@ -429,6 +435,22 @@ function pruneExpiredFlows() {
     if (flow.expired && flow.expiredAt && now - flow.expiredAt > EXPIRED_RETENTION_MS) {
       authFlows.delete(k);
     }
+  }
+}
+
+// Evicts oldest-first until the map fits, never touching the flow just created.
+// Eviction cancels the listener rather than dropping it silently — an
+// abandoned listener is exactly what the round-3 review found leaking.
+async function enforceFlowCeiling(protectKey) {
+  if (authFlows.size <= MAX_LIVE_FLOWS) return;
+  const byAge = [...authFlows.entries()]
+    .filter(([k]) => k !== protectKey)
+    .sort((a, b) => a[1].startedAt - b[1].startedAt);
+  for (const [k, flow] of byAge) {
+    if (authFlows.size <= MAX_LIVE_FLOWS) break;
+    authFlows.delete(k);
+    if (flow?.oauth) { try { await flow.oauth.cancel(); } catch {} }
+    console.error(`[vibe] auth flow for @${k || '(no handle)'} evicted — more than ${MAX_LIVE_FLOWS} live sign-ins in one process`);
   }
 }
 
@@ -468,6 +490,7 @@ async function createAuthFlow({ requestedHandle, one_liner }) {
   // still opening (review P2). The field is updated in place when known.
   const flow = { oauth, loginUrl: oauth.loginUrl, startedAt: Date.now(), browserOpened: 'unknown', expired: false, reused: false, replacedExpired, key };
   authFlows.set(key, flow);
+  await enforceFlowCeiling(key);
   // Background completion: nobody awaits this. Success persists the credential;
   // timeout marks the flow expired so the next start issues a fresh link.
   oauth.waitForCallback().then(
@@ -791,6 +814,7 @@ _Say "vibe onboarding" anytime to check your progress_`
 module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE, _completeSignInForTest: completeSignIn, _resetMintStateForTest: () => { lastMintLackedPrincipalForToken = null; lastSignInFailedToPersist = null; },
   _ensureAuthFlowForTest: ensureAuthFlow,
   _flowCountForTest: () => authFlows.size,
+  _maxLiveFlowsForTest: () => MAX_LIVE_FLOWS,
   // Lets a test wait for the rejection handler that marks a flow expired, so
   // the pin exercises production's own assignment rather than stamping it.
   _expireViaCallbackForTest: async () => { await new Promise((r) => setImmediate(r)); },

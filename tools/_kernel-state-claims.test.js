@@ -1016,3 +1016,144 @@ test('init (#320): expired flows do not accumulate', async () => {
     delete require.cache[initPath];
   }
 });
+
+test('verifyAuthToken: only an answer SHAPED like an answer is a verdict', async () => {
+  // This boundary decides whether a credential is kept or discarded, and it
+  // decided by truthiness: {valid:"false"} is a truthy string, so a malformed
+  // reply asserting a handle was read as a definitive YES (round-6 review).
+  const http = require('node:http');
+  let body = '{}';
+  let status = 200;
+  const server = http.createServer((req, res) => {
+    res.statusCode = status;
+    res.setHeader('content-type', 'application/json');
+    res.end(body);
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+  const { execFile } = require('node:child_process');
+  const probe = () => new Promise((resolve, reject) => {
+    const script = `
+      const store = require(${JSON.stringify(path.join(__dirname, '..', 'store', 'api.js'))});
+      store.verifyAuthToken('h.eyJzdWIiOiJhZGEifQ.sig').then((v) => process.stdout.write(JSON.stringify(v)));
+    `;
+    execFile('node', ['-e', script], {
+      env: { ...process.env, VIBE_API_URL: `http://127.0.0.1:${port}`, VIBE_SETUP_NO_AUTORUN: '1', CI: '1' },
+      encoding: 'utf8', timeout: 60000,
+    }, (err, stdout) => (err ? reject(err) : resolve(JSON.parse(stdout))));
+  });
+  try {
+    for (const [label, replyBody, replyStatus] of [
+      ['empty object', '{}', 200],
+      ['non-JSON body', 'not json at all', 200],
+      ['bare 204', '', 204],
+      ['truthy string valid', JSON.stringify({ valid: 'false', handle: 'mallory' }), 200],
+      ['yes with no handle', JSON.stringify({ valid: true }), 200],
+    ]) {
+      body = replyBody; status = replyStatus;
+      const v = await probe();
+      assert.equal(v.definitive, false, `${label}: an unreadable reply became a verdict`);
+      assert.equal(v.valid, false, `${label}: an unreadable reply asserted validity`);
+    }
+    // …and the two real answers still are answers.
+    body = JSON.stringify({ valid: true, handle: 'ada' }); status = 200;
+    assert.deepEqual(await probe().then((v) => [v.valid, v.definitive]), [true, true]);
+    body = JSON.stringify({ valid: false, error: 'revoked' }); status = 200;
+    assert.deepEqual(await probe().then((v) => [v.valid, v.definitive]), [false, true]);
+  } finally {
+    server.close();
+  }
+});
+
+test('principalFromToken: a JOSE header that is not one proves nothing', () => {
+  const authStore = require('../auth-store');
+  const P = b64({ principal_id: 'prin_ok' });
+  assert.equal(authStore.principalFromToken(`${b64({ alg: 'ES256', typ: 'JWT' })}.${P}.sig`), 'prin_ok');
+  for (const [name, header] of [
+    ['empty header object', {}],
+    ['alg none', { alg: 'none' }],
+    ['alg NONE', { alg: 'NONE' }],
+    ['alg not a string', { alg: 1 }],
+    ['crit present', { alg: 'ES256', crit: ['b64'] }],
+    ['b64 false', { alg: 'ES256', b64: false }],
+  ]) {
+    assert.equal(authStore.principalFromToken(`${b64(header)}.${P}.sig`), null,
+      `${name} reported a principal it did not prove`);
+  }
+  // Invalid utf-8 in the HEADER, not just the payload — the payload case alone
+  // left header decoding unpinned (round-6 review).
+  const badHeader = Buffer.concat([Buffer.from('{"alg":"ES'), Buffer.from([0xFF]), Buffer.from('256"}')]).toString('base64url');
+  assert.equal(authStore.principalFromToken(`${badHeader}.${P}.sig`), null);
+});
+
+test('principalFromToken: claims must be an object, independently of the header', () => {
+  const authStore = require('../auth-store');
+  const H = b64({ alg: 'ES256' });
+  // A string payload carrying a principal_id-looking body: the container shape
+  // check is the only thing that rejects this.
+  assert.equal(authStore.principalFromToken(`${H}.${b64('principal_id')}.sig`), null);
+  assert.equal(authStore.principalFromToken(`${H}.${b64(42)}.sig`), null);
+});
+
+test('init (#320): live auth flows have a ceiling, not just an age-out', async () => {
+  const initPath = require.resolve('./init.js');
+  const oauthPath = require.resolve('../oauth-callback');
+  const realOauth = require.cache[oauthPath];
+  const cancelled = [];
+  require.cache[oauthPath] = {
+    id: oauthPath, filename: oauthPath, loaded: true,
+    exports: {
+      ...(realOauth ? realOauth.exports : {}),
+      beginOAuth: async ({ requestedHandle }) => ({
+        loginUrl: `https://example.invalid/login?who=${requestedHandle}`,
+        waitForCallback: () => new Promise(() => {}),   // all stay live
+        cancel: async () => { cancelled.push(requestedHandle); },
+      }),
+    },
+  };
+  const priorCI = process.env.CI;
+  process.env.CI = '1';
+  delete require.cache[initPath];
+  const tool = require(initPath);
+  try {
+    await tool._resetPendingAuth();
+    const max = tool._maxLiveFlowsForTest();
+    for (let i = 0; i < max + 10; i++) {
+      await tool._ensureAuthFlowForTest({ requestedHandle: `person${i}` });
+    }
+    assert.ok(tool._flowCountForTest() <= max,
+      `live flows grew to ${tool._flowCountForTest()} with no ceiling`);
+    assert.ok(cancelled.length > 0, 'evicted flows must have their listeners cancelled, not dropped');
+    // The most recent caller must still hold a usable flow.
+    const latest = await tool._ensureAuthFlowForTest({ requestedHandle: `person${max + 9}` });
+    assert.ok(latest.loginUrl.includes(`person${max + 9}`));
+  } finally {
+    await tool._resetPendingAuth();
+    if (priorCI === undefined) delete process.env.CI; else process.env.CI = priorCI;
+    if (realOauth) require.cache[oauthPath] = realOauth; else delete require.cache[oauthPath];
+    delete require.cache[initPath];
+  }
+});
+
+test('config: the credential writers themselves report a refusal', () => {
+  // Every persistence pin above STUBS these to return false, so the callers'
+  // handling is pinned but the callees' propagation was not (round-6 audit).
+  // Against a genuinely unreadable config, they must refuse on their own.
+  const os = require('node:os');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-writers-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  const corrupt = '{"username":"ada","authToken":"KEEP" TRUNCATED';
+  fs.writeFileSync(path.join(home, 'config.json'), corrupt);
+  delete require.cache[require.resolve('../config')];
+  try {
+    const config = require('../config');
+    assert.equal(config.saveAuthToken('new-token'), false,
+      'saveAuthToken reported success over a config it could not read');
+    assert.equal(fs.readFileSync(path.join(home, 'config.json'), 'utf8'), corrupt,
+      'the unreadable config was overwritten anyway');
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+  }
+});

@@ -102,6 +102,16 @@ function principalFromToken(token) {
     const rawHeader = utf8.decode(Buffer.from(header, 'base64url'));
     const head = JSON.parse(rawHeader);
     if (!head || typeof head !== 'object' || Array.isArray(head)) return null;
+    // A JOSE header, not merely an object. The contract this function claims is
+    // "the principal a well-formed JWT proves", and these are not well-formed:
+    //   - no `alg` at all, or an empty one
+    //   - `alg: "none"`, which asserts the token is unsigned — a signature
+    //     beside it is a contradiction, and it is the classic forgery shape
+    //   - `crit` or `b64:false`, which change how the payload must be read;
+    //     we do not implement them, so we cannot claim to have read it
+    const alg = head.alg;
+    if (typeof alg !== 'string' || !alg || alg.toLowerCase() === 'none') return null;
+    if ('crit' in head || head.b64 === false) return null;
     const claims = JSON.parse(utf8.decode(Buffer.from(payload, 'base64url')));
     if (!claims || typeof claims !== 'object' || Array.isArray(claims)) return null;
     const pid = Object.prototype.hasOwnProperty.call(claims, 'principal_id')

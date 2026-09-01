@@ -1100,7 +1100,27 @@ async function verifyAuthToken(token) {
   try {
     const result = await request('POST', '/api/auth/verify', {}, { token, auth: true });
 
-    if (result.valid) {
+    // THE ANSWER MUST BE SHAPED LIKE AN ANSWER.
+    //
+    // This boundary decides whether a credential is kept or discarded, and it
+    // used to decide by truthiness. `{valid: "false"}` is a truthy string, so a
+    // malformed reply asserting `valid:"false", handle:"mallory"` was read as a
+    // definitive YES. In the other direction `{}`, a non-JSON body and a bare
+    // 204 were all read as a definitive NO — a verdict conjured out of a reply
+    // that said nothing. Three states, named explicitly:
+    //
+    //   valid   → the server answered, in the agreed shape, and said yes
+    //   invalid → the server answered, in the agreed shape, and said no
+    //   neither → nothing usable came back; that is not evidence either way
+    const answered = result && typeof result === 'object';
+    const saysValid = answered && result.valid === true;
+    const saysInvalid = answered && result.valid === false;
+
+    if (saysValid) {
+      // A yes must also name who it is a yes ABOUT, or it cannot be acted on.
+      if (typeof result.handle !== 'string' || !result.handle) {
+        return { valid: false, definitive: false, error: 'Malformed verification response (no handle)' };
+      }
       return {
         valid: true,
         definitive: true,
@@ -1125,6 +1145,16 @@ async function verifyAuthToken(token) {
         valid: false,
         definitive: false,
         error: result.error || 'Could not reach the server'
+      };
+    }
+
+    // Anything that is not the agreed shape is not an answer. A reply we cannot
+    // read must never cost someone their session.
+    if (!saysInvalid) {
+      return {
+        valid: false,
+        definitive: false,
+        error: result?.error || 'Unreadable verification response'
       };
     }
 
