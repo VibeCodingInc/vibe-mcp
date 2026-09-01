@@ -116,10 +116,29 @@ function save(config) {
   };
   // Fields this function does not enumerate — x_credentials, firstDmSent,
   // pendingAuth, visible — used to vanish on every save, because the object
-  // above is built field by field. Spreading `existing` underneath keeps them:
-  // each key in `data` already falls back to its existing value, so the overlay
-  // never replaces a real value with a null it invented.
-  const merged = { ...existing, ...data };
+  // above is built field by field.
+  //
+  // Two layers are needed, not one. Spreading `existing` keeps what was already
+  // on disk (each key in `data` already falls back to its existing value, so the
+  // overlay never replaces a real value with a null it invented). But callers
+  // also SET these fields — `cfg.pendingAuth = true`, `cfg.visible = true`,
+  // `save({firstDmSent: true})` — and those writes were dropped just as
+  // silently. Keeping only `existing` would preserve the old value and still
+  // ignore the update, which reads as working and isn't. So the caller's own
+  // non-translated keys go on top of `existing` and under `data`.
+  //
+  // TRANSLATED names are excluded because they are aliases the block above
+  // already resolved; passing them through would write both spellings.
+  const TRANSLATED = new Set([
+    'handle', 'one_liner', 'username', 'workingOn', 'createdAt',
+    'publicKey', 'privateKey', 'guided_mode', 'authToken', 'privyToken',
+    'authMethod', 'github_activity_enabled', 'github_activity_privacy',
+  ]);
+  const fromCaller = {};
+  for (const [k, v] of Object.entries(config || {})) {
+    if (!TRANSLATED.has(k)) fromCaller[k] = v;
+  }
+  const merged = { ...existing, ...fromCaller, ...data };
 
   // 0600: this file carries the auth token — it is a credential, not a preference.
   const tmp = `${PRIMARY_CONFIG}.${process.pid}.${Date.now()}.tmp`;

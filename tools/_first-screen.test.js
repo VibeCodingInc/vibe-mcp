@@ -661,3 +661,31 @@ test('a config write that cannot complete leaves the original intact and no .tmp
     delete require.cache[require.resolve('../config')];
   }
 });
+
+test('a field the caller SETS persists — preserving the old value is not enough', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-cfg5-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  const file = path.join(home, 'config.json');
+  fs.writeFileSync(file, JSON.stringify({ username: 'ada', authToken: 'KEEP', pendingAuth: false }, null, 2));
+  delete require.cache[require.resolve('../config')];
+  try {
+    const cfg = require('../config');
+    const c = cfg.load();
+    c.pendingAuth = true;          // tools/init.js does exactly this
+    c.x_credentials = { t: 'new' };
+    cfg.save(c);
+    const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(after.pendingAuth, true, 'the update was swallowed');
+    assert.deepEqual(after.x_credentials, { t: 'new' });
+    assert.equal(after.authToken, 'KEEP');
+    // …and the clear must work in the other direction too.
+    const c2 = cfg.load();
+    c2.pendingAuth = false;
+    cfg.save(c2);
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).pendingAuth, false, 'the clear was swallowed');
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+  }
+});
