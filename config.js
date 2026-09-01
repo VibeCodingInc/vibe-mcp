@@ -97,14 +97,25 @@ function save(config) {
     }
   }
 
+  // "Did the caller mention this field?" — distinct from "is its value truthy".
+  // The fallbacks below are truthy-or-existing, which cannot express a removal:
+  // removeKeypair() deleted the keys and save() restored them from disk, so
+  // vibe_token's "old local keys removed" was never true. For the fields where
+  // an explicit empty value is a real instruction, presence decides.
+  const has = (k) => !!config && Object.prototype.hasOwnProperty.call(config, k);
+
   // Save to primary config (~/.vibe/config.json)
   const data = {
     username: config.handle || config.username || existing.username,
-    workingOn: config.one_liner || config.workingOn || existing.workingOn,
+    // An empty one_liner is a person clearing what they're working on, not an
+    // absent update; the truthy chain kept showing the previous line forever.
+    workingOn: has('one_liner') ? config.one_liner
+      : has('workingOn') ? config.workingOn
+      : existing.workingOn,
     createdAt: config.createdAt || existing.createdAt || new Date().toISOString().split('T')[0],
     // AIRC keypair (persisted across sessions)
-    publicKey: config.publicKey || existing.publicKey || null,
-    privateKey: config.privateKey || existing.privateKey || null,
+    publicKey: has('publicKey') ? (config.publicKey ?? null) : (existing.publicKey || null),
+    privateKey: has('privateKey') ? (config.privateKey ?? null) : (existing.privateKey || null),
     // Guided mode (AskUserQuestion menus)
     guided_mode: config.guided_mode !== undefined ? config.guided_mode : existing.guided_mode,
     // GitHub Activity settings
@@ -443,9 +454,11 @@ const hasPrivyAuth = hasOAuth;
  */
 function removeKeypair() {
   const cfg = load();
-  delete cfg.publicKey;
-  delete cfg.privateKey;
-  save(cfg);
+  // Explicitly null, not deleted: an absent key means "no instruction" to
+  // save(), and the old value came straight back off disk.
+  cfg.publicKey = null;
+  cfg.privateKey = null;
+  const saved = save(cfg);
 
   // Also clear from session
   const data = getSessionData();
@@ -454,6 +467,7 @@ function removeKeypair() {
     delete data.privateKey;
     saveSessionData(data);
   }
+  return saved;
 }
 
 /**

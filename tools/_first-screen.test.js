@@ -689,3 +689,70 @@ test('a field the caller SETS persists — preserving the old value is not enoug
     delete require.cache[require.resolve('../config')];
   }
 });
+
+test('removeKeypair actually removes — the keys do not come back off disk', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-keys-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
+    username: 'ada', authToken: 'KEEP', publicKey: 'PUB', privateKey: 'PRIV',
+  }, null, 2));
+  delete require.cache[require.resolve('../config')];
+  try {
+    const cfg = require('../config');
+    assert.equal(cfg.hasKeypair(), true, 'fixture is wrong — no keypair to remove');
+    cfg.removeKeypair();
+    assert.equal(cfg.hasKeypair(), false, 'vibe token would claim "old local keys removed" falsely');
+    const after = JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf8'));
+    assert.equal(after.publicKey, null);
+    assert.equal(after.privateKey, null);
+    assert.equal(after.authToken, 'KEEP', 'the credential was collateral damage');
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+  }
+});
+
+test('clearing what you are working on actually clears it', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-oneliner-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  const file = path.join(home, 'config.json');
+  fs.writeFileSync(file, JSON.stringify({ username: 'ada', workingOn: 'the old thing' }, null, 2));
+  delete require.cache[require.resolve('../config')];
+  try {
+    const cfg = require('../config');
+    const c = cfg.load();
+    c.one_liner = '';
+    cfg.save(c);
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).workingOn, '', 'the stale line survived the clear');
+    // …and an unrelated save must not clear it.
+    cfg.save({ firstDmSent: true });
+    assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).firstDmSent, true);
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+  }
+});
+
+test('a session write that cannot complete leaves the original intact and no .tmp', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-sess2-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  delete require.cache[require.resolve('../config')];
+  const realRename = fs.renameSync;
+  try {
+    const cfg = require('../config');
+    const file = path.join(home, `.session_${process.pid}`);
+    const before = JSON.stringify({ sessionId: 'sess_x', authToken: 'KEEP-SESSION-TOKEN' }, null, 2);
+    fs.writeFileSync(file, before);
+    fs.renameSync = () => { const e = new Error('EACCES'); e.code = 'EACCES'; throw e; };
+    cfg.setAuthToken('a-new-token');
+    assert.equal(fs.readFileSync(file, 'utf8'), before, 'the session credential was damaged by a failed write');
+    assert.deepEqual(fs.readdirSync(home).filter((f) => f.endsWith('.tmp')), [], 'a temp file was orphaned');
+  } finally {
+    fs.renameSync = realRename;
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+  }
+});
