@@ -239,3 +239,39 @@ test('adversarial handles and ids cannot break the line budget', withStore({
     assert.ok(l.length <= 120, `line of ${l.length} chars would wrap: ${l.slice(0, 40)}…`);
   }
 }));
+
+test('BOTH stores answer the read-outcome contract (a missing one would fake a failure)', () => {
+  // VIBE_LOCAL=true selects store/local.js. When only the API store had
+  // getInboxResult, local mode threw a TypeError into start's catch and every
+  // start claimed "couldn't read your inbox" (review P1).
+  const api = require('../store/api.js');
+  const local = require('../store/local.js');
+  for (const [name, impl] of [['api', api], ['local', local]]) {
+    assert.equal(typeof impl.getInboxResult, 'function', `${name} store implements getInboxResult`);
+    assert.equal(typeof impl.getInbox, 'function', `${name} store still implements getInbox`);
+  }
+});
+
+test('local mode reports a real read, not a failure', async () => {
+  const { execFileSync } = require('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-localmode-'));
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
+    username: 'ada', authMethod: 'github',
+    authToken: `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`,
+  }));
+  const script = `
+    const store = require(${JSON.stringify(path.join(__dirname, '..', 'store', 'index.js'))});
+    store.getActiveUsers = async () => [];
+    store.heartbeat = async () => ({}); store.registerSession = async () => ({});
+    require(${JSON.stringify(path.join(__dirname, 'start.js'))}).handler({}).then((r) => {
+      process.stdout.write(JSON.stringify({ display: r.display, unread: r.unread }));
+    });
+  `;
+  const out = execFileSync('node', ['-e', script], {
+    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_LOCAL: 'true', VIBE_SETUP_NO_AUTORUN: '1' },
+    encoding: 'utf8', timeout: 30000,
+  });
+  const r = JSON.parse(out);
+  assert.ok(!/couldn't read your inbox/.test(r.display), `local mode must not claim a failed read: ${r.display}`);
+  assert.equal(typeof r.unread, 'number', 'local mode reports a real count');
+});

@@ -127,6 +127,24 @@ async function getInbox(handle) {
     .sort((a, b) => b.timestamp - a.timestamp);
 }
 
+/**
+ * The inbox, and whether it was actually read — the same contract the API
+ * store provides (store/api.js). Both implementations must answer it, or a
+ * caller that distinguishes "empty" from "could not ask" silently gets the
+ * wrong answer in the other mode (review P1: with VIBE_LOCAL=true, a missing
+ * method made every start claim the read had failed).
+ *
+ * A local file read either produces the list or throws; there is no partial
+ * or refused outcome to represent.
+ */
+async function getInboxResult(handle) {
+  try {
+    return { ok: true, threads: await getInbox(handle) };
+  } catch (e) {
+    return { ok: false, threads: [], error: e?.code || 'local_read_failed', message: e?.message };
+  }
+}
+
 async function getUnreadCount(handle) {
   const inbox = await getInbox(handle);
   return inbox.filter(m => !m.read_at).length;
@@ -243,6 +261,7 @@ module.exports = {
 
   // Messages
   sendMessage,
+  getInboxResult,
   getInbox,
   getRawInbox,
   getUnreadCount,
