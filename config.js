@@ -82,13 +82,20 @@ function load() {
 
 function save(config) {
   ensureDir();
-  // Load existing to preserve fields we're not updating
+  // Load existing to preserve fields we're not updating.
+  //
+  // Every field below falls back to `existing`, so a file that failed to parse
+  // does not merge into this write — it VANISHES from it, and the auth token
+  // with it. Signing someone out is not a repair for a file we could not read.
   let existing = {};
-  try {
-    if (fs.existsSync(PRIMARY_CONFIG)) {
+  if (fs.existsSync(PRIMARY_CONFIG)) {
+    try {
       existing = JSON.parse(fs.readFileSync(PRIMARY_CONFIG, 'utf8'));
+    } catch (e) {
+      console.error('Refusing to write config: the file on disk could not be read.', e.message);
+      return false;
     }
-  } catch (e) {}
+  }
 
   // Save to primary config (~/.vibe/config.json)
   const data = {
@@ -108,7 +115,16 @@ function save(config) {
     authMethod: config.authMethod || existing.authMethod || null
   };
   // 0600: this file carries the auth token — it is a credential, not a preference.
-  fs.writeFileSync(PRIMARY_CONFIG, JSON.stringify(data, null, 2), { mode: 0o600 });
+  const tmp = `${PRIMARY_CONFIG}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, PRIMARY_CONFIG);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch {}
+    console.error('Failed to save config:', e.message);
+    return false;
+  }
+  return true;
 }
 
 function getHandle() {
@@ -198,6 +214,19 @@ function generateSessionId() {
   return 'sess_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 10);
 }
 
+// Distinguishes "no session yet" (absent) from "unreadable" (present, corrupt),
+// which getSessionData() cannot: both come back as null.
+function sessionFileIsReadable() {
+  if (!fs.existsSync(SESSION_FILE)) return true;
+  try {
+    const content = fs.readFileSync(SESSION_FILE, 'utf8').trim();
+    if (content.startsWith('{')) JSON.parse(content);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 function getSessionData() {
   try {
     if (fs.existsSync(SESSION_FILE)) {
@@ -215,7 +244,12 @@ function getSessionData() {
 
 function saveSessionData(data) {
   ensureDir();
+  if (!sessionFileIsReadable()) {
+    console.error('Refusing to write session data: the file on disk could not be read.');
+    return false;
+  }
   fs.writeFileSync(SESSION_FILE, JSON.stringify(data, null, 2));
+  return true;
 }
 
 function getSessionId() {

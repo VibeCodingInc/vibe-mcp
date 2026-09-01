@@ -78,6 +78,11 @@ async function heartbeat(handle, one_liner) {
   savePresence(presence);
 }
 
+async function getActiveUsersResult() {
+  if (!presenceIsReadable()) return { ok: false, users: [], error: 'local_corrupt' };
+  return { ok: true, users: await getActiveUsers() };
+}
+
 async function getActiveUsers() {
   const presence = loadPresence();
   const now = Date.now();
@@ -336,6 +341,7 @@ module.exports = {
   // Presence
   heartbeat,
   getActiveUsers,
+  getActiveUsersResult,
   setVisibility,
 
   // Messages

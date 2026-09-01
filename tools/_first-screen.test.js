@@ -51,6 +51,10 @@ const withStore = (stubs, fn) => async () => {
     merged.getInboxResult = async (h) => ({ ok: true, threads: await stubs.getInbox(h) });
   }
   if (!merged.getInboxResult) merged.getInboxResult = async () => ({ ok: true, threads: [] });
+  // Same for presence: supplying getActiveUsers means "the server answered".
+  if (!stubs.getActiveUsersResult) {
+    merged.getActiveUsersResult = async () => ({ ok: true, users: await merged.getActiveUsers() });
+  }
   for (const [k, v] of Object.entries(merged)) { orig[k] = store[k]; store[k] = v; }
   try { return await fn(); } finally { for (const [k, v] of Object.entries(orig)) store[k] = v; }
 };
@@ -486,3 +490,76 @@ test('"N others here" never counts the signed-in person, whatever the casing', w
     assert.match(res.display, /2 others here/);
   }
 ));
+
+test('a REAL presence failure is never rendered as an empty room', async () => {
+  // Same discipline as the inbox pin: a child process against an unreachable
+  // host, exercising the production presence path rather than a stub. Flattening
+  // that failure to [] made "0 others here" a claim nobody verified (round 7).
+  const { execFileSync } = require('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-presfail-'));
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
+    username: 'ada', authMethod: 'github',
+    authToken: `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`,
+  }));
+  const script = `
+    const store = require(${JSON.stringify(path.join(__dirname, '..', 'store', 'api.js'))});
+    store.getInboxResult = async () => ({ ok: true, threads: [] });
+    store.heartbeat = async () => ({}); store.registerSession = async () => ({});
+    require(${JSON.stringify(path.join(__dirname, 'start.js'))}).handler({}).then((r) => {
+      process.stdout.write(JSON.stringify({ display: r.display, here: r.here }));
+    });
+  `;
+  const out = execFileSync('node', ['-e', script], {
+    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_API_URL: 'http://127.0.0.1:9', VIBE_SETUP_NO_AUTORUN: '1' },
+    encoding: 'utf8', timeout: 30000,
+  });
+  const r = JSON.parse(out);
+  assert.match(r.display, /couldn't see who's here/, 'says the presence read failed');
+  assert.ok(!/\b0 others here\b/.test(r.display), 'never claims an empty room from a failed read');
+  assert.equal(r.here, null, 'the payload says not-read, not zero');
+});
+
+test('BOTH stores answer the presence read-outcome contract', () => {
+  for (const mod of ['../store/api.js', '../store/local.js']) {
+    const s = require(mod);
+    assert.equal(typeof s.getActiveUsersResult, 'function', `${mod} is missing getActiveUsersResult`);
+  }
+});
+
+test('a corrupt config file is never overwritten — the credential survives', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-cfg-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  const file = path.join(home, 'config.json');
+  const corrupt = '{"username":"ada","authToken":"KEEP-CREDENTIAL" TRUNCATED';
+  fs.writeFileSync(file, corrupt);
+  delete require.cache[require.resolve('../config')];
+  try {
+    const cfg = require('../config');
+    cfg.setGuidedMode(false);
+    assert.equal(fs.readFileSync(file, 'utf8'), corrupt, 'the credential file was rewritten over a failed read');
+    assert.deepEqual(fs.readdirSync(home).filter((f) => f.endsWith('.tmp')), []);
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+  }
+});
+
+test('a readable config still saves, keeping the fields it is not updating', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-cfg2-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  const file = path.join(home, 'config.json');
+  fs.writeFileSync(file, JSON.stringify({ username: 'ada', authToken: 'KEEP-CREDENTIAL' }, null, 2));
+  delete require.cache[require.resolve('../config')];
+  try {
+    const cfg = require('../config');
+    cfg.setGuidedMode(false);
+    const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(after.authToken, 'KEEP-CREDENTIAL', 'the credential was lost on a good write');
+    assert.equal(after.guided_mode, false, 'the update did not land');
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+  }
+});

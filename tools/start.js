@@ -221,7 +221,12 @@ async function handler(args) {
   patterns.logSessionStart(myHandle);
 
   // Step 2: Get who's around
-  const users = await store.getActiveUsers();
+  // A presence request that FAILED is not an empty room (round-7 review):
+  // getActiveUsers flattens transport failure to [], so without this outcome
+  // "0 others here" is a claim nobody verified.
+  const presence = await store.getActiveUsersResult();
+  const presenceRead = presence.ok;
+  const users = presence.users;
   // Compared normalized: an exact !== lets a differently-cased or @-prefixed
   // copy of your own handle through, and then "N others here" counts you.
   const me = normalizeHandle(myHandle || '');
@@ -284,7 +289,9 @@ async function handler(args) {
   // exactly what was counted.
   const counts = [
     inboxRead ? `${unreadCount} unread` : "couldn't read your inbox",
-    `${hereCount} other${hereCount === 1 ? '' : 's'} here`,
+    presenceRead
+      ? `${hereCount} other${hereCount === 1 ? '' : 's'} here`
+      : "couldn't see who's here",
   ];
   display += `\n${counts.join(' · ')}`;
 
@@ -320,7 +327,7 @@ async function handler(args) {
   const response = { display };
 
   response.unread = inboxRead ? unreadCount : null;   // null = not read, never 0
-  response.here = hereCount;
+  response.here = presenceRead ? hereCount : null;   // null = not read, never 0
   response.waiting = unreadSenders.slice(0, 5).map((t) => ({
     handle: t.handle,
     unread: t.unread,

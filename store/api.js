@@ -354,10 +354,20 @@ async function getTypingUsers(forHandle) {
   }
 }
 
-async function getActiveUsers() {
+async function getActiveUsersInner() {
   try {
     const endpoint = USE_V2_PRESENCE ? '/api/v2/presence' : '/api/presence';
     const result = await request('GET', endpoint);
+
+    // request() RESOLVES on transport failure ({success:false, network:true}),
+    // so without this the lists below are simply absent and a dead network maps
+    // to a successful empty room. 401 is deliberately excluded: that is the
+    // "signed out, here are public counts" path handled below, not a failure.
+    if (result?.success === false && result.statusCode !== 401) {
+      const err = new Error(result.error || 'presence request failed');
+      err.code = result.network ? 'transport_failed' : `http_${result.statusCode || 'error'}`;
+      throw err;
+    }
 
     // Combine active + away, plus any AGENTS currently live in a room (e.g.
     // @coltrane hosting the cantina). Agents live in their own array; without
@@ -446,8 +456,30 @@ async function getActiveUsers() {
     return mappedUsers;
   } catch (e) {
     console.error('Who failed:', e.message);
-    return [];
+    const err = new Error(e?.message || 'presence read failed');
+    err.code = e?.code || 'transport_failed';
+    throw err;
   }
+}
+
+// The same outcome-preserving shape the inbox uses: flattening a failed
+// presence read to [] made "0 others here" a claim nobody verified.
+async function getActiveUsersResult() {
+  try {
+    const users = await getActiveUsersInner();
+    if (!Array.isArray(users)) return { ok: false, users: [], error: 'malformed_response' };
+    // Signed out is not an empty room either — the server told us it would not
+    // say who is here. A caller rendering a count must not treat that as zero.
+    if (users.anonymous) return { ok: false, users: [], error: 'unauthenticated' };
+    return { ok: true, users };
+  } catch (e) {
+    return { ok: false, users: [], error: e?.code || 'transport_failed', message: e?.message };
+  }
+}
+
+// Named callers keep the old shape: an empty list on failure, as before.
+async function getActiveUsers() {
+  return (await getActiveUsersResult()).users;
 }
 
 async function setVisibility(handle, visible) {
@@ -1417,6 +1449,7 @@ module.exports = {
   // Presence
   heartbeat,
   getActiveUsers,
+  getActiveUsersResult,
   setVisibility,
   sendTypingIndicator,
   getTypingUsers,

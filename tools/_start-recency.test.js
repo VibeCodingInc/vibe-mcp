@@ -38,6 +38,11 @@ const mins = (n) => Date.now() - n * 60_000;
 
 function toolWith(name, stubs) {
   const originals = {};
+  // start reads the presence OUTCOME; a stubbed roster means "the server
+  // answered with this", not "the read failed".
+  if (stubs.getActiveUsers && !stubs.getActiveUsersResult) {
+    stubs = { ...stubs, getActiveUsersResult: async () => ({ ok: true, users: await stubs.getActiveUsers() }) };
+  }
   for (const [k, v] of Object.entries(stubs)) {
     originals[k] = store[k];
     store[k] = v;
