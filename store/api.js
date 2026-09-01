@@ -1111,6 +1111,19 @@ async function verifyAuthToken(token) {
       };
     }
 
+    // request() RESOLVES on transport failure ({success:false, network:true,
+    // retryable:true}) instead of throwing, so this branch was reached by a
+    // dead network and labelled it definitive — the server saying no. Everything
+    // downstream that trusts `definitive` (init's principal fall-through, vibe
+    // token) then treated ECONNREFUSED as evidence against the credential.
+    if (result && result.success === false && !result.statusCode) {
+      return {
+        valid: false,
+        definitive: false,
+        error: result.error || 'Could not reach the server'
+      };
+    }
+
     // The server answered and said no — a fact about the token.
     return {
       valid: false,

@@ -652,3 +652,103 @@ test('init (#320): an auth flow is never shared with a different identity', asyn
     delete require.cache[initPath];
   }
 });
+
+test('verifyAuthToken: a REAL unreachable server is not a verdict', async () => {
+  // The round-3 finding: request() resolves on transport failure, so this
+  // classified ECONNREFUSED as definitive — the server saying no. The stubbed
+  // {definitive:false} pins passed while production did the opposite, which is
+  // the whole reason this one runs against a dead endpoint in a child process.
+  const { execFileSync } = require('node:child_process');
+  const script = `
+    process.env.VIBE_API_URL = 'http://127.0.0.1:9';
+    const store = require(${JSON.stringify(path.join(__dirname, '..', 'store', 'api.js'))});
+    store.verifyAuthToken('h.eyJzdWIiOiJhZGEifQ.sig').then((v) => {
+      process.stdout.write(JSON.stringify(v));
+    });
+  `;
+  const out = execFileSync('node', ['-e', script], {
+    env: { ...process.env, VIBE_SETUP_NO_AUTORUN: '1', CI: '1' },
+    encoding: 'utf8', timeout: 60000,
+  });
+  const v = JSON.parse(out);
+  assert.equal(v.valid, false);
+  assert.equal(v.definitive, false, 'an unreachable server was reported as a verdict about the token');
+});
+
+test('init (#320): a failed token write still reports the failure', async () => {
+  // Keying the persist-failure record by the NEW token was wrong: when the
+  // token write is what failed, disk still holds the OLD token, so the next
+  // call never matched and silently started another flow (round-3 review).
+  const cfgPath = path.join(HOME, 'config.json');
+  const keep = fs.readFileSync(cfgPath, 'utf8');
+  const cfg = JSON.parse(keep);
+  cfg.authToken = `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+  const config = require('../config');
+  const realSaveToken = config.saveAuthToken;
+  const restoreOauth = stubOauth();
+  const h = toolWith('init', { ...QUIET_STORE, verifyAuthToken: async () => ({ definitive: true, valid: true }) });
+  const initPath = require.resolve('./init.js');
+  try {
+    config.saveAuthToken = () => false;          // ONLY the token write fails
+    const tool = require(initPath);
+    await tool._completeSignInForTest({ token: `h.${b64({ sub: 'ada', iat: 99 })}.sig`, handle: 'ada' }, 'x');
+    config.saveAuthToken = realSaveToken;
+    const display = (await h.run({}))?.display || '';
+    assert.match(display, /could not be saved/, 'a failed token write started another flow instead of saying so');
+  } finally {
+    config.saveAuthToken = realSaveToken;
+    require(initPath)._resetMintStateForTest();
+    restoreOauth();
+    h.restore();
+    fs.writeFileSync(cfgPath, keep);
+    clearSessionToken();
+  }
+});
+
+test('init (#320): simultaneous flows for two identities are both tracked', async () => {
+  // A single creation slot meant Ada and Bob starting at the same moment each
+  // bound a listener while only the last was remembered — the other could
+  // never be cancelled. And cancelling a live flow that belonged to someone
+  // else dropped a callback already in flight, losing their credential.
+  const initPath = require.resolve('./init.js');
+  const oauthPath = require.resolve('../oauth-callback');
+  const realOauth = require.cache[oauthPath];
+  const cancelled = [];
+  const made = [];
+  require.cache[oauthPath] = {
+    id: oauthPath, filename: oauthPath, loaded: true,
+    exports: {
+      ...(realOauth ? realOauth.exports : {}),
+      beginOAuth: async ({ requestedHandle }) => {
+        await new Promise((r) => setTimeout(r, 20));   // both in flight at once
+        made.push(requestedHandle);
+        return {
+          loginUrl: `https://example.invalid/login?who=${requestedHandle}`,
+          waitForCallback: () => new Promise(() => {}),
+          cancel: async () => { cancelled.push(requestedHandle); },
+        };
+      },
+    },
+  };
+  const priorCI = process.env.CI;
+  process.env.CI = '1';
+  delete require.cache[initPath];
+  const tool = require(initPath);
+  try {
+    await tool._resetPendingAuth();
+    const [a, b] = await Promise.all([
+      tool._ensureAuthFlowForTest({ requestedHandle: 'ada' }),
+      tool._ensureAuthFlowForTest({ requestedHandle: 'bob' }),
+    ]);
+    assert.notEqual(a.loginUrl, b.loginUrl, "Bob was handed Ada's login URL");
+    assert.deepEqual(cancelled, [], "a live flow belonging to someone else was cancelled mid-callback");
+    // …and BOTH must be reachable by the reset, or one listener leaks.
+    await tool._resetPendingAuth();
+    assert.deepEqual(cancelled.sort(), ['ada', 'bob'], 'a concurrently-created flow could not be cancelled');
+  } finally {
+    if (priorCI === undefined) delete process.env.CI; else process.env.CI = priorCI;
+    if (realOauth) require.cache[oauthPath] = realOauth; else delete require.cache[oauthPath];
+    delete require.cache[initPath];
+  }
+});

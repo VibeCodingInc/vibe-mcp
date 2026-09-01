@@ -75,8 +75,11 @@ function principalFromToken(token) {
   // characters that would tell us this is not a token at all.
   // ALL THREE segments must be base64url — a signature of `!!!` is not a
   // signature, and validating only the payload let malformed tokens through.
-  const b64url = /^[A-Za-z0-9_-]+$/;
-  if (!b64url.test(header) || !b64url.test(payload) || !b64url.test(signature)) return null;
+  // Alphabet AND length: a single base64url character cannot encode anything
+  // (a length of 4n+1 is an impossible remainder), so 'A' and '_' are not
+  // signatures even though every character in them is legal.
+  const b64url = (seg) => /^[A-Za-z0-9_-]+$/.test(seg) && seg.length >= 2 && seg.length % 4 !== 1;
+  if (!b64url(header) || !b64url(payload) || !b64url(signature)) return null;
   try {
     // The header must decode to a JSON object too. `A` is not a possible
     // base64url encoding of anything, and a non-JSON header means this is not
