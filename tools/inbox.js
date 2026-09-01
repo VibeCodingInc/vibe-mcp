@@ -222,12 +222,21 @@ async function handler(args) {
   // all list/ambient concerns and must not hold this path open.
   if (requestedHandle) {
     const thread = await store.getThread(myHandle, requestedHandle);
-    await store.markThreadRead(
+    // markThreadRead can now REFUSE (a read that failed is not permission to
+    // write). A refusal means the thread on disk could not be read, so an
+    // empty render would be a claim about a conversation nobody looked at.
+    const marked = await store.markThreadRead(
       myHandle,
       requestedHandle,
       thread._lastMessageId,
       thread._threadId
     );
+    if (marked && marked.success === false) {
+      return {
+        display: `Couldn't read your thread with @${requestedHandle} — nothing is shown rather than an empty conversation.`,
+        footer: 'minimal',
+      };
+    }
 
     if (thread.some(m => m.from === requestedHandle)) {
       patterns.logMessageReceived(requestedHandle);
@@ -399,7 +408,10 @@ async function handler(args) {
 
     // Fetch full thread and mark as read
     const thread = await store.getThread(myHandle, them);
-    await store.markThreadRead(myHandle, them, thread._lastMessageId, thread._threadId);
+    const marked = await store.markThreadRead(myHandle, them, thread._lastMessageId, thread._threadId);
+    if (marked && marked.success === false) {
+      return { display: `Couldn't read your thread with @${them} — nothing is shown rather than an empty conversation.` };
+    }
 
     // Auto-track readWelcomeAt if viewing welcome from @brightseth
     const isWelcomeThread = them.toLowerCase() === 'brightseth';

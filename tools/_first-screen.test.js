@@ -376,3 +376,98 @@ test('a good read still marks and rewrites correctly', async () => {
     delete require.cache[require.resolve('../store/local.js')];
   }
 });
+
+test('a refused mark leaves no temp file behind and is never rendered as an empty thread', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-tmp-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  const file = path.join(home, 'messages.jsonl');
+  fs.writeFileSync(file, '{"from":"zoe","to":"ada","body":"keep","timestamp":1}\n{ bad\n');
+  delete require.cache[require.resolve('../config')];
+  delete require.cache[require.resolve('../store/local.js')];
+  try {
+    const fresh = require('../store/local.js');
+    const res = await fresh.markThreadRead('ada', 'zoe');
+    assert.equal(res.success, false);
+    const strays = fs.readdirSync(home).filter((f) => f.endsWith('.tmp'));
+    assert.deepEqual(strays, [], `temp files left behind: ${strays.join(', ')}`);
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+    delete require.cache[require.resolve('../store/local.js')];
+  }
+});
+
+test('the callers of markThreadRead observe a refusal', () => {
+  // The contract gained a {success:false} outcome; a caller that ignores it
+  // renders a claim about a thread nobody could read (review P2).
+  const inbox = fs.readFileSync(path.join(__dirname, 'inbox.js'), 'utf8');
+  const reply = fs.readFileSync(path.join(__dirname, 'reply.js'), 'utf8');
+  const marks = [...inbox.matchAll(/markThreadRead\(/g)].length;
+  const observed = [...inbox.matchAll(/marked\s*&&\s*marked\.success === false/g)].length;
+  assert.equal(observed, marks, `inbox has ${marks} mark call(s) and observes ${observed}`);
+  assert.match(reply, /marked\.success === false/, 'reply observes the refusal too');
+  assert.match(inbox, /nothing is shown rather than an empty conversation/, 'and says so honestly');
+});
+
+test('a corrupt profile store is never overwritten by a mutator', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-prof-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  const file = path.join(home, 'profiles.json');
+  const corrupt = '{"ada":{"handle":"ada","building":"a thing"} TRUNCATED';
+  fs.writeFileSync(file, corrupt);
+  delete require.cache[require.resolve('../config')];
+  delete require.cache[require.resolve('../store/profiles.js')];
+  try {
+    const profiles = require('../store/profiles.js');
+    await profiles.updateProfile('zoe', { building: 'something else' });
+    assert.equal(fs.readFileSync(file, 'utf8'), corrupt, 'the store was rewritten over an unreadable read');
+    assert.deepEqual(fs.readdirSync(home).filter((f) => f.endsWith('.tmp')), []);
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+    delete require.cache[require.resolve('../store/profiles.js')];
+  }
+});
+
+test('a readable profile store still saves, keeping the other profiles', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-prof2-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  const file = path.join(home, 'profiles.json');
+  fs.writeFileSync(file, JSON.stringify({ ada: { handle: 'ada', building: 'a thing' } }, null, 2));
+  delete require.cache[require.resolve('../config')];
+  delete require.cache[require.resolve('../store/profiles.js')];
+  try {
+    const profiles = require('../store/profiles.js');
+    await profiles.updateProfile('zoe', { building: 'something else' });
+    const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(after.ada.building, 'a thing', 'the existing profile was lost');
+    assert.equal(after.zoe.building, 'something else', 'the new profile was not written');
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+    delete require.cache[require.resolve('../store/profiles.js')];
+  }
+});
+
+test('a corrupt presence file is never overwritten by a heartbeat', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-pres-'));
+  const saved = process.env.VIBE_HOME;
+  process.env.VIBE_HOME = home;
+  const file = path.join(home, 'presence.json');
+  const corrupt = '{"ada":{"handle":"ada"} TRUNCATED';
+  fs.writeFileSync(file, corrupt);
+  delete require.cache[require.resolve('../config')];
+  delete require.cache[require.resolve('../store/local.js')];
+  try {
+    const local = require('../store/local.js');
+    await local.heartbeat('zoe', 'hello');
+    assert.equal(fs.readFileSync(file, 'utf8'), corrupt, 'presence was rewritten over an unreadable read');
+  } finally {
+    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
+    delete require.cache[require.resolve('../config')];
+    delete require.cache[require.resolve('../store/local.js')];
+  }
+});

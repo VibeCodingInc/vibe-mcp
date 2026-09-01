@@ -38,8 +38,33 @@ function loadPresence() {
   return {};
 }
 
+function presenceIsReadable() {
+  if (!fs.existsSync(PRESENCE_FILE)) return true;   // absent = a real first write
+  try {
+    JSON.parse(fs.readFileSync(PRESENCE_FILE, 'utf8'));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 function savePresence(presence) {
-  fs.writeFileSync(PRESENCE_FILE, JSON.stringify(presence, null, 2));
+  // loadPresence() turns an unreadable file into {}, so an unguarded save would
+  // drop every other person's presence record.
+  if (!presenceIsReadable()) {
+    console.error('Refusing to write presence: the file on disk could not be read.');
+    return false;
+  }
+  const tmp = `${PRESENCE_FILE}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(presence, null, 2));
+    fs.renameSync(tmp, PRESENCE_FILE);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch {}
+    console.error('Failed to save presence:', e.message);
+    return false;
+  }
+  return true;
 }
 
 async function heartbeat(handle, one_liner) {
@@ -227,9 +252,17 @@ async function markThreadRead(myHandle, theirHandle) {
   // Rewrite the file. Reached only from a read that actually succeeded, and
   // written via a temp file + rename so an interrupted write cannot leave a
   // half-file behind either.
-  const tmp = `${MESSAGES_FILE}.tmp`;
-  fs.writeFileSync(tmp, updated.map(m => JSON.stringify(m)).join('\n') + '\n');
-  fs.renameSync(tmp, MESSAGES_FILE);
+  // A per-write temp name: a fixed one collides between concurrent marks, and
+  // a failed rename would leave it behind (review P2).
+  const tmp = `${MESSAGES_FILE}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, updated.map(m => JSON.stringify(m)).join('\n') + '\n');
+    fs.renameSync(tmp, MESSAGES_FILE);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch {}
+    console.error('[local] mark-read write failed; the file is unchanged:', e.message);
+    return { success: false, error: e.code || 'local_write_failed' };
+  }
   return { success: true };
 }
 
