@@ -576,6 +576,18 @@ test('init (#320): a mint record never outlives the credential it is about', asy
   }
 });
 
+// A segment that decodes to the SAME bytes but is spelled differently — the
+// trailing pad bits are unused, so more than one encoding exists and only one
+// of them is canonical.
+function nonCanonicalTwin(seg) {
+  const target = Buffer.from(seg, 'base64url');
+  for (const c of 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_') {
+    const variant = seg.slice(0, -1) + c;
+    if (variant !== seg && Buffer.from(variant, 'base64url').equals(target)) return variant;
+  }
+  throw new Error('no non-canonical twin for this segment — the pin cannot run');
+}
+
 test('principalFromToken: a malformed JWT proves nothing', () => {
   const authStore = require('../auth-store');
   const H = b64({ alg: 'ES256', typ: 'JWT' });
@@ -592,6 +604,15 @@ test('principalFromToken: a malformed JWT proves nothing', () => {
     ['non-string', { toString() { return `${H}.${P}.sig`; } }],
     ['numeric pid', `${H}.${b64({ principal_id: 1 })}.sig`],
     ['null', null],
+    // These are why the length and canonical-form guards exist. Without them
+    // the pin passed with the guards reverted (round-4 review: vacuous).
+    ['single-char signature', `${H}.${P}.A`],
+    ['single-char signature _', `${H}.${P}._`],
+    ['non-canonical payload', `${H}.${P.slice(0, -1)}B.sig`],
+    // The case ONLY the canonical round-trip catches: same decoded bytes, so
+    // the JSON still parses and every other guard passes it — it is simply not
+    // the encoding it claims to be. Found by searching the alphabet for a twin.
+    ['non-canonical twin', `${H}.${nonCanonicalTwin(P)}.sig`],
   ]) {
     assert.equal(authStore.principalFromToken(tok), null, `${name} reported a principal it did not prove`);
   }
@@ -747,6 +768,127 @@ test('init (#320): simultaneous flows for two identities are both tracked', asyn
     await tool._resetPendingAuth();
     assert.deepEqual(cancelled.sort(), ['ada', 'bob'], 'a concurrently-created flow could not be cancelled');
   } finally {
+    if (priorCI === undefined) delete process.env.CI; else process.env.CI = priorCI;
+    if (realOauth) require.cache[oauthPath] = realOauth; else delete require.cache[oauthPath];
+    delete require.cache[initPath];
+  }
+});
+
+test('verifyAuthToken: a 200 that says no is still an answer', async () => {
+  // Round-4: keying "did the server answer?" on the ABSENCE of a statusCode
+  // meant a 200 body carrying {success:false} was reported as offline.
+  const http = require('node:http');
+  // Answer immediately. Waiting for the request body's 'end' meant the reply
+  // never went out and the client timed out — which would have "passed" this
+  // pin for the wrong reason on the very defect it exists to catch.
+  const server = http.createServer((req, res) => {
+    res.statusCode = 200;
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ success: false, valid: false, error: 'token revoked' }));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+  try {
+    // execFile, NOT execFileSync: the sync form blocks this process's event
+    // loop, so the server above can never answer the child and every run
+    // "passes" as a timeout — on the exact defect this pin exists to catch.
+    const { execFile } = require('node:child_process');
+    const script = `
+      const store = require(${JSON.stringify(path.join(__dirname, '..', 'store', 'api.js'))});
+      store.verifyAuthToken('h.eyJzdWIiOiJhZGEifQ.sig').then((v) => process.stdout.write(JSON.stringify(v)));
+    `;
+    const out = await new Promise((resolve, reject) => {
+      execFile('node', ['-e', script], {
+        env: { ...process.env, VIBE_API_URL: `http://127.0.0.1:${port}`, VIBE_SETUP_NO_AUTORUN: '1', CI: '1' },
+        encoding: 'utf8', timeout: 60000,
+      }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    });
+    const v = JSON.parse(out);
+    assert.equal(v.valid, false);
+    assert.equal(v.definitive, true, 'a served refusal was reported as an unreachable server');
+  } finally {
+    server.close();
+  }
+});
+
+test('init (#320): a stale persist complaint never attaches to a different credential', async () => {
+  // Round-4 confirmed the handle-only key reintroduced the round-2 defect.
+  // The record now names the person AND the credential they still hold.
+  const cfgPath = path.join(HOME, 'config.json');
+  const keep = fs.readFileSync(cfgPath, 'utf8');
+  const original = `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
+  const cfg = JSON.parse(keep);
+  cfg.username = 'ada';
+  cfg.authToken = original;
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+  const config = require('../config');
+  const realSaveToken = config.saveAuthToken;
+  const restoreOauth = stubOauth();
+  const h = toolWith('init', { ...QUIET_STORE, verifyAuthToken: async () => ({ definitive: true, valid: true }) });
+  const initPath = require.resolve('./init.js');
+  const authStore = require('../auth-store');
+  try {
+    config.saveAuthToken = () => false;
+    await require(initPath)._completeSignInForTest({ token: `h.${b64({ sub: 'ada', iat: 7 })}.sig`, handle: 'ada' }, 'x');
+    config.saveAuthToken = realSaveToken;
+    // The person still holds `original`, so the complaint applies…
+    assert.match((await h.run({}))?.display || '', /could not be saved/);
+    // …but an UNRELATED credential later loaded under the same name must not
+    // inherit it.
+    const unrelated = `h.${b64({ sub: 'ada', iat: 999, exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`;
+    const c2 = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    c2.authToken = unrelated;
+    fs.writeFileSync(cfgPath, JSON.stringify(c2));
+    clearSessionToken();
+    authStore.setToken(unrelated);
+    authStore.setHandle('ada');
+    assert.ok(!/could not be saved/.test((await h.run({}))?.display || ''),
+      'a stale complaint attached itself to a credential it was never about');
+  } finally {
+    config.saveAuthToken = realSaveToken;
+    require(initPath)._resetMintStateForTest();
+    restoreOauth();
+    h.restore();
+    fs.writeFileSync(cfgPath, keep);
+    clearSessionToken();
+    const restored = JSON.parse(keep);
+    authStore.setToken(restored.authToken);
+    authStore.setHandle(restored.username);
+  }
+});
+
+test('init (#320): expired flows do not accumulate', async () => {
+  const initPath = require.resolve('./init.js');
+  const oauthPath = require.resolve('../oauth-callback');
+  const realOauth = require.cache[oauthPath];
+  require.cache[oauthPath] = {
+    id: oauthPath, filename: oauthPath, loaded: true,
+    exports: {
+      ...(realOauth ? realOauth.exports : {}),
+      beginOAuth: async ({ requestedHandle }) => ({
+        loginUrl: `https://example.invalid/login?who=${requestedHandle}`,
+        waitForCallback: () => new Promise(() => {}),
+        cancel: async () => {},
+      }),
+    },
+  };
+  const priorCI = process.env.CI;
+  process.env.CI = '1';
+  delete require.cache[initPath];
+  const tool = require(initPath);
+  try {
+    await tool._resetPendingAuth();
+    for (let i = 0; i < 20; i++) {
+      await tool._ensureAuthFlowForTest({ requestedHandle: `person${i}` });
+    }
+    assert.equal(tool._flowCountForTest(), 20);
+    tool._forceExpireForTest();
+    tool._ageOutFlowsForTest();
+    await tool._ensureAuthFlowForTest({ requestedHandle: 'someone-new' });
+    assert.equal(tool._flowCountForTest(), 1,
+      'timed-out flows were retained — the map grows without bound');
+  } finally {
+    await tool._resetPendingAuth();
     if (priorCI === undefined) delete process.env.CI; else process.env.CI = priorCI;
     if (realOauth) require.cache[oauthPath] = realOauth; else delete require.cache[oauthPath];
     delete require.cache[initPath];

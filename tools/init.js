@@ -339,7 +339,7 @@ let lastMintLackedPrincipalForToken = null;
 // Set when a completed sign-in could not be written to disk at all. Distinct
 // from a handle-only mint: there, the credential exists and lacks a claim;
 // here, there may be no new credential at all.
-let lastSignInFailedToPersistFor = null;
+let lastSignInFailedToPersist = null;   // { handle, priorToken }
 
 async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) {
   // VERIFY BEFORE CLAIMING (#320): the point of reauth is a credential that
@@ -379,9 +379,18 @@ async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) 
   // and any later successful sign-in for the same person clears it.
   const who = normalizeHandle(finalHandle);
   if (credentialPersisted) {
-    if (lastSignInFailedToPersistFor === who) lastSignInFailedToPersistFor = null;
+    if (lastSignInFailedToPersist && lastSignInFailedToPersist.handle === who) {
+      lastSignInFailedToPersist = null;
+    }
   } else {
-    lastSignInFailedToPersistFor = who;
+    // Keyed by the person AND by the credential that was on disk when the
+    // write failed. The handle alone let a stale complaint attach itself to an
+    // unrelated credential later loaded under the same name (the round-2
+    // defect, reintroduced in round 3 and confirmed in round 4). The token
+    // alone could never match, because a failed token write leaves the OLD one
+    // on disk. Both together say exactly what happened: this person's sign-in
+    // did not land, and what they still hold is this.
+    lastSignInFailedToPersist = { handle: who, priorToken: tokenFingerprint(config.getAuthToken()) };
   }
   if (!credentialPersisted) {
     console.error(`[vibe] sign-in for @${finalHandle} did not persist — token:${tokenSaved} identity:${identitySaved} config:${configSaved}`);
@@ -409,7 +418,22 @@ const flowKey = (opts) => normalizeHandle((opts && opts.requestedHandle) || '');
 const authFlows = new Map();       // key -> flow
 const authFlowCreations = new Map(); // key -> promise
 
+// An expired flow is kept briefly so the next start for the SAME person can
+// report that it replaced one; beyond that it is garbage. Without this, every
+// timed-out sign-in for a distinct handle stayed in the map forever.
+const EXPIRED_RETENTION_MS = 5 * 60 * 1000;
+
+function pruneExpiredFlows() {
+  const now = Date.now();
+  for (const [k, flow] of authFlows) {
+    if (flow.expired && flow.expiredAt && now - flow.expiredAt > EXPIRED_RETENTION_MS) {
+      authFlows.delete(k);
+    }
+  }
+}
+
 async function ensureAuthFlow(opts) {
+  pruneExpiredFlows();
   const key = flowKey(opts);
   const existing = authFlows.get(key);
   if (existing && !existing.expired) {
@@ -448,7 +472,7 @@ async function createAuthFlow({ requestedHandle, one_liner }) {
   // timeout marks the flow expired so the next start issues a fresh link.
   oauth.waitForCallback().then(
     (result) => completeSignIn(result, one_liner).catch((e) => console.error('[vibe_init] sign-in completion failed:', e.message)).finally(() => { if (authFlows.get(key) === flow) authFlows.delete(key); }),
-    (err) => { flow.expired = true; if (err?.message !== 'AUTH_TIMEOUT') console.error('[vibe_init] sign-in flow ended:', err?.message || err); }
+    (err) => { flow.expired = true; flow.expiredAt = Date.now(); if (err?.message !== 'AUTH_TIMEOUT') console.error('[vibe_init] sign-in flow ended:', err?.message || err); }
   );
   // Kick the launcher off and report only what is known within a short
   // budget — a slow launcher yields 'unknown', never a wait and never a lie.
@@ -490,7 +514,7 @@ function authRequiredResult(flow, presenceBanner) {
 
 // Test seam: expire every pending flow between cases.
 function _forceExpireForTest() {
-  for (const flow of authFlows.values()) flow.expired = true;
+  for (const flow of authFlows.values()) { flow.expired = true; flow.expiredAt = Date.now(); }
 }
 
 // Cancels EVERY tracked flow. The single-slot version could only reach the
@@ -565,8 +589,9 @@ async function handler(args) {
       // …unless the last completed sign-in ALREADY came back handle-only. Then
       // reauth is not a fix, it is a loop, and the honest thing is to say so.
       const currentFp = tokenFingerprint(config.getAuthToken());
-      if (lastSignInFailedToPersistFor
-          && lastSignInFailedToPersistFor === normalizeHandle(existingHandle)) {
+      if (lastSignInFailedToPersist
+          && lastSignInFailedToPersist.handle === normalizeHandle(existingHandle)
+          && lastSignInFailedToPersist.priorToken === currentFp) {
         return {
           display: `## Signed in as @${existingHandle} — but the credential could not be saved\n\n`
             + `The sign-in itself worked; writing it to disk did not, so this session is still `
@@ -763,5 +788,11 @@ _Say "vibe onboarding" anytime to check your progress_`
   };
 }
 
-module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE, _completeSignInForTest: completeSignIn, _resetMintStateForTest: () => { lastMintLackedPrincipalForToken = null; lastSignInFailedToPersistFor = null; },
-  _ensureAuthFlowForTest: ensureAuthFlow };
+module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE, _completeSignInForTest: completeSignIn, _resetMintStateForTest: () => { lastMintLackedPrincipalForToken = null; lastSignInFailedToPersist = null; },
+  _ensureAuthFlowForTest: ensureAuthFlow,
+  _flowCountForTest: () => authFlows.size,
+  _ageOutFlowsForTest: () => {
+    for (const flow of authFlows.values()) {
+      if (flow.expired) flow.expiredAt = Date.now() - (EXPIRED_RETENTION_MS + 1000);
+    }
+  } };

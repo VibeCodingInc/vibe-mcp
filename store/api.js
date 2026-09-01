@@ -1116,7 +1116,11 @@ async function verifyAuthToken(token) {
     // dead network and labelled it definitive — the server saying no. Everything
     // downstream that trusts `definitive` (init's principal fall-through, vibe
     // token) then treated ECONNREFUSED as evidence against the credential.
-    if (result && result.success === false && !result.statusCode) {
+    //
+    // Keyed on the TRANSPORT markers, not on the absence of a statusCode: a
+    // 200 carrying {success:false} is the server answering, and reading "no
+    // status" as "no answer" turned a real rejection into "you're offline".
+    if (result && result.success === false && (result.network || result.timeout)) {
       return {
         valid: false,
         definitive: false,

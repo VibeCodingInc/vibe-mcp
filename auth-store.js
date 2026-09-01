@@ -78,7 +78,18 @@ function principalFromToken(token) {
   // Alphabet AND length: a single base64url character cannot encode anything
   // (a length of 4n+1 is an impossible remainder), so 'A' and '_' are not
   // signatures even though every character in them is legal.
-  const b64url = (seg) => /^[A-Za-z0-9_-]+$/.test(seg) && seg.length >= 2 && seg.length % 4 !== 1;
+  // Alphabet, length, AND canonical form. A segment whose trailing pad bits are
+  // non-zero decodes without complaint but is not the encoding it claims to be;
+  // round-tripping is the only check that catches it.
+  const b64url = (seg) => {
+    if (!/^[A-Za-z0-9_-]+$/.test(seg)) return false;
+    if (seg.length < 2 || seg.length % 4 === 1) return false;
+    try {
+      return Buffer.from(seg, 'base64url').toString('base64url') === seg;
+    } catch {
+      return false;
+    }
+  };
   if (!b64url(header) || !b64url(payload) || !b64url(signature)) return null;
   try {
     // The header must decode to a JSON object too. `A` is not a possible
