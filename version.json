@@ -1,12 +1,11 @@
 {
-  "version": "0.8.23",
-  "updated": "2026-09-01",
-  "changelog": "The install tells the truth about the room. Setup used to say “0 builders online” to every newcomer, because the roster is private before you sign in and it was counting names it was never given; now it reads the count the server actually serves, and after sign-in it lists real people and what they are working on. And a first message to someone before you have signed in no longer asks GitHub to sign you in as them.",
+  "version": "0.8.24",
+  "updated": "2026-09-02",
+  "changelog": "Quieter when you are away. The server used to check your inbox twice every fifteen seconds for as long as your coding session stayed open — days, sometimes. Now it checks every fifteen seconds while you are actually using /vibe and backs off to once a minute when you are not; the moment you use a tool it is fast again. Replies still reach a live session within fifteen seconds, and within a minute of an idle one.",
   "features": [
-    "Setup says how many people are here now — never a zero it did not measure",
-    "After sign-in, setup lists the people actually here and what they are working on",
-    "Messaging @someone before sign-in starts your own sign-in, not one for them",
-    "Setup's quick start is a sentence you can say, not a command to learn"
+    "Inbox checks back off to once a minute when a session is idle, and snap back the moment you use a tool",
+    "The rarely used guest-session poll runs once a minute while active and every five minutes while idle",
+    "Presence heartbeat unchanged: you stay visible exactly as before"
   ],
   "deprecated": [],
   "breaking": false,
