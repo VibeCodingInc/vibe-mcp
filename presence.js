@@ -5,7 +5,7 @@
  * Uses session tokens for per-session identity.
  * Users become "idle" after 5 minutes of no heartbeat.
  *
- * Also runs a guest message poll every 15 seconds. When guest messages
+ * Also polls for DMs and guest messages on an idle-aware cadence. When they
  * are detected, emits a tools/list_changed notification to force Claude
  * to re-query vibe tools (which triggers getPresenceFooter and injects
  * the messages into context). This ensures Use Case 2 (user testing/QA)
@@ -18,8 +18,46 @@ const store = require('./store');
 const { apiHeaders } = require('./api-auth');
 
 let heartbeatInterval = null;
-let guestPollInterval = null;
+let unreadPollTimer = null;
+let guestPollTimer = null;
 let sessionInitialized = false;
+
+// ---- Poll cadence (2026-09-02 audit) -------------------------------------
+// One idle signed-in client made 2 inbox reads every 15s forever — session/guest
+// (6 KV commands) + the full threads list (1) — and the fleet's long-lived
+// sessions (9-hour and 9-day-old windows) added up to ~7 inbox polls/sec at
+// the KV. Replies must still land fast, so the DM check stays at 15s while the
+// person is ACTIVE (any tool call in the last ACTIVE_WINDOW_MS) and backs off
+// to 60s when idle; the guest-session poll, a pairing feature almost nobody is
+// in, runs at 60s active / 300s idle. Any tool call snaps both back to fast.
+// Worst-case DM latency: 15s active, 60s idle.
+const ACTIVE_WINDOW_MS = Number(process.env.VIBE_POLL_ACTIVE_WINDOW_MS) || 10 * 60 * 1000;
+const CADENCE = {
+  active: { unread: 15 * 1000, guest: 60 * 1000 },
+  idle:   { unread: 60 * 1000, guest: 300 * 1000 },
+};
+let lastActivityAt = Date.now(); // the session starting is activity
+
+function noteActivity() {
+  lastActivityAt = Date.now();
+}
+
+/** Pure: which cadence applies after `idleMs` without a tool call. */
+function cadenceFor(idleMs) {
+  return idleMs < ACTIVE_WINDOW_MS ? CADENCE.active : CADENCE.idle;
+}
+
+function schedule(kind) {
+  const ms = cadenceFor(Date.now() - lastActivityAt)[kind];
+  const run = async () => {
+    if (kind === 'unread') await pollUnread(); else await pollGuestMessages();
+    // Re-arm only while start() is in effect (stop() clears the timers).
+    if (kind === 'unread' ? unreadPollTimer : guestPollTimer) schedule(kind);
+  };
+  const t = setTimeout(run, ms);
+  t.unref?.();
+  if (kind === 'unread') unreadPollTimer = t; else guestPollTimer = t;
+}
 
 function start() {
   if (heartbeatInterval) return;
@@ -30,11 +68,9 @@ function start() {
   // Then every 30 seconds
   heartbeatInterval = setInterval(sendHeartbeat, 30 * 1000);
 
-  // Guest message poll: every 15 seconds, check for incoming session messages
-  // and emit tools/list_changed to force Claude to pick them up via getPresenceFooter
-  if (!guestPollInterval) {
-    guestPollInterval = setInterval(pollGuestMessages, 15 * 1000);
-  }
+  // Inbox polls on the idle-aware cadence above (see CADENCE).
+  if (!unreadPollTimer) schedule('unread');
+  if (!guestPollTimer) schedule('guest');
 }
 
 function stop() {
@@ -42,9 +78,13 @@ function stop() {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
   }
-  if (guestPollInterval) {
-    clearInterval(guestPollInterval);
-    guestPollInterval = null;
+  if (unreadPollTimer) {
+    clearTimeout(unreadPollTimer);
+    unreadPollTimer = null;
+  }
+  if (guestPollTimer) {
+    clearTimeout(guestPollTimer);
+    guestPollTimer = null;
   }
   // Clean up session file
   config.clearSession();
@@ -97,13 +137,11 @@ async function pollGuestMessages() {
   try {
     const handle = config.getHandle();
     if (!handle) return;
-
     const apiUrl = config.getApiUrl?.() || 'https://www.slashvibe.dev';
     const resp = await fetch(`${apiUrl}/api/session/guest?handle=${encodeURIComponent(handle)}`, {
       headers: apiHeaders(),
     });
     if (!resp.ok) return;
-
     const data = await resp.json();
     if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
       // Guest messages waiting — emit list_changed to force Claude to refresh
@@ -112,11 +150,21 @@ async function pollGuestMessages() {
         global.vibeNotifier.emitImmediate();
       }
     }
+  } catch {
+    // Silent fail — guest polling is best-effort
+  }
+}
 
-    // Ordinary DMs: nudge the session when the unread count RISES, so a DM
-    // sent from any surface reaches the live session within one poll cycle
-    // (getPresenceFooter injects the new bodies, once each). A drop just
-    // rebaselines — reading elsewhere shouldn't trigger a refresh here.
+/**
+ * Ordinary DMs: nudge the session when the unread count RISES, so a DM sent
+ * from any surface reaches the live session within one poll cycle
+ * (getPresenceFooter injects the new bodies, once each). A drop just
+ * rebaselines — reading elsewhere shouldn't trigger a refresh here.
+ */
+async function pollUnread() {
+  try {
+    const handle = config.getHandle();
+    if (!handle) return;
     const unread = await store.getUnreadCount(handle).catch(() => null);
     if (typeof unread === 'number') {
       if (lastSeenUnread !== null && unread > lastSeenUnread && global.vibeNotifier) {
@@ -125,7 +173,7 @@ async function pollGuestMessages() {
       lastSeenUnread = unread;
     }
   } catch {
-    // Silent fail — guest polling is best-effort
+    // Silent fail — best-effort
   }
 }
 
@@ -170,4 +218,4 @@ async function goOffline() {
   }
 }
 
-module.exports = { start, stop, forceHeartbeat, goOffline };
+module.exports = { start, stop, forceHeartbeat, goOffline, noteActivity, cadenceFor, CADENCE, ACTIVE_WINDOW_MS };
