@@ -39,7 +39,14 @@ const CADENCE = {
 let lastActivityAt = Date.now(); // the session starting is activity
 
 function noteActivity() {
+  const wasIdle = cadenceFor(Date.now() - lastActivityAt) === CADENCE.idle;
   lastActivityAt = Date.now();
+  // A pending idle timer would still fire on the slow cadence (codex P2 on #37):
+  // re-arm both polls on the fast cadence the moment the person is back.
+  if (wasIdle) {
+    if (unreadPollTimer) { clearTimeout(unreadPollTimer); schedule('unread'); }
+    if (guestPollTimer) { clearTimeout(guestPollTimer); schedule('guest'); }
+  }
 }
 
 /** Pure: which cadence applies after `idleMs` without a tool call. */
@@ -218,4 +225,8 @@ async function goOffline() {
   }
 }
 
-module.exports = { start, stop, forceHeartbeat, goOffline, noteActivity, cadenceFor, CADENCE, ACTIVE_WINDOW_MS };
+module.exports = { start, stop, forceHeartbeat, goOffline, noteActivity, cadenceFor, CADENCE, ACTIVE_WINDOW_MS,
+  // test seams — read the armed delays, and age the session without waiting
+  _pollDelaysForTest: () => ({ unread: unreadPollTimer?._idleTimeout ?? null, guest: guestPollTimer?._idleTimeout ?? null }),
+  _setLastActivityForTest: (ts) => { lastActivityAt = ts; },
+};

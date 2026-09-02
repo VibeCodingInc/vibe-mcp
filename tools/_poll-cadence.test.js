@@ -34,3 +34,16 @@ test('the dispatcher marks every tool call as activity', () => {
   const j = src.indexOf('const result = await tool.handler(args)');
   assert.ok(i > -1 && j > i, 'noteActivity() must run before tool.handler in tools/call');
 });
+
+test('a tool call after going idle re-arms both polls on the fast cadence (codex P2)', () => {
+  // Uninitialized VIBE_HOME (npm test sets one): start() arms timers but polls return early.
+  presence._setLastActivityForTest(Date.now() - presence.ACTIVE_WINDOW_MS - 1);
+  presence.start();
+  try {
+    assert.deepEqual(presence._pollDelaysForTest(), { unread: 60_000, guest: 300_000 }, 'idle session arms slow timers');
+    presence.noteActivity();
+    assert.deepEqual(presence._pollDelaysForTest(), { unread: 15_000, guest: 60_000 }, 'activity re-arms fast timers');
+  } finally {
+    presence.stop();
+  }
+});
