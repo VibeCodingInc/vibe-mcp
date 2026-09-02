@@ -30,12 +30,14 @@ function canonicalHandle(value) {
   if (typeof value !== 'string') return '';
   let h = value.replace(INVISIBLE, '');
   h = h.normalize ? h.normalize('NFC') : h;
-  h = h.trim().replace(/^@+/, '').trim().toLowerCase();
-  return h.replace(/-/g, '_');
+  // A handle is the GitHub login, and GitHub logins may contain '-'. Rewriting
+  // dashes to underscores made `vibe inbox synth-stan` look up synth_stan and
+  // render an empty thread (found live 2026-09-02). Keep the dash.
+  return h.trim().replace(/^@+/, '').trim().toLowerCase();
 }
 
-/** Platform-legal shape: ASCII letters, digits, underscore. Reject anything else. */
-const isCanonicalHandle = (value) => /^[a-z0-9_]{1,39}$/.test(canonicalHandle(value));
+/** Platform-legal shape: ASCII letters, digits, underscore, dash (GitHub logins). Reject anything else. */
+const isCanonicalHandle = (value) => /^[a-z0-9_-]{1,39}$/.test(canonicalHandle(value));
 
 /** True when two handles refer to the same principal label. */
 const sameHandle = (a, b) => {
