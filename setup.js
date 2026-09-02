@@ -340,26 +340,21 @@ async function getOnlineUsers(token) {
     const response = await fetch(`${API_BASE}/api/presence`, { headers });
     const data = await response.json();
     const people = (u) => !u.isAgent;
+    // "Here now" means active humans only. Away rows were once appended below,
+    // which let the headline count disagree with the rows under it (codex P2).
     const active = (data.active || []).filter(people);
-    const away = (data.away || []).filter(people);
+    const workText = (u) => u.workingOn || u.working_on || u.one_liner || '';
 
     // Format: { users: [{handle, status, one_liner}], total: number }
-    const users = [
-      ...active.slice(0, 5).map(u => ({
-        handle: u.username || u.handle,
-        status: 'active',
-        one_liner: u.one_liner || u.working_on || ''
-      })),
-      ...away.slice(0, 2).map(u => ({
-        handle: u.username || u.handle,
-        status: 'away',
-        one_liner: u.one_liner || u.working_on || ''
-      }))
-    ].slice(0, 5);
+    const users = active.slice(0, 5).map(u => ({
+      handle: u.username || u.handle,
+      status: 'active',
+      one_liner: workText(u)
+    }));
 
     const total = Number.isFinite(data.counts?.humansActive)
       ? data.counts.humansActive
-      : active.length + away.length;
+      : active.length;
     return { users, total };
   } catch (e) {
     return { users: [], total: 0 };
