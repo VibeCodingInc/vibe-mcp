@@ -1,11 +1,11 @@
 {
-  "version": "0.8.24",
+  "version": "0.8.25",
   "updated": "2026-09-02",
-  "changelog": "Quieter when you are away. The server used to check your inbox twice every fifteen seconds for as long as your coding session stayed open — days, sometimes. Now it checks every fifteen seconds while you are actually using /vibe and backs off to once a minute when you are not; the moment you use a tool it is fast again. Replies still reach a live session within fifteen seconds, and within a minute of an idle one.",
+  "changelog": "Waiting means their words. After you replied to someone, their next session could open with their own message echoed back as if it had just arrived; now a waiting message is always the other person's newest words. And handles keep their dashes — a GitHub login like synth-stan is looked up as written, so the thread opens instead of coming back empty.",
   "features": [
-    "Inbox checks back off to once a minute when a session is idle, and snap back the moment you use a tool",
-    "The rarely used guest-session poll runs once a minute while active and every five minutes while idle",
-    "Presence heartbeat unchanged: you stay visible exactly as before"
+    "A waiting message at session start is always the other person's newest message, never your own reply",
+    "Handles with dashes open the right thread",
+    "Long threads read from the end, and the startup check finishes inside its time budget"
   ],
   "deprecated": [],
   "breaking": false,
