@@ -6,12 +6,12 @@
     "url": "https://github.com/VibeCodingInc/vibe-mcp",
     "source": "github"
   },
-  "version": "0.8.22",
+  "version": "0.8.23",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "slashvibe-mcp",
-      "version": "0.8.22",
+      "version": "0.8.23",
       "runtime": "node",
       "transport": {
         "type": "stdio"

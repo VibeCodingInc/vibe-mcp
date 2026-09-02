@@ -1,13 +1,12 @@
 {
-  "version": "0.8.22",
-  "updated": "2026-08-31",
-  "changelog": "The first screen. vibe start is now seven lines: who you are, what's waiting, how many others are here, and where to go next. No message bodies, no chosen person, no drafted DM, no rotating tips. And it only says what it actually read — if your inbox or the room can't be reached it says so, instead of showing you a confident zero.",
+  "version": "0.8.23",
+  "updated": "2026-09-01",
+  "changelog": "The install tells the truth about the room. Setup used to say “0 builders online” to every newcomer, because the roster is private before you sign in and it was counting names it was never given; now it reads the count the server actually serves, and after sign-in it lists real people and what they are working on. And a first message to someone before you have signed in no longer asks GitHub to sign you in as them.",
   "features": [
-    "vibe start is seven lines and states the unread count exactly once",
-    "A failed read is never rendered as an empty inbox or an empty room",
-    "No message bodies on the first screen, and nobody is chosen for you",
-    "A read that did not succeed can no longer authorize a write — six places where one corrupt line destroyed messages, profiles, presence or your credential",
-    "vibe token no longer says “old local keys removed” unless they are gone"
+    "Setup says how many people are here now — never a zero it did not measure",
+    "After sign-in, setup lists the people actually here and what they are working on",
+    "Messaging @someone before sign-in starts your own sign-in, not one for them",
+    "Setup's quick start is a sentence you can say, not a command to learn"
   ],
   "deprecated": [],
   "breaking": false,
