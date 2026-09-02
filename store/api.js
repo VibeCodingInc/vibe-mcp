@@ -798,22 +798,36 @@ async function getRawInbox(handle) {
     // Transform threads with unread messages into message-like objects
     // for compatibility with notification system
     const unreadMessages = [];
-
+    const me = String(handle || '').toLowerCase();
     for (const thread of threads) {
-      if (thread.unread > 0 && thread.last_message) {
-        // Create message object from thread's last message
-        unreadMessages.push({
-          id: thread.last_message.id,
-          from: thread.last_message.from,
-          to: handle,
-          text: thread.last_message.body,
-          body: thread.last_message.body,
-          createdAt: thread.last_message.created_at,
-          read: false, // If it's in unread threads, it's unread
-          thread_id: thread.id,
-          unread_count: thread.unread,
-        });
+      if (!(thread.unread > 0 && thread.last_message)) continue;
+      let waiting = thread.last_message;
+      // "Waiting" means THEIR words. When the newest message is mine — I replied
+      // and their earlier message is still unread — the thread's last_message
+      // is my own send, and presenting it as "MESSAGE from @me" told a person
+      // their own words had arrived (Seth, 2026-09-02, the day of the invite).
+      // Fetch the thread and take the newest message from them instead.
+      if (String(waiting.from || '').toLowerCase() === me) {
+        try {
+          const t = await request('GET', `/api/messages?user=${encodeURIComponent(handle)}&with=${encodeURIComponent(thread.with)}&limit=50`);
+          const theirs = (t.messages || []).filter((m) => String(m.from || '').toLowerCase() !== me);
+          waiting = theirs.length ? theirs[theirs.length - 1] : null;
+        } catch {
+          waiting = null;
+        }
+        if (!waiting) continue; // nothing of theirs to show — not a waiting message
       }
+      unreadMessages.push({
+        id: waiting.id,
+        from: waiting.from,
+        to: handle,
+        text: waiting.body,
+        body: waiting.body,
+        createdAt: waiting.created_at,
+        read: false, // If it's in unread threads, it's unread
+        thread_id: thread.id,
+        unread_count: thread.unread,
+      });
     }
 
     return unreadMessages;
