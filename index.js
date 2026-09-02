@@ -595,7 +595,11 @@ class VibeMCPServer {
             // vibe_init reads only {handle, one_liner, auth_method} and ignores any
             // extra keys, so this is safe for every command yet lets relevant
             // context (e.g. a handle the caller already supplied) carry into auth.
-            const initResult = await initTool.handler(params.arguments || {});
+            // The gated tool's arguments describe ITS job, not the person signing in:
+            // vibe_dm's `handle` is the recipient. Forwarding it made a first message
+            // to @brightseth request a sign-in AS @brightseth (login?handle=brightseth,
+            // config.handle saved as the recipient). GitHub says who you are; pass nothing.
+            const initResult = await initTool.handler({});
             const initDisplay = initResult.display || JSON.stringify(initResult, null, 2);
 
             // After auth, emit tools/list_changed so Claude sees full toolset

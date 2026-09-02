@@ -315,6 +315,14 @@ async function getOnlineCount() {
   try {
     const response = await fetch(`${API_BASE}/api/presence`);
     const data = await response.json();
+    // Before sign-in the roster is private: the server answers with counts only
+    // (`{ anonymous: true, counts: { humansActive, active, ... }, active: [] }`).
+    // Counting names here printed "0 builders online" to every newcomer while
+    // eleven people were on. Read the count the server actually gives.
+    if (data.counts && typeof data.counts === 'object') {
+      const n = data.counts.humansActive ?? data.counts.active;
+      if (Number.isFinite(n)) return n;
+    }
     return (data.active?.length || 0) + (data.away?.length || 0);
   } catch (e) {
     return 0;
@@ -324,28 +332,30 @@ async function getOnlineCount() {
 /**
  * Get online users with details for display
  */
-async function getOnlineUsers() {
+async function getOnlineUsers(token) {
   try {
-    const response = await fetch(`${API_BASE}/api/presence`);
+    // Handles are only served to a signed-in caller; pass the fresh token so the
+    // "here now" list after sign-in is real, not an empty anonymous answer.
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const response = await fetch(`${API_BASE}/api/presence`, { headers });
     const data = await response.json();
-    const active = data.active || [];
-    const away = data.away || [];
+    const people = (u) => !u.isAgent;
+    // "Here now" means active humans only. Away rows were once appended below,
+    // which let the headline count disagree with the rows under it (codex P2).
+    const active = (data.active || []).filter(people);
+    const workText = (u) => u.workingOn || u.working_on || u.one_liner || '';
 
     // Format: { users: [{handle, status, one_liner}], total: number }
-    const users = [
-      ...active.slice(0, 5).map(u => ({
-        handle: u.username || u.handle,
-        status: 'active',
-        one_liner: u.one_liner || u.status || ''
-      })),
-      ...away.slice(0, 2).map(u => ({
-        handle: u.username || u.handle,
-        status: 'away',
-        one_liner: u.one_liner || u.status || ''
-      }))
-    ].slice(0, 5);
+    const users = active.slice(0, 5).map(u => ({
+      handle: u.username || u.handle,
+      status: 'active',
+      one_liner: workText(u)
+    }));
 
-    return { users, total: active.length + away.length };
+    const total = Number.isFinite(data.counts?.humansActive)
+      ? data.counts.humansActive
+      : active.length;
+    return { users, total };
   } catch (e) {
     return { users: [], total: 0 };
   }
@@ -477,7 +487,9 @@ async function setup() {
   }
 
   const onlineCount = await getOnlineCount();
-  console.log(`${colors.dim}     → Connected! ${onlineCount} builders online${colors.reset}`);
+  console.log(onlineCount > 0
+      ? `${colors.dim}     → Connected — ${onlineCount} ${onlineCount === 1 ? 'person' : 'people'} here now${colors.reset}`
+      : `${colors.dim}     → Connected${colors.reset}`);
   printStep(3, 'Testing connection...', 'done');
 
   // Step 4: Authenticate
@@ -504,7 +516,7 @@ async function setup() {
     console.log(`${colors.dim}     → Authenticated as @${authResult.handle}${colors.reset}`);
 
     // Success! Show who's online immediately
-    const presence = await getOnlineUsers();
+    const presence = await getOnlineUsers(authResult.token);
 
     console.log('');
     console.log(`${colors.green}  ✓ Setup complete!${colors.reset}`);
@@ -512,7 +524,7 @@ async function setup() {
 
     // Show who's vibing right now
     if (presence.users.length > 0) {
-      console.log(`${colors.bold}  🟢 ${presence.total} builders vibing now:${colors.reset}`);
+      console.log(`${colors.bold}  🟢 ${presence.total} people here now:${colors.reset}`);
       for (const user of presence.users) {
         const statusIcon = user.status === 'active' ? colors.green + '●' : colors.yellow + '○';
         const liner = user.one_liner ? ` — ${user.one_liner.slice(0, 40)}` : '';
@@ -526,7 +538,7 @@ async function setup() {
 
     console.log(`${colors.bold}  Quick start:${colors.reset}`);
     console.log(`${colors.dim}  1. Restart your coding agent${detected.length > 1 ? `s (${detected.join(', ')})` : ''}${colors.reset}`);
-    console.log(`${colors.dim}  2. Send a real message to someone you already know — "dm @their-handle ..."${colors.reset}`);
+    console.log(`${colors.dim}  2. Say: "message @their-handle — ..." to someone you already know${colors.reset}`);
     console.log(`${colors.dim}  3. Claude Code: run "npx slashvibe-mcp hook install" — waiting messages appear at the top of your next session${colors.reset}`);
     console.log('');
     console.log(`${colors.cyan}  Welcome to /vibe, @${authResult.handle}.${colors.reset}`);
