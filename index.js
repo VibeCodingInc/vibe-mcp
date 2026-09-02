@@ -658,6 +658,7 @@ class VibeMCPServer {
           // The HTTP store creates one random key per logical send and preserves it
           // across its internal transport retries. JSON-RPC ids restart every MCP
           // process, so deriving a durable key from `id` would collapse future sends.
+          presence.noteActivity(); // a tool call = the person is here; polls snap back to fast
           const result = await tool.handler(args);
 
           // Emit list_changed notification for state-changing tools
