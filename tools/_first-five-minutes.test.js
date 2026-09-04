@@ -25,6 +25,9 @@ global.fetch = async () => ({ ok: false, json: async () => ({}) });
 const store = require('../store/api.js');
 const stubStore = (stubs) => {
   const orig = {};
+  // The inbox tool reads through getInboxResult now (a failed read is not an
+  // empty inbox); a stub of getInbox alone answers that surface too.
+  if (stubs.getInbox && !stubs.getInboxResult) stubs = { ...stubs, getInboxResult: async (...a) => ({ ok: true, threads: await stubs.getInbox(...a) }) };
   for (const [k, v] of Object.entries(stubs)) { orig[k] = store[k]; store[k] = v; }
   return () => { for (const [k, v] of Object.entries(orig)) store[k] = v; };
 };

@@ -248,7 +248,18 @@ async function handler(args) {
     };
   }
 
-  const threads = await store.getInbox(myHandle);
+  // A failed read is not an empty inbox. getInbox() flattens "nobody
+  // answered" into [] — and the tool then said "no messages yet", which every
+  // host repeated as "you're caught up" (routing corpus R02, 0/6). Keep the
+  // outcome, as vibe_start already does, and say what is actually known.
+  const read = await store.getInboxResult(myHandle);
+  if (read.ok !== true) {
+    return {
+      display: `⚠️ could not check your inbox (${read.error || 'unknown'}) — unread is unknown, not zero. Try again in a moment.`,
+      footer: 'minimal',
+    };
+  }
+  const threads = read.threads;
 
   // Check for guest session messages (multiplayer)
   let guestMessages = [];
