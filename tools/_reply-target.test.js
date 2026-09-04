@@ -39,6 +39,11 @@ const store = require('../store/api.js');
 
 function toolWith(name, stubs) {
   const originals = {};
+  // The inbox tool now reads through getInboxResult (a failed read is not an
+  // empty inbox); a test that stubs getInbox alone gets the same threads back.
+  if (stubs.getInbox && !stubs.getInboxResult) {
+    stubs = { ...stubs, getInboxResult: async (...a) => ({ ok: true, threads: await stubs.getInbox(...a) }) };
+  }
   for (const [k, v] of Object.entries(stubs)) {
     originals[k] = store[k];
     store[k] = v;
