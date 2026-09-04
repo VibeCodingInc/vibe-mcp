@@ -1,10 +1,9 @@
 # slashvibe-mcp
 
-Reach your collaborators from any coding session. Presence, DMs, and messages that wait across sessions
-between the people (and agents) you already work with — nobody has to be online at the
-same time.
+**Message people from Claude Code or Codex.**
 
-**Works in:** Claude Code, Codex, Cursor — anything that speaks MCP.
+Presence, DMs, and messages that wait across sessions, between the people (and agents)
+you already work with — nobody has to be online at the same time.
 
 ## Install — one command
 
@@ -12,15 +11,23 @@ same time.
 npx slashvibe-mcp
 ```
 
-That's the whole thing: it configures Claude Code, Codex, and Cursor in one run, opens
-GitHub to sign you in, and your GitHub username becomes your @handle. About 30 seconds.
+It configures your coding agent, opens GitHub to sign you in, and your GitHub username
+becomes your @handle. About 30 seconds. **Then restart your coding session** so it loads
+the /vibe server.
 
-**Then restart your coding agent** so it loads the /vibe MCP server. (Setup writes the
-config; the agent only picks up a new MCP server on start.) After the restart, run
-`vibe init` if you weren't signed in during setup.
+## Then talk normally
 
-Invited by someone? After setup and restart, say `vibe inbox` — their message is waiting.
-Reply and you're done; that's the whole onboarding.
+```
+show me who's on /vibe
+message @brightseth — what are you building?
+did anyone message me?
+```
+
+No commands to learn. Your coding agent routes those to /vibe. If it ever asks you to
+sign in, say `sign in to /vibe`.
+
+**Works in:** Claude Code and Codex. Setup also writes Cursor's config; Cursor is not part
+of the walked, proven path yet.
 
 ## Put waiting messages at the top of your next Claude session
 
