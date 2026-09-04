@@ -321,7 +321,7 @@ function getSessionOneLiner() {
 function setSessionIdentity(handle, one_liner, keypair = null) {
   const sessionId = getSessionId();
   const existingData = getSessionData() || {};
-  saveSessionData({
+  return saveSessionData({
     sessionId,
     handle,
     one_liner,
@@ -397,7 +397,7 @@ function getAuthToken() {
 function saveAuthToken(token) {
   // Save to session data
   const data = getSessionData() || {};
-  saveSessionData({
+  const sessionSaved = saveSessionData({
     ...data,
     sessionId: data.sessionId || generateSessionId(),
     token,
@@ -419,7 +419,10 @@ function saveAuthToken(token) {
       cfg.handle = require('./auth-store').inspectToken(token).handle || cfg.handle;
     } catch (e) { /* auth-store unavailable at early boot — the token still saves */ }
   }
-  save(cfg);
+  // save() and saveSessionData() can REFUSE (an unreadable file is not
+  // permission to write). Callers that then say "the refreshed credential was
+  // saved" must be able to find out that it was not.
+  return save(cfg) !== false && sessionSaved !== false;
 }
 
 // Backwards compatibility alias

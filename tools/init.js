@@ -13,6 +13,7 @@ const { exec, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { normalizeHandle } = require('./_shared');
 const store = require('../store');
 const discord = require('../discord');
 const authStore = require('../auth-store');
@@ -321,14 +322,37 @@ function openBrowser(url) {
 // persisted in the background so the NEXT vibe_start recognizes the
 // credential. Expired flows are replaced with a fresh one and say so.
 const AUTH_SENTENCE = 'Open this, sign in with GitHub, then say vibe start.';
-let pendingAuth = null; // { oauth, loginUrl, startedAt, browserOpened, expired }
-let pendingAuthCreation = null; // in-flight ensureAuthFlow, so concurrent starts share ONE flow (review P1)
+
+// WHICH CREDENTIAL the record is about — a fingerprint of the token, not a
+// boolean and not a handle. Under the blocking flow this was a return value;
+// the flow is non-blocking now, so the fact has to outlive the call that
+// learned it. A bare boolean told Bob about Ada's mint. A handle was better but
+// still outlived the credential: sign out, then load a legacy token under the
+// same handle, and it inherited a complaint about a mint it was never part of.
+// Binding to the credential makes both cases the same rule — a record is only
+// ever about the exact token it was recorded for.
+const tokenFingerprint = (token) => {
+  if (typeof token !== 'string' || !token) return null;
+  return require('node:crypto').createHash('sha256').update(token).digest('hex').slice(0, 16);
+};
+let lastMintLackedPrincipalForToken = null;
+// Set when a completed sign-in could not be written to disk at all. Distinct
+// from a handle-only mint: there, the credential exists and lacks a claim;
+// here, there may be no new credential at all.
+let lastSignInFailedToPersist = null;   // { handle, priorToken }
 
 async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) {
+  // VERIFY BEFORE CLAIMING (#320): the point of reauth is a credential that
+  // PROVES the principal. Decoded here, but RECORDED only after the credential
+  // is actually persisted below — recording it first claimed a saved
+  // credential on a path where saving had not happened yet.
+  const mintLackedPrincipal = !authStore.principalFromToken(token);
   if (actor) await actorSession.installOAuthSession(actor);
   else await actorSession.clearActorSession();
-  config.saveAuthToken(token);
-  config.setSessionIdentity(finalHandle, one_liner || '');
+  // Each of these can REFUSE rather than throw. "The refreshed credential was
+  // saved" is a claim about disk, so it has to be answered by disk.
+  const tokenSaved = config.saveAuthToken(token) !== false;
+  const identitySaved = config.setSessionIdentity(finalHandle, one_liner || '') !== false;
   authStore.setToken(token);
   authStore.setHandle(finalHandle);
   authStore.setOneLiner(one_liner || '');
@@ -340,7 +364,37 @@ async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) 
   if (one_liner) authConfig.one_liner = one_liner;
   authConfig.authMethod = 'browser';
   authConfig.pendingAuth = false;
-  config.save(authConfig);
+  const configSaved = config.save(authConfig) !== false;
+  // Only a credential that actually reached disk may drive the message that
+  // says so. If nothing was written, the honest state is "not saved", not a
+  // minting complaint about a credential the person does not have.
+  const credentialPersisted = tokenSaved && identitySaved && configSaved;
+  const fp = tokenFingerprint(token);
+  // The MINT record is about a credential, so it is keyed by that credential.
+  lastMintLackedPrincipalForToken = (credentialPersisted && mintLackedPrincipal) ? fp : null;
+  // The PERSIST-FAILURE record cannot be: when the token write is what failed,
+  // the token on disk is still the OLD one, so keying the failure by the new
+  // token means the next call never matches it and silently starts another
+  // flow. That failure is about this person's attempt, so it is keyed by them,
+  // and any later successful sign-in for the same person clears it.
+  const who = normalizeHandle(finalHandle);
+  if (credentialPersisted) {
+    if (lastSignInFailedToPersist && lastSignInFailedToPersist.handle === who) {
+      lastSignInFailedToPersist = null;
+    }
+  } else {
+    // Keyed by the person AND by the credential that was on disk when the
+    // write failed. The handle alone let a stale complaint attach itself to an
+    // unrelated credential later loaded under the same name (the round-2
+    // defect, reintroduced in round 3 and confirmed in round 4). The token
+    // alone could never match, because a failed token write leaves the OLD one
+    // on disk. Both together say exactly what happened: this person's sign-in
+    // did not land, and what they still hold is this.
+    lastSignInFailedToPersist = { handle: who, priorToken: tokenFingerprint(config.getAuthToken()) };
+  }
+  if (!credentialPersisted) {
+    console.error(`[vibe] sign-in for @${finalHandle} did not persist — token:${tokenSaved} identity:${identitySaved} config:${configSaved}`);
+  }
   // The toolset just changed — tell the host now, not on the next call.
   global.vibeNotifier?.emitImmediate();
   // Presence + welcome are best-effort and must never block or throw here.
@@ -350,39 +404,98 @@ async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) 
   try { await Promise.race([sendPersonalizedWelcome(finalHandle, one_liner), new Promise((r) => setTimeout(r, 2500))]); } catch {}
 }
 
-async function ensureAuthFlow(opts) {
-  if (pendingAuth && !pendingAuth.expired) {
-    return { ...pendingAuth, reused: true };
+// A flow is only shareable with a caller asking for the SAME identity. The
+// sharing exists so concurrent signed-out starts don't each bind a listener —
+// but it was unconditional, so Ada starting a flow and Bob starting one handed
+// Bob Ada's login URL, and completing it would have signed Bob in as Ada.
+const flowKey = (opts) => normalizeHandle((opts && opts.requestedHandle) || '');
+
+// Keyed by identity, not single slots. A single `pendingAuthCreation` slot meant
+// simultaneous Ada and Bob starts each bound a listener and only the last was
+// tracked — the other could never be cancelled or reset. The callback server
+// falls back to an ephemeral port when 9876 is taken, so concurrent flows for
+// different people are legitimate; they just have to be remembered.
+const authFlows = new Map();       // key -> flow
+const authFlowCreations = new Map(); // key -> promise
+
+// An expired flow is kept briefly so the next start for the SAME person can
+// report that it replaced one; beyond that it is garbage. Without this, every
+// timed-out sign-in for a distinct handle stayed in the map forever.
+const EXPIRED_RETENTION_MS = 5 * 60 * 1000;
+// A hard ceiling as well as an age-out. Pruning bounds flows over TIME but not
+// over cardinality: 2,000 concurrently live identities stayed resident (round-6
+// review). One process is one person's coding session; a number this size means
+// something is wrong, and the oldest live flow is the one least likely to still
+// have someone waiting on it.
+const MAX_LIVE_FLOWS = 32;
+
+function pruneExpiredFlows() {
+  const now = Date.now();
+  for (const [k, flow] of authFlows) {
+    if (flow.expired && flow.expiredAt && now - flow.expiredAt > EXPIRED_RETENTION_MS) {
+      authFlows.delete(k);
+    }
   }
-  // Concurrent signed-out starts must not each bind a listener: the FIRST
-  // caller's creation promise is shared until pendingAuth exists.
-  if (pendingAuthCreation) {
-    const flow = await pendingAuthCreation;
+}
+
+// Evicts oldest-first until the map fits, never touching the flow just created.
+// Eviction cancels the listener rather than dropping it silently — an
+// abandoned listener is exactly what the round-3 review found leaking.
+async function enforceFlowCeiling(protectKey) {
+  if (authFlows.size <= MAX_LIVE_FLOWS) return;
+  const byAge = [...authFlows.entries()]
+    .filter(([k]) => k !== protectKey)
+    .sort((a, b) => a[1].startedAt - b[1].startedAt);
+  for (const [k, flow] of byAge) {
+    if (authFlows.size <= MAX_LIVE_FLOWS) break;
+    authFlows.delete(k);
+    if (flow?.oauth) { try { await flow.oauth.cancel(); } catch {} }
+    console.error(`[vibe] auth flow for @${k || '(no handle)'} evicted — more than ${MAX_LIVE_FLOWS} live sign-ins in one process`);
+  }
+}
+
+async function ensureAuthFlow(opts) {
+  pruneExpiredFlows();
+  const key = flowKey(opts);
+  const existing = authFlows.get(key);
+  if (existing && !existing.expired) {
+    return { ...existing, reused: true };
+  }
+  // Concurrent starts for the SAME identity must not each bind a listener.
+  const inFlight = authFlowCreations.get(key);
+  if (inFlight) {
+    const flow = await inFlight;
     return { ...flow, reused: true };
   }
-  pendingAuthCreation = createAuthFlow(opts).finally(() => { pendingAuthCreation = null; });
-  return pendingAuthCreation;
+  const promise = createAuthFlow(opts).finally(() => { authFlowCreations.delete(key); });
+  authFlowCreations.set(key, promise);
+  return promise;
 }
 
 async function createAuthFlow({ requestedHandle, one_liner }) {
-  const replacedExpired = Boolean(pendingAuth && pendingAuth.expired);
+  const key = flowKey({ requestedHandle });
+  const prior = authFlows.get(key);
+  const replacedExpired = Boolean(prior && prior.expired);
   if (replacedExpired) {
     // The expired listener must not linger through its grace period beside
-    // the replacement (review P2).
-    try { await pendingAuth.oauth.cancel(); } catch {}
-    pendingAuth = null;
+    // the replacement (review P2). Only THIS identity's expired flow is
+    // touched: cancelling someone else's live flow dropped a callback that
+    // was already in flight (round-3 review), losing their credential.
+    try { await prior.oauth.cancel(); } catch {}
+    authFlows.delete(key);
   }
   const oauth = await beginOAuth({ requestedHandle, actorAware: true });
   // 'unknown' until the launcher actually answers: a staggered caller that
   // finds the flow mid-launch must not report `false` for a browser that is
   // still opening (review P2). The field is updated in place when known.
-  const flow = { oauth, loginUrl: oauth.loginUrl, startedAt: Date.now(), browserOpened: 'unknown', expired: false, reused: false, replacedExpired };
-  pendingAuth = flow;
+  const flow = { oauth, loginUrl: oauth.loginUrl, startedAt: Date.now(), browserOpened: 'unknown', expired: false, reused: false, replacedExpired, key };
+  authFlows.set(key, flow);
+  await enforceFlowCeiling(key);
   // Background completion: nobody awaits this. Success persists the credential;
   // timeout marks the flow expired so the next start issues a fresh link.
   oauth.waitForCallback().then(
-    (result) => completeSignIn(result, one_liner).catch((e) => console.error('[vibe_init] sign-in completion failed:', e.message)).finally(() => { if (pendingAuth === flow) pendingAuth = null; }),
-    (err) => { flow.expired = true; if (err?.message !== 'AUTH_TIMEOUT') console.error('[vibe_init] sign-in flow ended:', err?.message || err); }
+    (result) => completeSignIn(result, one_liner).catch((e) => console.error('[vibe_init] sign-in completion failed:', e.message)).finally(() => { if (authFlows.get(key) === flow) authFlows.delete(key); }),
+    (err) => { flow.expired = true; flow.expiredAt = Date.now(); if (err?.message !== 'AUTH_TIMEOUT') console.error('[vibe_init] sign-in flow ended:', err?.message || err); }
   );
   // Kick the launcher off and report only what is known within a short
   // budget — a slow launcher yields 'unknown', never a wait and never a lie.
@@ -422,16 +535,20 @@ function authRequiredResult(flow, presenceBanner) {
   };
 }
 
-// Test seam: reset the one pending flow between cases.
+// Test seam: expire every pending flow between cases.
 function _forceExpireForTest() {
-  if (pendingAuth) pendingAuth.expired = true;
+  for (const flow of authFlows.values()) { flow.expired = true; flow.expiredAt = Date.now(); }
 }
 
+// Cancels EVERY tracked flow. The single-slot version could only reach the
+// last one created, so a concurrently-started flow leaked its listener.
 async function _resetPendingAuth() {
-  const flow = pendingAuth;
-  pendingAuth = null;
-  pendingAuthCreation = null;
-  if (flow?.oauth) { try { await flow.oauth.cancel(); } catch {} }
+  const flows = [...authFlows.values()];
+  authFlows.clear();
+  authFlowCreations.clear();
+  for (const flow of flows) {
+    if (flow?.oauth) { try { await flow.oauth.cancel(); } catch {} }
+  }
 }
 
 
@@ -461,6 +578,7 @@ async function handler(args) {
   if (config.hasOAuth()) {
     const existingHandle = config.getHandle();
     let sessionDead = false;
+    let verifiedAlive = false;
     if (existingHandle) {
       try {
         const verification = await Promise.race([
@@ -468,12 +586,53 @@ async function handler(args) {
           new Promise(resolve => setTimeout(() => resolve(null), 2500))
         ]);
         sessionDead = !!(verification && verification.definitive && !verification.valid);
+        // A DEFINITIVE "yes" is a different fact from the absence of a "no".
+        // The principal fall-through below may only fire on a confirmed-alive
+        // session; a timeout or an unreachable server is not evidence about
+        // the credential, and treating it as such rebuilds the #91 sign-in
+        // loop for anyone offline.
+        verifiedAlive = !!(verification && verification.definitive && verification.valid);
       } catch (e) {}
       if (sessionDead) {
         console.error(`[vibe] Saved session for @${existingHandle} was rejected by the server — reconnecting.`);
       }
     }
-    if (existingHandle && !sessionDead) {
+    // #320: a session that proves only a HANDLE cannot exercise principal
+    // authority (thought-bearing invitations refuse it with principal_required).
+    // The server mints principal-bearing sessions on every fresh OAuth — but
+    // this short-circuit was the trap: "Already signed in" left the legacy
+    // credential in place with no path to the server's reauth action. A valid
+    // handle-only token therefore falls through to re-auth — but ONLY when the
+    // server confirmed the session is alive. Offline and timeout keep the
+    // short-circuit, because unreachable is not invalid.
+    const provesPrincipal = !!authStore.principalFromToken(config.getAuthToken());
+    const needsReauthForPrincipal = existingHandle && !sessionDead && verifiedAlive && !provesPrincipal;
+    if (needsReauthForPrincipal) {
+      console.error(`[vibe] @${existingHandle}'s saved session proves the handle but not the principal — refreshing sign-in (server action: reauth).`);
+      // …unless the last completed sign-in ALREADY came back handle-only. Then
+      // reauth is not a fix, it is a loop, and the honest thing is to say so.
+      const currentFp = tokenFingerprint(config.getAuthToken());
+      if (lastSignInFailedToPersist
+          && lastSignInFailedToPersist.handle === normalizeHandle(existingHandle)
+          && lastSignInFailedToPersist.priorToken === currentFp) {
+        return {
+          display: `## Signed in as @${existingHandle} — but the credential could not be saved\n\n`
+            + `The sign-in itself worked; writing it to disk did not, so this session is still `
+            + `using the old credential and a restart will lose the new one. Check that `
+            + `~/.vibe is writable, then say \`vibe init\` again.`,
+        };
+      }
+      if (lastMintLackedPrincipalForToken && currentFp
+          && lastMintLackedPrincipalForToken === currentFp) {
+        return {
+          display: `## Signed in as @${existingHandle} — but this session still proves only your handle\n\n`
+            + `The server did not mint a principal claim into your last sign-in, so principal-gated actions `
+            + `will still refuse with \`principal_required\`. The refreshed credential was saved. `
+            + `Signing in again will not change this — it is a server-side minting issue, not something you did.`,
+        };
+      }
+    }
+    if (existingHandle && !sessionDead && !needsReauthForPrincipal) {
       // Enrich the returning-user surface — this fires on every `vibe` for an
       // already-authed user, so it's our highest-frequency touchpoint. Surface
       // unread (the reason to come back) and, if we have no email on file, nudge
@@ -652,4 +811,17 @@ _Say "vibe onboarding" anytime to check your progress_`
   };
 }
 
-module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE };
+module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE, _completeSignInForTest: completeSignIn, _resetMintStateForTest: () => { lastMintLackedPrincipalForToken = null; lastSignInFailedToPersist = null; },
+  _ensureAuthFlowForTest: ensureAuthFlow,
+  _flowCountForTest: () => authFlows.size,
+  _maxLiveFlowsForTest: () => MAX_LIVE_FLOWS,
+  // Lets a test wait for the rejection handler that marks a flow expired, so
+  // the pin exercises production's own assignment rather than stamping it.
+  _expireViaCallbackForTest: async () => { await new Promise((r) => setImmediate(r)); },
+  _ageOutFlowsForTest: () => {
+    for (const flow of authFlows.values()) {
+      // SHIFTS an existing stamp; it must never create one, or it supplies the
+      // very assignment production is meant to make and the pin cannot fail.
+      if (flow.expired && flow.expiredAt) flow.expiredAt -= (EXPIRED_RETENTION_MS + 1000);
+    }
+  } };

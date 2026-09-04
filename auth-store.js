@@ -54,6 +54,74 @@ function handleFromToken(token) {
   }
 }
 
+/**
+ * The principal a token PROVES, from its own claim — or null for the legacy
+ * handle-only shape. Decode, not verify (same posture as handleFromToken):
+ * the server checks the signature on every call; this answers the narrower
+ * local question "does this credential carry principal authority at all?"
+ * A handle is a mutable label; only the principal claim is authority (#300).
+ */
+function principalFromToken(token) {
+  // Only a well-formed JWT answers this question. Reading segment [1] out of
+  // whatever String() produced accepted `h.<payload>`, `.<payload>.sig`,
+  // `h.<payload>.sig.extra` and an object whose toString() returned a token —
+  // every one of them then reported principal authority it had not proven.
+  if (typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const [header, payload, signature] = parts;
+  if (!header || !payload || !signature) return null;
+  // base64url alphabet only: Buffer.from is lenient and silently skips the
+  // characters that would tell us this is not a token at all.
+  // ALL THREE segments must be base64url — a signature of `!!!` is not a
+  // signature, and validating only the payload let malformed tokens through.
+  // Alphabet AND length: a single base64url character cannot encode anything
+  // (a length of 4n+1 is an impossible remainder), so 'A' and '_' are not
+  // signatures even though every character in them is legal.
+  // Alphabet, length, AND canonical form. A segment whose trailing pad bits are
+  // non-zero decodes without complaint but is not the encoding it claims to be;
+  // round-tripping is the only check that catches it.
+  const b64url = (seg) => {
+    if (!/^[A-Za-z0-9_-]+$/.test(seg)) return false;
+    if (seg.length < 2 || seg.length % 4 === 1) return false;
+    try {
+      return Buffer.from(seg, 'base64url').toString('base64url') === seg;
+    } catch {
+      return false;
+    }
+  };
+  if (!b64url(header) || !b64url(payload) || !b64url(signature)) return null;
+  try {
+    // The header must decode to a JSON object too. `A` is not a possible
+    // base64url encoding of anything, and a non-JSON header means this is not
+    // a token whose payload we should be reading claims out of.
+    // FATAL utf-8: Buffer.toString('utf8') replaces an invalid byte with U+FFFD
+    // rather than failing, which turned `prin_<FF>` into the synthesized
+    // principal `prin_\uFFFD` — a value no server ever issued.
+    const utf8 = new TextDecoder('utf-8', { fatal: true });
+    const rawHeader = utf8.decode(Buffer.from(header, 'base64url'));
+    const head = JSON.parse(rawHeader);
+    if (!head || typeof head !== 'object' || Array.isArray(head)) return null;
+    // A JOSE header, not merely an object. The contract this function claims is
+    // "the principal a well-formed JWT proves", and these are not well-formed:
+    //   - no `alg` at all, or an empty one
+    //   - `alg: "none"`, which asserts the token is unsigned — a signature
+    //     beside it is a contradiction, and it is the classic forgery shape
+    //   - `crit` or `b64:false`, which change how the payload must be read;
+    //     we do not implement them, so we cannot claim to have read it
+    const alg = head.alg;
+    if (typeof alg !== 'string' || !alg || alg.toLowerCase() === 'none') return null;
+    if ('crit' in head || head.b64 === false) return null;
+    const claims = JSON.parse(utf8.decode(Buffer.from(payload, 'base64url')));
+    if (!claims || typeof claims !== 'object' || Array.isArray(claims)) return null;
+    const pid = Object.prototype.hasOwnProperty.call(claims, 'principal_id')
+      ? claims.principal_id : null;
+    return typeof pid === 'string' && pid ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
 function hydrate() {
   if (_hydrated) return; // Only hydrate once
 
@@ -346,6 +414,7 @@ module.exports = {
   getHandle,
   hasRejectedCredential,
   inspectToken,
+  principalFromToken,
   setOneLiner,
   getOneLiner,
   isAuthenticated,
