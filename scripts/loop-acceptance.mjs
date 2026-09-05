@@ -41,7 +41,9 @@ function homeFor(side) {
 
 /** One MCP session over stdio. */
 function session(side, home) {
-  const child = spawn('npx', ['-y', `slashvibe-mcp@${VERSION}`], { env: { ...process.env, HOME: home, VIBE_HOME: path.join(home, '.vibe'), VIBE_API_URL: API, VIBE_SETUP_NO_AUTORUN: '1', VIBE_LAB_A_MINT: '', VIBE_LAB_B_MINT: '' }, stdio: ['pipe', 'pipe', 'pipe'] });
+  // VERSION 'local' runs this checkout (for the stub-backed rehearsal); anything else is the published package.
+  const cmd = VERSION === 'local' ? ['node', [path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'index.js')]] : ['npx', ['-y', `slashvibe-mcp@${VERSION}`]];
+  const child = spawn(cmd[0], cmd[1], { env: { ...process.env, HOME: home, VIBE_HOME: path.join(home, '.vibe'), VIBE_API_URL: API, VIBE_SETUP_NO_AUTORUN: '1', VIBE_LAB_A_MINT: '', VIBE_LAB_B_MINT: '' }, stdio: ['pipe', 'pipe', 'pipe'] });
   let buf = ''; const waiters = new Map(); let nextId = 1;
   child.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); try { const o = JSON.parse(line); if (o.id && waiters.has(o.id)) { waiters.get(o.id)(o); waiters.delete(o.id); } } catch {} } });
   child.stderr.on('data', () => {});
