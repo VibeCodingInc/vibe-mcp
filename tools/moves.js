@@ -47,6 +47,9 @@ const path = require('path');
 const crypto = require('crypto');
 const config = require('../config');
 const store = require('../store');
+// The signed-in handle is read LIVE: the store reloads the config module after a
+// token refresh, and a module holding the old instance would keep an old identity.
+const currentHandle = () => require('../config').getHandle();
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
 const { canonicalHandle, storedRecipientHandle } = require('../protocol/handle');
 const { inertField } = require('../incoming');
@@ -181,13 +184,13 @@ function getReturnBinding(handle) {
   const b = raw && typeof raw === 'object' ? raw[normalizeHandle(handle)] : null;
   if (!b || typeof b !== 'object' || !b.sentAt) return null;
   if (Date.now() - b.sentAt > BINDING_TTL_MS) return null;
-  if (b.from && b.from !== config.getHandle()) return null;
+  if (b.from && b.from !== currentHandle()) return null;
   return b;
 }
 /** An ordinary DM to them supersedes the binding — the thread has moved on. */
 function clearReturnBinding(handle) {
   const h = normalizeHandle(handle);
-  const me = config.getHandle();
+  const me = currentHandle();
   withBindings(b => { if (b[h] && (!b[h].from || b[h].from === me)) delete b[h]; });
 }
 /** Retrying an unconfirmed send is safe only where the transport deduplicates by key. */
@@ -212,7 +215,9 @@ function reconcileAbandoned(d) {
 const newId = (prefix) => `${prefix}${crypto.randomBytes(4).toString('hex')}`;
 /** This process's flow: vibe_moves replaces only ITS OWN earlier suggestions (codex P2). */
 const FLOW = `${process.pid}-${crypto.randomBytes(2).toString('hex')}`;
-const textHash = (d) => crypto.createHash('sha1').update(compose(d)).digest('hex');
+// The local approval covers the exact text AND what it answers: editing only
+// the reply target must invalidate the preview (codex P1 on #42).
+const textHash = (d) => crypto.createHash('sha1').update(`${compose(d)}\n@reply_to:${d.replyTo || ''}`).digest('hex');
 const sendKey = (d) => `draft-${d.id}-${textHash(d).slice(0, 10)}`;
 /**
  * The #392 approval digest over the EXACT snapshot the person approved:
@@ -436,7 +441,7 @@ const movesDefinition = {
 async function movesHandler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
-  const me = config.getHandle();
+  const me = currentHandle();
   const ctx = cleanContext(args && args.context);
   if (ctx.tooLong.length) {
     const f = ctx.tooLong[0];
@@ -456,7 +461,7 @@ async function movesHandler(args) {
   // person is relevant by their own words even when they are offline — a
   // green dot is not relevance, and its absence is not irrelevance.
   try {
-    const dir = typeof store.getDirectoryResult === 'function' ? await store.getDirectoryResult() : (typeof store.getDirectory === 'function' ? await store.getDirectory() : null);
+    const dir = typeof store.getPeople === 'function' ? await store.getPeople() : null;
     const listings = dir && dir.ok !== false && Array.isArray(dir.listings) ? dir.listings : [];
     const seen = new Set(roster.map(u => u && u.handle));
     for (const l of listings) {
@@ -482,12 +487,28 @@ async function movesHandler(args) {
   // message carries reply_to = the id we sent; otherwise labeled as newer
   // than what you sent. Returning a reply authorizes nothing.
   const replies = [];
-  for (const t of threads) {
-    if (!t || !t.handle || t.lastFrom !== t.handle) continue;
+  const bound = threads.filter(t => t && t.handle && t.lastFrom === t.handle && getReturnBinding(t.handle)).slice(0, 3);
+  for (const t of bound) {
     const b = getReturnBinding(t.handle);
-    if (!b || !t.lastTimestamp || t.lastTimestamp <= b.sentAt) continue;
-    const verified = Boolean(b.messageId && t.lastReplyTo && t.lastReplyTo === b.messageId);
-    replies.push({ from: t.handle, project: b.project || null, you_wrote: b.firstLine || '', their_words: inertField(String(t.lastMessage || ''), 200), verified, message_id: t.lastMessageId || null });
+    // Explicit linkage first: a message of theirs whose reply_to is the id
+    // we sent is the reply, whatever its timestamp (a retried send records a
+    // later sentAt — codex P2). The thread list does not carry reply_to, so
+    // read the thread tail for bound threads only (bounded by `bound`).
+    let linked = null;
+    if (b.messageId) {
+      const rt = (t.lastReplyTo && t.lastReplyTo === b.messageId) ? { id: t.lastMessageId, body: t.lastMessage } : null;
+      if (rt) linked = rt;
+      else if (typeof store.getThread === 'function') {
+        try {
+          const msgs = await store.getThread(me, t.handle);
+          const hit = (Array.isArray(msgs) ? msgs : []).filter(m => m && m.from === t.handle).find(m => { const r = m.reply_to; const id = r && typeof r === 'object' ? (r.id || r.message_id) : r; return id === b.messageId; });
+          if (hit) linked = { id: hit.id, body: hit.body };
+        } catch {}
+      }
+    }
+    if (linked) { replies.push({ from: t.handle, project: b.project || null, you_wrote: b.firstLine || '', their_words: inertField(String(linked.body || ''), 200), verified: true, message_id: linked.id || null }); continue; }
+    if (!t.lastTimestamp || t.lastTimestamp <= b.sentAt) continue;
+    replies.push({ from: t.handle, project: b.project || null, you_wrote: b.firstLine || '', their_words: inertField(String(t.lastMessage || ''), 200), verified: false, message_id: t.lastMessageId || null });
   }
   const replyLines = replies.slice(0, 3).map(r => `↩ @${r.from} ${r.verified ? 'replied to' : 'wrote after'} what you sent${r.project ? ` from **${r.project}**` : ''} ("${inertField(r.you_wrote, 60)}"): "${r.their_words}"`);
   const replyBlock = replyLines.length ? `${replyLines.join('\n')}\n_(a reply is news beside the work — suggest one next step; do nothing until asked)_\n\n` : '';
@@ -568,7 +589,7 @@ async function findPerson(handle) {
 async function draftHandler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
-  const me = config.getHandle();
+  const me = currentHandle();
   const message = typeof (args && args.message) === 'string' ? args.message.trim() : '';
   const wantId = args && args.id;
 
@@ -662,7 +683,7 @@ async function sendHandler(args) {
   if (initCheck) return initCheck;
   const id = args && args.id;
   const rev = typeof (args && args.rev) === 'string' ? args.rev.trim() : '';
-  const me = config.getHandle();
+  const me = currentHandle();
 
   // 1. Claim under the lock: nothing leaves the machine until this draft is
   //    marked 'sending' with a key derived from the exact text — and the

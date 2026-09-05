@@ -219,7 +219,7 @@ test('the idempotency key names the exact text: an edit before Send changes it',
   await moves.vibe_draft.handler({ id, message: 'second text' });
   await send(id);
   const crypto = require('node:crypto');
-  const expect = `draft-${id}-${crypto.createHash('sha1').update('second text').digest('hex').slice(0, 10)}`;
+  const expect = `draft-${id}-${crypto.createHash('sha1').update('second text\n@reply_to:').digest('hex').slice(0, 10)}`;
   assert.equal(sends[0].opts.idempotencyKey, expect);
 });
 test('an unconfirmed send freezes the text: retry sends the same text with the same key; edit is refused; cancel warns', async () => {
@@ -235,7 +235,7 @@ test('an unconfirmed send freezes the text: retry sends the same text with the s
   assert.match(retry.display, /Sent to \*\*@linus\*\*/);
   assert.equal(sends.length, 1); assert.equal(sends[0].message, 'frozen text');
   const crypto = require('node:crypto');
-  assert.equal(sends[0].opts.idempotencyKey, `draft-${id}-${crypto.createHash('sha1').update('frozen text').digest('hex').slice(0, 10)}`);
+  assert.equal(sends[0].opts.idempotencyKey, `draft-${id}-${crypto.createHash('sha1').update('frozen text\n@reply_to:').digest('hex').slice(0, 10)}`);
 });
 test('a refusal that never reached the network (too long) returns the draft to editable', async () => {
   stub(QUIET);
@@ -676,7 +676,7 @@ test('relevance outranks recency and presence: a topical one-liner beats an off-
   assert.ok(!out.moves.some(m => m.to === 'chatty'));
 });
 test('the directory (what people chose to share) is evidence, including people who are offline', async () => {
-  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [] }), getDirectoryResult: async () => ({ ok: true, listings: [{ handle: 'stan', building: 'local/cloud handoff for agent runtimes', kind: 'human' }] }) });
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [] }), getPeople: async () => ({ ok: true, listings: [{ handle: 'stan', building: 'local/cloud handoff for agent runtimes', kind: 'human' }] }) });
   const r = await moves.vibe_moves.handler({ context: { project: 'runtime', question: 'where should the local/cloud handoff decide which side runs the agent?' } });
   assert.equal(r.data.primary.to, 'stan');
   assert.match(r.display, /\*\*Strongest:\*\* ask a question → @stan/);
@@ -686,13 +686,13 @@ test('a reply to what you sent from this work comes back beside it — verified 
   stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_sent_9', success: true }; } });
   const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'where should the handoff decide?' });
   await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
-  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', unread: 1, lastFrom: 'linus', lastMessage: 'on the cloud side — the local one lies about capacity', lastTimestamp: Date.now() + 1000, lastMessageId: 'msg_r1', lastReplyTo: 'msg_sent_9' }] }) });
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', unread: 1, lastFrom: 'linus', lastMessage: 'on the cloud side — the local one lies about capacity', lastTimestamp: Date.now() + 1000, lastMessageId: 'msg_r1' }] }), getThread: async () => [{ id: 'msg_r1', from: 'linus', to: 'ada', body: 'on the cloud side — the local one lies about capacity', timestamp: Date.now() + 1000, reply_to: { id: 'msg_sent_9', from: 'ada', body: 'where should the handoff decide?' } }] });
   const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
   assert.equal(r.data.replies.length, 1);
   assert.equal(r.data.replies[0].verified, true);
   assert.match(r.display, /↩ @linus replied to what you sent/);
   assert.match(r.display, /suggest one next step; do nothing until asked/);
-  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', unread: 1, lastFrom: 'linus', lastMessage: 'unrelated: lunch?', lastTimestamp: Date.now() + 1000, lastMessageId: 'msg_r2', lastReplyTo: null }] }) });
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', unread: 1, lastFrom: 'linus', lastMessage: 'unrelated: lunch?', lastTimestamp: Date.now() + 1000, lastMessageId: 'msg_r2' }] }), getThread: async () => [{ id: 'msg_r2', from: 'linus', to: 'ada', body: 'unrelated: lunch?', timestamp: Date.now() + 1000, reply_to: null }] });
   const r2 = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
   assert.equal(r2.data.replies[0].verified, false);
   assert.match(r2.display, /↩ @linus wrote after what you sent/);
@@ -709,4 +709,24 @@ test('regression: an unrelated result is never an answer to the newest inbox que
   const out = moves.computeMoves(moves.cleanContext({ project: 'vibeconf', result: "Leo's answer: any openai-compatible url; three keys in config.json" }), 'ada', ROSTER, threads, NOW);
   assert.ok(!(out.moves || []).some(m => m.to === 'peer_x'));
   assert.ok(!(out.moves || []).some(m => /warning|mismatch/i.test(m.why_now || '')));
+});
+
+test('editing only the reply target invalidates the preview revision', async () => {
+  stub(QUIET);
+  const d = await moves.vibe_draft.handler({ handle: '@linus', message: 'on the cloud side.', reply_to: 'msg_A' });
+  const rev1 = d.data.draft.rev;
+  const e = await moves.vibe_draft.handler({ id: d.data.draft.id, reply_to: 'msg_B' });
+  assert.notEqual(e.data.draft.rev, rev1);
+  const stale = await moves.vibe_send_draft.handler({ id: d.data.draft.id, rev: rev1 });
+  assert.match(stale.display, /changed since that preview/);
+  assert.equal(sends.length, 0);
+});
+test('a reply that predates a retried sentAt is still recognized when its reply_to matches', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_sent_late', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'retried question' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  const earlier = Date.now() - 60000; // their reply "arrived" before our (retried) sentAt
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', unread: 1, lastFrom: 'linus', lastMessage: 'yes', lastTimestamp: earlier, lastMessageId: 'msg_early' }] }), getThread: async () => [{ id: 'msg_early', from: 'linus', to: 'ada', body: 'yes', timestamp: earlier, reply_to: { id: 'msg_sent_late' } }] });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
+  assert.equal(r.data.replies.length, 1); assert.equal(r.data.replies[0].verified, true);
 });

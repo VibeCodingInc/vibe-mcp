@@ -309,7 +309,9 @@ async function handler(args) {
       try {
         const { getReturnBinding } = require('./moves');
         const b = getReturnBinding(t.handle);
-        if (b && t.lastTimestamp && t.lastTimestamp > b.sentAt) back = ` · ↩ ${b.messageId && t.lastReplyTo === b.messageId ? 'reply to' : 'after'} what you sent${b.project ? ` from ${b.project}` : ''}`;
+        // Explicit linkage first (when the list serves reply_to), then time.
+        if (b && b.messageId && t.lastReplyTo && t.lastReplyTo === b.messageId) back = ` · ↩ reply to what you sent${b.project ? ` from ${b.project}` : ''}`;
+        else if (b && t.lastTimestamp && t.lastTimestamp > b.sentAt) back = ` · ↩ after what you sent${b.project ? ` from ${b.project}` : ''}`;
       } catch {}
       display += `\n@${cell(t.handle, 39)} (${t.unread})${id}${back}`;
     });
