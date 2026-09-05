@@ -553,3 +553,34 @@ test('the wire origin of a draft send is one the platform classifies', async () 
   await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
   assert.equal(sends[0].opts.origin, 'composed');
 });
+
+test('lock: a stale lock from a dead process is reclaimed; release never frees a lock it does not own', () => {
+  const fs2 = require('node:fs'); const path2 = require('node:path');
+  const lockDir = `${moves.DRAFTS_FILE}.lock`;
+  fs2.rmSync(lockDir, { recursive: true, force: true });
+  // 1. a dead owner → reclaimed, work proceeds
+  fs2.mkdirSync(lockDir, { recursive: true });
+  fs2.writeFileSync(path2.join(lockDir, 'owner'), JSON.stringify({ pid: 999999, nonce: 'dead', at: Date.now() - 1000 }));
+  const ran = moves.transact(() => 'ran');
+  assert.equal(ran, 'ran');
+  assert.ok(!fs2.existsSync(lockDir), 'released after the transaction');
+  // 2. release checks ownership: a lock re-taken by someone else mid-critical-section is left alone
+  let observed;
+  moves.transact(() => {
+    fs2.writeFileSync(path2.join(lockDir, 'owner'), JSON.stringify({ pid: process.pid, nonce: 'someone-else', at: Date.now() }));
+    observed = true;
+  });
+  assert.ok(observed);
+  assert.ok(fs2.existsSync(lockDir), 'a lock owned by another nonce is not removed by our release');
+  fs2.rmSync(lockDir, { recursive: true, force: true });
+});
+test('a live lock held by another process is waited on, then times out honestly', () => {
+  const fs2 = require('node:fs'); const path2 = require('node:path');
+  const lockDir = `${moves.DRAFTS_FILE}.lock`;
+  fs2.mkdirSync(lockDir, { recursive: true });
+  fs2.writeFileSync(path2.join(lockDir, 'owner'), JSON.stringify({ pid: process.pid, nonce: 'live', at: Date.now() }));
+  const t0 = Date.now();
+  assert.throws(() => moves.transact(() => 'never'), /busy/);
+  assert.ok(Date.now() - t0 >= 2500, 'waited for the lock rather than stealing it');
+  fs2.rmSync(lockDir, { recursive: true, force: true });
+});

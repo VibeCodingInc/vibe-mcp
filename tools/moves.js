@@ -71,6 +71,15 @@ function writeJsonAtomic(file, value) {
   const tmp = `${file}.${process.pid}.${crypto.randomBytes(3).toString('hex')}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, file);
+  // A process killed between write and rename leaves its .tmp; sweep any
+  // older than a minute so they never accumulate (product-test finding).
+  try {
+    const dir = path.dirname(file); const base = path.basename(file);
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.startsWith(`${base}.`) || !f.endsWith('.tmp')) continue;
+      try { const st = fs.statSync(path.join(dir, f)); if (Date.now() - st.mtimeMs > 60_000) fs.unlinkSync(path.join(dir, f)); } catch {}
+    }
+  } catch {}
 }
 function sleepSync(ms) {
   try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { const end = Date.now() + ms; while (Date.now() < end) { /* spin */ } }
@@ -86,22 +95,50 @@ function pidAlive(pid) {
  * other's drafts (codex P2). Synchronous on purpose: no await between load
  * and save, so nothing interleaves inside one process either.
  */
+/**
+ * Ownership-checked lock (the pattern actor-session.js uses): the lock is a
+ * directory (mkdir is atomic) holding an owner file {pid, nonce}. A stale
+ * lock (owner dead, or too old) is reclaimed only by whoever still sees the
+ * SAME owner it judged stale — so two waiters cannot both reclaim it — and
+ * release removes the lock only if the nonce is still ours. Found by the
+ * product-test session reading this file: the previous unlink-and-retry let
+ * two waiters into the critical section together.
+ */
+function readOwner(lockDir) {
+  try { return JSON.parse(fs.readFileSync(path.join(lockDir, 'owner'), 'utf8')); } catch { return null; }
+}
 function locked(file, fn) {
-  const lock = `${file}.lock`;
+  const lockDir = `${file}.lock`;
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  const nonce = crypto.randomBytes(6).toString('hex');
   const deadline = Date.now() + 3000;
   for (;;) {
-    try { fs.writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 }); break; }
-    catch (e) {
+    try {
+      fs.mkdirSync(lockDir);
+      fs.writeFileSync(path.join(lockDir, 'owner'), JSON.stringify({ pid: process.pid, nonce, at: Date.now() }), { mode: 0o600 });
+      break;
+    } catch (e) {
       if (!e || e.code !== 'EEXIST') throw e;
-      let stale = false;
-      try { const st = fs.statSync(lock); stale = Date.now() - st.mtimeMs > LOCK_STALE_MS; } catch { stale = true; }
-      if (stale) { try { fs.unlinkSync(lock); } catch {} continue; }
+      const owner = readOwner(lockDir);
+      let age = Infinity;
+      if (owner && typeof owner.at === 'number') age = Date.now() - owner.at;
+      else { try { age = Date.now() - fs.statSync(lockDir).mtimeMs; } catch { age = Infinity; } }
+      const stale = age > LOCK_STALE_MS || (owner && owner.pid && !pidAlive(owner.pid) && age > 250);
+      if (stale) {
+        // Reclaim only if the owner is still the one we judged stale.
+        const now = readOwner(lockDir);
+        const same = (!owner && !now) || (owner && now && owner.nonce === now.nonce);
+        if (same) { try { fs.rmSync(lockDir, { recursive: true, force: true }); } catch {} }
+        continue;
+      }
       if (Date.now() > deadline) throw new Error(`${path.basename(file)} is busy — try again in a moment`);
       sleepSync(20);
     }
   }
-  try { return fn(); } finally { try { fs.unlinkSync(lock); } catch {} }
+  try { return fn(); } finally {
+    const now = readOwner(lockDir);
+    if (now && now.nonce === nonce) { try { fs.rmSync(lockDir, { recursive: true, force: true }); } catch {} }
+  }
 }
 /** Drafts: read-modify-write under the lock, atomic replace. */
 function transact(fn) {
