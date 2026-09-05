@@ -8,7 +8,7 @@ The person wants to connect with someone on /vibe using what you already know ab
 
 2. **Call `vibe_moves`** with that context. It returns up to three moves (each: a named recipient, the evidence for naming them, a prepared draft) — or one question. If it returns a question, ask the person that question and stop; do not invent a recipient.
 
-3. **Offer the moves as choices.** Use the native question control if this host has one (Claude Code: AskUserQuestion, one option per move using its label, plus "write my own" and "not now"). Otherwise print them numbered and ask for a number. Selecting sends nothing.
+3. **Offer the moves as choices.** Use the native question control if this host has one. Claude Code: AskUserQuestion with one option per move (its label) plus **"not now"** — at most four options; the person can always pick the built-in "Other" to write their own, so do not add a "write my own" option. Otherwise print them numbered, then "0 = write my own, n = not now", and ask for a number. Selecting sends nothing.
 
 4. **On a choice, call `vibe_draft`** with the move's id (or, for "write my own", with `handle` and `message` after asking what to say). Show the person exactly what it returns: the recipient, the exact message, the attachments.
 

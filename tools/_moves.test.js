@@ -386,3 +386,50 @@ test('two sends finishing at once keep both return bindings', async () => {
   await Promise.all([moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev }), moves.vibe_send_draft.handler({ id: b.data.draft.id, rev: b.data.draft.rev })]);
   assert.ok(moves.getReturnBinding('linus')); assert.ok(moves.getReturnBinding('grace'));
 });
+
+test('a draft prepared as one account cannot be sent by another', async () => {
+  stub(QUIET);
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'as ada' });
+  const id = a.data.draft.id; const rev = a.data.draft.rev;
+  const configPath = require.resolve('../config'); const cfg = require(configPath);
+  const orig = cfg.getHandle; cfg.getHandle = () => 'bob';
+  try {
+    const r = await moves.vibe_send_draft.handler({ id, rev });
+    assert.match(r.display, /prepared as @ada; you are signed in as @bob/);
+    const e = await moves.vibe_draft.handler({ id, message: 'edit as bob' });
+    assert.match(e.display, /prepared as @ada/);
+    assert.equal(sends.length, 0);
+  } finally { cfg.getHandle = orig; }
+});
+test('a recovered claim is unconfirmed first: a definite refusal on the retry keeps it unknown', async () => {
+  stub({ ...QUIET, sendMessage: async () => ({ error: 'auth_expired', message: 'session expired' }) });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'orphan then refused' });
+  const id = a.data.draft.id; const rev = a.data.draft.rev;
+  moves.transact(drafts => { const d = drafts.find(x => x.id === id); d.status = 'sending'; d.claimedAt = Date.now() - 120000; d.claimedBy = 999999; });
+  await moves.vibe_send_draft.handler({ id, rev });
+  const e = await moves.vibe_draft.handler({ id, message: 'edit' });
+  assert.match(e.display, /text is frozen/);
+});
+test('thread evidence carrying agent actor metadata is excluded even when the roster has no row', () => {
+  const threads = [{ handle: 'quietbot', unread: 1, lastFrom: 'quietbot', lastMessage: 'beep', lastTimestamp: NOW, lastActorKind: 'agent' }];
+  const out = moves.computeMoves(moves.cleanContext({ project: 'payments', result: 'retry backoff is exponential now' }), 'ada', ROSTER, threads, NOW);
+  assert.ok(!out.moves.some(m => m.to === 'quietbot'));
+});
+test('another session\'s suggestions survive this session\'s vibe_moves', async () => {
+  stub(QUIET);
+  moves.transact(drafts => { drafts.push({ id: 'm1-otherflow', status: 'suggested', createdAt: Date.now(), from: 'ada', flow: 'other-1234', kind: 'ask', to: 'grace', why: 'x', body: 'from the other window', refs: [], context: { project: null } }); });
+  await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential now' } });
+  await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential again' } });
+  const drafts = JSON.parse(fs.readFileSync(moves.DRAFTS_FILE, 'utf8'));
+  assert.ok(drafts.some(d => d.id === 'm1-otherflow'), 'the other flow\'s suggestion is still there');
+  assert.equal(drafts.filter(d => d.status === 'suggested' && d.flow !== 'other-1234').length, drafts.filter(d => d.status === 'suggested').length - 1);
+});
+test('an unconfirmed draft previews with its real state: retry or cancel, no Edit', async () => {
+  stub({ ...QUIET, sendMessage: async () => ({ error: 'transport_failed', message: 'socket hang up' }) });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'maybe delivered' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  const p = await moves.vibe_draft.handler({ id: a.data.draft.id });
+  assert.match(p.display, /did not confirm — it may or may not have reached @linus/);
+  assert.doesNotMatch(p.display, /nothing has been sent/);
+  assert.deepEqual(p.data.actions.map(x => x.label), ['Send to @linus again', 'Cancel']);
+});

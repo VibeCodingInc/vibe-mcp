@@ -682,6 +682,9 @@ async function getInboxInner(handle) {
         lastMessage: t.last_message?.body,
         lastMessageId: t.last_message?.id || null,
         lastFrom: t.last_message?.from || null,
+        // Actor metadata of the newest message, as served (#272: server-owned).
+        // Drafting tools use it so an agent is never suggested as a person.
+        lastActorKind: t.last_message?.actor?.kind || null,
         muted: t.preferences?.muted || false,
         lastTimestamp: t.last_message?.created_at ? new Date(t.last_message.created_at).getTime() : null
       }));
@@ -726,6 +729,9 @@ async function getInboxV1(handle) {
         // name explicitly (first-five-minutes repair: no guessed targets).
         lastMessageId: t.last_message?.id || null,
         lastFrom: t.last_message?.from || null,
+        // Actor metadata of the newest message, as served (#272: server-owned).
+        // Drafting tools use it so an agent is never suggested as a person.
+        lastActorKind: t.last_message?.actor?.kind || null,
         lastTimestamp: t.last_message?.created_at ? new Date(t.last_message.created_at).getTime() : null
       }));
     }

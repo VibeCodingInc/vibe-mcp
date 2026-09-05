@@ -138,6 +138,8 @@ function clearReturnBinding(handle) {
 }
 
 const newId = (prefix) => `${prefix}${crypto.randomBytes(4).toString('hex')}`;
+/** This process's flow: vibe_moves replaces only ITS OWN earlier suggestions (codex P2). */
+const FLOW = `${process.pid}-${crypto.randomBytes(2).toString('hex')}`;
 const textHash = (d) => crypto.createHash('sha1').update(compose(d)).digest('hex');
 const sendKey = (d) => `draft-${d.id}-${textHash(d).slice(0, 10)}`;
 /** The preview revision: what the person SAW. Send must name it (codex P1). */
@@ -199,8 +201,10 @@ function computeMoves(ctx, me, roster, threads, now = Date.now()) {
   // message would be welcome.
   for (const t of threads || []) {
     if (!t || !t.handle || t.handle === me) continue;
-    // Agents are not people to draft to, whichever side the evidence came from.
-    if (t.isAgent || t.lastIsAgent || knownAgents.has(t.handle)) continue;
+    // Agents are not people to draft to, whichever side the evidence came
+    // from: the thread's own actor metadata (served with the last message)
+    // first, the live roster second.
+    if (t.isAgent || t.lastIsAgent || t.lastActorKind === 'agent' || knownAgents.has(t.handle)) continue;
     if (t.lastFrom && t.lastFrom !== me && t.lastMessage) {
       const ageH = t.lastTimestamp ? Math.max(0, (now - t.lastTimestamp) / 3600000) : null;
       const kind = ctx.result ? 'answer' : (ctx.question || ctx.blocker) ? 'ask' : 'update';
@@ -292,12 +296,12 @@ async function movesHandler(args) {
   // Write the drafts locally so that a later "select" is a state change on
   // disk and never a send. Earlier unselected suggestions are replaced.
   const moves = out.moves.map((m, i) => ({
-    id: newId(`m${i + 1}-`), status: 'suggested', createdAt: Date.now(),
+    id: newId(`m${i + 1}-`), status: 'suggested', createdAt: Date.now(), from: me, flow: FLOW,
     kind: m.kind, to: m.to, why: m.why, body: m.body, refs: m.refs,
     context: { project: ctx.project || null },
   }));
   transact(drafts => {
-    for (let i = drafts.length - 1; i >= 0; i--) if (drafts[i].status === 'suggested') drafts.splice(i, 1);
+    for (let i = drafts.length - 1; i >= 0; i--) if (drafts[i].status === 'suggested' && drafts[i].flow === FLOW) drafts.splice(i, 1);
     drafts.push(...moves);
   });
 
@@ -333,8 +337,17 @@ function preview(d, person) {
   const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
   const message = compose(d);
   const rev = revOf(d);
+  const head = `**To:** @${d.to} (${where})\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n\n`;
+  if (d.status === 'unknown') {
+    // The earlier Send did not confirm: it may already have reached them.
+    // Only the two honest actions exist (codex P2).
+    return {
+      display: `${head}the last Send did not confirm — it may or may not have reached @${d.to}. Send again retries exactly this text (delivers once) · Cancel. Editing is off for this draft.  _(draft ${d.id} · rev ${rev})_`,
+      data: { draft: { id: d.id, to: d.to, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to} again`, tool: 'vibe_send_draft', args: { id: d.id, rev } }, { label: 'Cancel', tool: 'vibe_discard_draft', args: { id: d.id } }] },
+    };
+  }
   return {
-    display: `**To:** @${d.to} (${where})\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n\nSend to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_`,
+    display: `${head}Send to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_`,
     data: { draft: { id: d.id, to: d.to, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to}`, tool: 'vibe_send_draft', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_draft', args: { id: d.id, message: '<new text>' } }, { label: 'Cancel', tool: 'vibe_discard_draft', args: { id: d.id } }] },
   };
 }
@@ -363,11 +376,12 @@ async function draftHandler(args) {
       // @echo is the feedback line with its own path and no receipt shape;
       // it is not a person to draft to (codex P2).
       if (to === 'echo') return { display: '@echo is the feedback line — send to it with vibe_dm directly. Nothing drafted.' };
-      d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), kind: 'free', to, why: 'you named them', body: message, refs: cleanContext({ refs: args.refs }).refs, context: { project: null } };
+      d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), from: me, flow: FLOW, kind: 'free', to, why: 'you named them', body: message, refs: cleanContext({ refs: args.refs }).refs, context: { project: null } };
       drafts.push(d);
     } else {
       // A finished draft stays finished; an unconfirmed one may only be
       // retried as-is or cancelled (its idempotency key names THIS text).
+      if (d.from && d.from !== me) return { display: `Draft ${d.id} was prepared as @${d.from}; you are signed in as @${me}. Nothing sent — open a new draft as yourself.` };
       if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — nothing changed. Open a new draft to say more.` };
       if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — open a new draft (vibe_draft with handle + message, or vibe_moves again). Nothing sent.` };
       if (d.status === 'sending') return { display: `Draft ${d.id} is being sent right now — nothing to edit.` };
@@ -424,6 +438,7 @@ async function sendHandler(args) {
   if (initCheck) return initCheck;
   const id = args && args.id;
   const rev = typeof (args && args.rev) === 'string' ? args.rev.trim() : '';
+  const me = config.getHandle();
 
   // 1. Claim under the lock: nothing leaves the machine until this draft is
   //    marked 'sending' with a key derived from the exact text — and the
@@ -431,6 +446,9 @@ async function sendHandler(args) {
   const claim = transact(drafts => {
     const d = drafts.find(x => x.id === id);
     if (!d) return { display: `No draft ${id} — nothing sent. Open it with vibe_draft first.` };
+    // The approval was given as one account; it is not transferable to
+    // whoever is signed in now (codex P1).
+    if (d.from && d.from !== me) return { display: `Draft ${d.id} was prepared as @${d.from}; you are signed in as @${me}. Nothing sent — open a new draft as yourself.` };
     if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — not sending it twice.` };
     if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.` };
     if (d.status === 'suggested') return { display: `Draft ${d.id} has not been reviewed yet — open it with vibe_draft so you see the exact message first. Nothing sent.` };
@@ -442,6 +460,9 @@ async function sendHandler(args) {
       if (!abandoned) return { display: `Draft ${d.id} is already being sent — not sending it twice.` };
       // The claiming process died mid-send: retry the SAME text under the
       // SAME key — the server deduplicates, so this delivers once (codex P2).
+      // That earlier attempt may have committed: uncertainty is recorded
+      // BEFORE the retry so a later definite refusal cannot erase it.
+      d.unconfirmed = true;
     }
     d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
     d.idempotencyKey = sendKey(d);
