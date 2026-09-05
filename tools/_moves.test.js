@@ -237,12 +237,15 @@ test('an unconfirmed send freezes the text: retry sends the same text with the s
   const crypto = require('node:crypto');
   assert.equal(sends[0].opts.idempotencyKey, `draft-${id}-${crypto.createHash('sha1').update('frozen text').digest('hex').slice(0, 10)}`);
 });
-test('a definite refusal (handle not found) returns the draft to editable', async () => {
-  stub({ ...QUIET, sendMessage: async () => ({ error: 'handle_not_found', message: 'No such handle' }) });
-  const a = await moves.vibe_draft.handler({ handle: '@nobody', message: 'hello' });
-  await send(a.data.draft.id, a.data.draft.rev);
-  const e = await moves.vibe_draft.handler({ id: a.data.draft.id, message: 'hello again' });
-  assert.match(e.display, /hello again/);
+test('a refusal that never reached the network (too long) returns the draft to editable', async () => {
+  stub(QUIET);
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'x'.repeat(1990) });
+  const id = a.data.draft.id;
+  await moves.vibe_draft.handler({ id, refs: [{ title: 'a long link title here', url: 'https://example.com/' + 'y'.repeat(40) }] });
+  const p = await moves.vibe_draft.handler({ id });
+  assert.match(p.display, /Not ready — the message is/);
+  const e = await moves.vibe_draft.handler({ id, message: 'short again', refs: [] });
+  assert.match(e.display, /short again/);
 });
 test('cancel is refused while sending and after sent', async () => {
   stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { await new Promise(r => setTimeout(r, 40)); sends.push({ from, to, message, opts }); return { id: 'msg_1', success: true }; } });
@@ -473,5 +476,45 @@ test('an auth refusal after a send attempt is not treated as definite', async ()
   const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'auth path' });
   await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
   const e = await moves.vibe_draft.handler({ id: a.data.draft.id, message: 'edit' });
+  assert.match(e.display, /text is frozen/);
+});
+
+test('an unreadable or anonymous roster is "unknown", never "nobody is around"', () => {
+  const out = moves.computeMoves(moves.cleanContext({ result: 'the solar array sizing spreadsheet is done' }), 'ada', [], [], NOW, { rosterKnown: false });
+  assert.match(out.ask, /couldn't check who's around/);
+  assert.doesNotMatch(out.ask, /Nobody is around/);
+});
+test('vibe_moves treats an anonymous presence read as unknown', async () => {
+  const anon = []; anon.anonymous = true;
+  stub({ ...QUIET, getActiveUsersResult: async () => ({ ok: true, users: anon }), getInboxResult: async () => ({ ok: true, threads: [] }) });
+  const r = await moves.vibe_moves.handler({ context: { result: 'the solar array sizing spreadsheet is done' } });
+  assert.match(r.display, /couldn't check who's around/);
+  assert.doesNotMatch(r.display, /Nobody is around/);
+});
+test('pasting the previewed message back as an edit does not duplicate the attachments', async () => {
+  stub(QUIET);
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'see this', refs: [{ title: 'PR', url: 'https://github.com/x/y/pull/1' }] });
+  const id = a.data.draft.id;
+  assert.equal(a.data.draft.body, 'see this');
+  const e = await moves.vibe_draft.handler({ id, message: a.data.draft.message.replace('see this', 'look at this') });
+  const e2 = await moves.vibe_draft.handler({ id, message: e.data.draft.message });
+  assert.equal((e2.data.draft.message.match(/https:\/\/github\.com/g) || []).length, 1);
+  assert.equal(e2.data.draft.body, 'look at this');
+});
+test('cancelling an unconfirmed draft keeps its warning on repeat cancel and on preview', async () => {
+  stub({ ...QUIET, sendMessage: async () => ({ error: 'transport_failed', message: 'socket hang up' }) });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'maybe' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  await moves.vibe_discard_draft.handler({ id: a.data.draft.id });
+  const again = await moves.vibe_discard_draft.handler({ id: a.data.draft.id });
+  assert.match(again.display, /may or may not have reached them/);
+  const p = await moves.vibe_draft.handler({ id: a.data.draft.id });
+  assert.match(p.display, /did not confirm — it may or may not have reached them/);
+});
+test('a server refusal after an attempt is not definite either (transport may have retried)', async () => {
+  stub({ ...QUIET, sendMessage: async () => ({ error: 'handle_not_found', message: 'gone' }) });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'x' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  const e = await moves.vibe_draft.handler({ id: a.data.draft.id, message: 'y' });
   assert.match(e.display, /text is frozen/);
 });

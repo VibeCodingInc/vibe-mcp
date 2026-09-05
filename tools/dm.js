@@ -153,7 +153,11 @@ async function handler(args) {
     // recipient that does not exist, self, too long, throttled at the door.
     // An auth error is NOT here: the store retries a 401 with a fresh token,
     // and the outcome of a retried exchange must stay uncertain (codex P2).
-    const DEFINITE = new Set(['not_signed_in', 'handle_not_found', 'self_dm', 'message_too_long', 'rate_limited']);
+    // Narrowed again (codex round 6): the transport may retry a dropped
+    // connection internally, so even a server refusal on the final attempt
+    // does not prove an earlier attempt wrote nothing. Definite = never
+    // reached the network at all.
+    const DEFINITE = new Set(['not_signed_in', 'self_dm', 'message_too_long']);
     return {
       display: (result && REMEDY_CARRYING.has(result.error))
         ? detail

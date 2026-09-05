@@ -210,7 +210,7 @@ function draftFor(kind, ctx) {
 }
 
 /** Build up to three moves from evidence. Returns { moves } or { ask }. Pure; never sends. */
-function computeMoves(ctx, me, roster, threads, now = Date.now()) {
+function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown = true } = {}) {
   const hasContext = Boolean(ctx.result || ctx.question || ctx.blocker || ctx.doing);
   if (!hasContext) {
     return { ask: "What are you working on right now, in one line — and is there a result to share or a question to ask? (I'll only suggest people I can name a reason for.)" };
@@ -256,6 +256,8 @@ function computeMoves(ctx, me, roster, threads, now = Date.now()) {
 
   if (!candidates.length) {
     const topic = [...ctxTok].slice(0, 3).join(', ') || 'this';
+    // An unreadable or anonymous roster is not an empty room (codex P2).
+    if (!rosterKnown) return { ask: `Who is this for? I couldn't check who's around right now, so I won't guess — name a handle, or tell me who would care about ${topic}.` };
     const around = people.filter(isHereNow).length;
     return { ask: `Who is this for? ${around ? `${around} ${around === 1 ? 'person is' : 'people are'} around` : 'Nobody is around right now'} and none of their one-liners touch ${topic} — name a handle, or tell me who would care.` };
   }
@@ -309,13 +311,16 @@ async function movesHandler(args) {
     store.getActiveUsersResult ? store.getActiveUsersResult() : Promise.resolve({ ok: true, users: await store.getActiveUsers() }),
     store.getInboxResult ? store.getInboxResult(me) : Promise.resolve({ ok: true, threads: await store.getInbox(me) }),
   ]);
-  const roster = rosterRead.ok ? rosterRead.users : [];
+  // A signed-out read comes back ok:true with users.anonymous — counts only,
+  // no people. That is "unknown", not "nobody".
+  const rosterKnown = Boolean(rosterRead.ok && !(rosterRead.users && rosterRead.users.anonymous));
+  const roster = rosterKnown ? rosterRead.users : [];
   const threads = inboxRead.ok ? inboxRead.threads : [];
-  const evidenceNote = (!rosterRead.ok || !inboxRead.ok)
-    ? `\n_(could not read ${[!rosterRead.ok && 'who is around', !inboxRead.ok && 'your inbox'].filter(Boolean).join(' or ')} — suggestions below use only what was readable)_`
+  const evidenceNote = (!rosterKnown || !inboxRead.ok)
+    ? `\n_(could not read ${[!rosterKnown && 'who is around', !inboxRead.ok && 'your inbox'].filter(Boolean).join(' or ')} — suggestions above use only what was readable)_`
     : '';
 
-  const out = computeMoves(ctx, me, roster, threads);
+  const out = computeMoves(ctx, me, roster, threads, Date.now(), { rosterKnown });
   if (out.ask) return { display: out.ask + evidenceNote, data: { ask: out.ask, moves: [] } };
 
   // Write the drafts locally so that a later "select" is a state change on
@@ -373,7 +378,7 @@ function preview(d, person) {
   }
   return {
     display: `${head}Send to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_`,
-    data: { draft: { id: d.id, to: d.to, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to}`, tool: 'vibe_send_draft', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_draft', args: { id: d.id, message: '<new text>' } }, { label: 'Cancel', tool: 'vibe_discard_draft', args: { id: d.id } }] },
+    data: { draft: { id: d.id, to: d.to, body: d.body, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to}`, tool: 'vibe_send_draft', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_draft', args: { id: d.id, message: '<new body text — links are kept separately>' } }, { label: 'Cancel', tool: 'vibe_discard_draft', args: { id: d.id } }] },
   };
 }
 
@@ -410,11 +415,19 @@ async function draftHandler(args) {
       if (d.from && d.from !== me) return { display: `Draft ${d.id} was prepared as @${d.from}; you are signed in as @${me}. Nothing sent — open a new draft as yourself.` };
       reconcileAbandoned(d);
       if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — nothing changed. Open a new draft to say more.` };
-      if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — open a new draft (vibe_draft with handle + message, or vibe_moves again). Nothing sent.` };
+      if (d.status === 'cancelled') return { display: d.unconfirmed
+        ? `Draft ${d.id} was cancelled after a Send to @${d.to} that did not confirm — it may or may not have reached them. Open a new draft to say more.`
+        : `Draft ${d.id} was cancelled — open a new draft (vibe_draft with handle + message, or vibe_moves again). Nothing sent.` };
       if (d.status === 'sending') return { display: `Draft ${d.id} is being sent right now — nothing to edit.` };
       if (d.status === 'unknown' && (message || args.refs)) return { display: `Draft ${d.id}: the last Send to @${d.to} did not confirm, so the text is frozen — Send again to retry exactly that text (it delivers once), or Cancel. To say something different, cancel and open a new draft.` };
       if (d.status !== 'unknown') {
-        if (message) { d.body = message; d.edited = true; }
+        if (message) {
+          // The preview's `message` already ends with the attachment lines;
+          // an edit that pastes it back must not double them (codex P2).
+          const tail = refLines(d.refs);
+          d.body = tail && message.endsWith(tail) ? message.slice(0, -tail.length) : message;
+          d.edited = true;
+        }
         if (args.refs) { d.refs = cleanContext({ refs: args.refs }).refs; }
         d.status = 'previewed';
       }
@@ -442,7 +455,10 @@ async function discardHandler(args) {
     reconcileAbandoned(d);
     if (d.status === 'sending') return { display: `Draft ${d.id} is being sent to @${d.to} right now — it can't be cancelled at this point.`, data: { draft: { id: d.id, status: d.status } } };
     if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — a sent message can't be unsent.`, data: { draft: { id: d.id, status: d.status } } };
-    const wasUnknown = d.status === 'unknown';
+    if (d.status === 'cancelled') return { display: d.unconfirmed
+      ? `Draft ${d.id} is already cancelled — and the earlier Send to @${d.to} did not confirm, so it may or may not have reached them.`
+      : `Draft ${d.id} is already cancelled — nothing was sent.`, data: { draft: { id: d.id, status: d.status } } };
+    const wasUnknown = d.status === 'unknown' || Boolean(d.unconfirmed);
     d.status = 'cancelled';
     return {
       display: wasUnknown
