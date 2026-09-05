@@ -584,3 +584,13 @@ test('a live lock held by another process is waited on, then times out honestly'
   assert.ok(Date.now() - t0 >= 2500, 'waited for the lock rather than stealing it');
   fs2.rmSync(lockDir, { recursive: true, force: true });
 });
+
+test('an over-long field is reported, never silently cut mid-word', async () => {
+  stub(QUIET);
+  const r = await moves.vibe_moves.handler({ context: { project: 'payments', result: 'x'.repeat(1600) } });
+  assert.match(r.display, /result is 1600 characters/);
+  assert.equal(r.data.moves.length, 0);
+  const ok = await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential now. '.repeat(20).trim() } });
+  assert.ok(ok.data.moves.length >= 1);
+  assert.ok(ok.data.moves[0].message.endsWith('now.'), 'the draft ends where the result ends');
+});

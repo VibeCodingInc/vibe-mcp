@@ -226,13 +226,25 @@ function tokens(text) {
 function overlap(a, b) { const out = []; for (const w of a) if (b.has(w)) out.push(w); return out; }
 function contextText(ctx) { return [ctx.project, ctx.doing, ctx.result, ctx.question, ctx.blocker].filter(Boolean).join(' '); }
 
+// Field ceilings keep a draft inside the 2000-char message limit. A field
+// over its ceiling is REPORTED, never silently cut: a draft that ends
+// mid-word is not "the exact text you approve" (product-test finding —
+// the previous 280-char slice produced "…and it judge").
+const FIELD_MAX = { project: 60, doing: 300, result: 1500, question: 1500, blocker: 1500 };
 function cleanContext(raw) {
   const ctx = raw && typeof raw === 'object' ? raw : {};
-  const str = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
+  const tooLong = [];
+  const str = (k, max) => {
+    const v = ctx[k];
+    if (typeof v !== 'string' || !v.trim()) return undefined;
+    const t = v.trim();
+    if (t.length > max) { tooLong.push({ field: k, length: t.length, max }); return t; }
+    return t;
+  };
   const refs = Array.isArray(ctx.refs)
-    ? ctx.refs.filter(r => r && typeof r.url === 'string' && /^https?:\/\//.test(r.url)).slice(0, 3).map(r => ({ title: str(r.title, 80) || r.url, url: r.url.slice(0, 300) }))
+    ? ctx.refs.filter(r => r && typeof r.url === 'string' && /^https?:\/\//.test(r.url)).slice(0, 3).map(r => ({ title: (typeof r.title === 'string' && r.title.trim() ? r.title.trim().slice(0, 80) : r.url), url: r.url.slice(0, 300) }))
     : [];
-  return { project: str(ctx.project, 60), doing: str(ctx.doing, 160), result: str(ctx.result, 280), question: str(ctx.question, 280), blocker: str(ctx.blocker, 280), refs };
+  return { project: str('project', FIELD_MAX.project), doing: str('doing', FIELD_MAX.doing), result: str('result', FIELD_MAX.result), question: str('question', FIELD_MAX.question), blocker: str('blocker', FIELD_MAX.blocker), refs, tooLong };
 }
 
 function refLines(refs) { return refs && refs.length ? '\n' + refs.map(r => `${r.title}: ${r.url}`).join('\n') : ''; }
@@ -379,6 +391,11 @@ async function movesHandler(args) {
   if (initCheck) return initCheck;
   const me = config.getHandle();
   const ctx = cleanContext(args && args.context);
+  if (ctx.tooLong.length) {
+    const f = ctx.tooLong[0];
+    const ask = `The ${f.field} is ${f.length} characters; a message this long would be cut mid-sentence. Say it in under ${f.max} characters — what the other person needs to hear — or attach a link and keep the text short. Nothing drafted.`;
+    return { display: ask, data: { ask, moves: [] } };
+  }
 
   const [rosterRead, inboxRead] = await Promise.all([
     store.getActiveUsersResult ? store.getActiveUsersResult() : Promise.resolve({ ok: true, users: await store.getActiveUsers() }),
