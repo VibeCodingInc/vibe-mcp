@@ -48,6 +48,7 @@
   },
   "files": [
     "README.md",
+    "hosts/",
     "actor-session.js",
     "ambient-escapes.js",
     "api-auth.js",
@@ -89,6 +90,7 @@
     "store/profiles.js",
     "tool-privacy.js",
     "tools/_actions.js",
+    "tools/moves.js",
     "tools/_discovery.js",
     "tools/_shared.js",
     "tools/_work-context.js",

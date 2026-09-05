@@ -336,6 +336,14 @@ const kernelTools = {
   vibe_reflect: require('./tools/reflect'),
   vibe_call: require('./tools/call'),
 
+  // ── Context-guided messaging (human-approved ≠ human-typed) ────────────
+  // The host agent proposes, the person chooses; nothing sends until the
+  // clearly labeled Send action. Drafts live in ~/.vibe/drafts.json only.
+  vibe_moves: require('./tools/moves').vibe_moves,
+  vibe_draft: require('./tools/moves').vibe_draft,
+  vibe_discard_draft: require('./tools/moves').vibe_discard_draft,
+  vibe_send_draft: require('./tools/moves').vibe_send_draft,
+
   // ── People (opt-in discovery, platform#345 / vibe-mcp#28) ──────────────
   // `vibe who` is who is present NOW; `vibe people` is who chose to be
   // findable, online or not. Listing is always the person's own act — no

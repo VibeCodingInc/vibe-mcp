@@ -262,6 +262,41 @@ function configureAllHosts() {
 }
 
 /**
+ * Install the /vibe host command — the one-line entry to context-guided
+ * messaging ("from what I'm doing, who should I talk to?"). Written only where
+ * no /vibe command or skill already exists; never overwritten, so a person's
+ * own /vibe stays theirs. Claude Code reads ~/.claude/commands/vibe.md;
+ * Codex reads $CODEX_HOME/prompts/vibe.md.
+ */
+function installHostCommands() {
+  const src = path.join(__dirname, 'hosts', 'vibe-command.md');
+  let body;
+  try { body = fs.readFileSync(src, 'utf8'); } catch { return []; }
+  const installed = [];
+  const claudeDir = path.join(os.homedir(), '.claude');
+  if (fs.existsSync(claudeDir)) {
+    const cmd = path.join(claudeDir, 'commands', 'vibe.md');
+    const skill = path.join(claudeDir, 'skills', 'vibe', 'SKILL.md');
+    if (!fs.existsSync(cmd) && !fs.existsSync(skill)) {
+      fs.mkdirSync(path.dirname(cmd), { recursive: true });
+      fs.writeFileSync(cmd, body, 'utf8');
+      installed.push({ host: 'Claude Code', path: cmd });
+    }
+  }
+  const cx = codexHome();
+  if (fs.existsSync(cx)) {
+    const prompt = path.join(cx, 'prompts', 'vibe.md');
+    if (!fs.existsSync(prompt)) {
+      fs.mkdirSync(path.dirname(prompt), { recursive: true });
+      // Codex prompts take no frontmatter; strip it.
+      fs.writeFileSync(prompt, body.replace(/^---[\s\S]*?---\n/, ''), 'utf8');
+      installed.push({ host: 'Codex', path: prompt });
+    }
+  }
+  return installed;
+}
+
+/**
  * Test API connection
  */
 async function testConnection() {
@@ -449,6 +484,8 @@ async function setup() {
   // Step 2: Add /vibe MCP server to every detected host
   printStep(2, 'Adding /vibe MCP server...', 'running');
   const hostResults = configureAllHosts();
+  const hostCommands = installHostCommands();
+  for (const c of hostCommands) console.log(`  /vibe command installed for ${c.host}: ${c.path}`);
   for (const r of hostResults) {
     const note = r.status === 'added' ? 'configured'
       : r.status === 'exists' ? 'already configured'
