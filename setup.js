@@ -285,14 +285,19 @@ function installHostCommands() {
       installed.push({ host, path: file, error: e && e.message ? e.message : String(e) });
     }
   };
+  // A person's own /vibe (command or skill) is never overwritten: when it
+  // exists, the candidate installs beside it as /vibe-moves and says so.
   const claudeDir = path.join(os.homedir(), '.claude');
   if (fs.existsSync(claudeDir)) {
-    const skill = path.join(claudeDir, 'skills', 'vibe', 'SKILL.md');
-    if (!fs.existsSync(skill)) tryInstall('Claude Code', path.join(claudeDir, 'commands', 'vibe.md'), body);
+    const taken = fs.existsSync(path.join(claudeDir, 'skills', 'vibe', 'SKILL.md')) || fs.existsSync(path.join(claudeDir, 'commands', 'vibe.md'));
+    tryInstall('Claude Code', path.join(claudeDir, 'commands', taken ? 'vibe-moves.md' : 'vibe.md'), body);
   }
   const cx = codexHome();
   // Codex prompts take no frontmatter; strip it.
-  if (fs.existsSync(cx)) tryInstall('Codex', path.join(cx, 'prompts', 'vibe.md'), body.replace(/^---[\s\S]*?---\n/, ''));
+  if (fs.existsSync(cx)) {
+    const taken = fs.existsSync(path.join(cx, 'prompts', 'vibe.md'));
+    tryInstall('Codex', path.join(cx, 'prompts', taken ? 'vibe-moves.md' : 'vibe.md'), body.replace(/^---[\s\S]*?---\n/, ''));
+  }
   return installed;
 }
 

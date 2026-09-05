@@ -2,3 +2,4 @@
 # Local editor/agent settings
 .claude/settings.local.json
 .codex/
+hosts/candidate.mcp.json

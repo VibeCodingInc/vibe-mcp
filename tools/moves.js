@@ -48,7 +48,7 @@ const crypto = require('crypto');
 const config = require('../config');
 const store = require('../store');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
-const { canonicalHandle } = require('../protocol/handle');
+const { canonicalHandle, storedRecipientHandle } = require('../protocol/handle');
 const { inertField } = require('../incoming');
 
 const DRAFTS_FILE = path.join(config.VIBE_DIR, 'drafts.json');
@@ -59,6 +59,7 @@ const BINDING_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const LOCK_STALE_MS = 10 * 1000;         // a transaction never takes this long
 const CLAIM_STALE_MS = 60 * 1000;        // a send claim older than this from a dead process is abandoned
 const CLAIM_HARD_STALE_MS = 10 * 60 * 1000;
+const THREAD_EVIDENCE_FRESH_MS = 7 * 24 * 60 * 60 * 1000; // someone who wrote you within a week is waiting; older needs topical overlap
 
 // ── local, private state (one file, one lock, atomic replace) ────────────────
 
@@ -167,6 +168,14 @@ const newId = (prefix) => `${prefix}${crypto.randomBytes(4).toString('hex')}`;
 const FLOW = `${process.pid}-${crypto.randomBytes(2).toString('hex')}`;
 const textHash = (d) => crypto.createHash('sha1').update(compose(d)).digest('hex');
 const sendKey = (d) => `draft-${d.id}-${textHash(d).slice(0, 10)}`;
+/**
+ * The #392 approval digest over the EXACT snapshot the person approved:
+ * SHA-256 of "<stored recipient>\n<body>", where the recipient is the form
+ * the platform stores (lowercase, no @) and the body is the composed text
+ * trimmed — exactly what vibe_dm sends. Computed once, at claim, from the
+ * snapshot; never recomputed after a change to the previewed content.
+ */
+const approvedDigest = (to, message) => crypto.createHash('sha256').update(`${storedRecipientHandle(to)}\n${message}`, 'utf8').digest('hex');
 /** The preview revision: what the person SAW. Send must name it (codex P1). */
 const revOf = (d) => textHash(d).slice(0, 8);
 
@@ -253,6 +262,12 @@ function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown 
     if (t.isAgent || t.lastIsAgent || t.lastActorKind === 'agent' || knownAgents.has(t.handle)) continue;
     if (t.lastFrom && t.lastFrom !== me && t.lastMessage) {
       const ageH = t.lastTimestamp ? Math.max(0, (now - t.lastTimestamp) / 3600000) : null;
+      // A stale thread is evidence only if it is about the work: filling a
+      // slot with someone who wrote a month ago about something else is
+      // not a move, it is noise (Seth's product test rule).
+      const fresh = t.lastTimestamp ? (now - t.lastTimestamp) <= THREAD_EVIDENCE_FRESH_MS : false;
+      const topical = overlap(ctxTok, tokens(String(t.lastMessage))).length > 0;
+      if (!fresh && !topical) continue;
       const kind = ctx.result ? 'answer' : (ctx.question || ctx.blocker) ? 'ask' : 'update';
       candidates.push({
         kind, to: t.handle,
@@ -539,7 +554,9 @@ async function sendHandler(args) {
     }
     d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
     d.idempotencyKey = sendKey(d);
-    return { snapshot: { id: d.id, to: d.to, kind: d.kind, body: d.body, refs: d.refs, context: d.context, message: compose(d), key: d.idempotencyKey } };
+    const message = compose(d).trim();
+    d.approvedSha256 = approvedDigest(d.to, message);
+    return { snapshot: { id: d.id, to: d.to, kind: d.kind, body: d.body, refs: d.refs, context: d.context, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256 } };
   });
   if (claim.display) return claim;
   const s = claim.snapshot;
@@ -548,7 +565,7 @@ async function sendHandler(args) {
   let result;
   try {
     const dm = require('./dm');
-    result = await dm.handler({ handle: s.to, message: s.message, origin: 'context_move', idempotency_key: s.key });
+    result = await dm.handler({ handle: s.to, message: s.message, origin: 'context_move', idempotency_key: s.key, approved_sha256: s.approvedSha256 });
   } catch (e) {
     result = { display: `That didn't send — ${e && e.message ? e.message : 'unknown error'}. Nothing confirmed; the draft is still here.`, data: { sent: false, definite: false } };
   }

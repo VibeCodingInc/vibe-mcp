@@ -26,6 +26,16 @@
 const INVISIBLE = /[​-‍⁠﻿؜‎‏‪-‮⁦-⁩]/g;
 
 /** Canonical comparison/storage form, or '' when there isn't one. */
+/**
+ * The recipient exactly as the platform STORES it (message-service
+ * storedRecipientHandle: lowercase, leading @ stripped, hyphens KEPT). The
+ * #392 approval digest is computed over this form; it must agree byte-for-byte
+ * with the server's, so it is deliberately not canonicalHandle().
+ */
+function storedRecipientHandle(value) {
+  return String(value || '').toLowerCase().replace(/^@/, '');
+}
+
 function canonicalHandle(value) {
   if (typeof value !== 'string') return '';
   let h = value.replace(INVISIBLE, '');
@@ -45,4 +55,4 @@ const sameHandle = (a, b) => {
   return !!x && x === canonicalHandle(b);
 };
 
-module.exports = { canonicalHandle, isCanonicalHandle, sameHandle };
+module.exports = { canonicalHandle, isCanonicalHandle, sameHandle, storedRecipientHandle };

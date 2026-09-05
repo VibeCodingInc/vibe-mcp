@@ -45,6 +45,10 @@ const definition = {
         type: 'string',
         description: 'Optional: a stable key for this exact send, so a retry delivers once. Drafting tools set it; omit when composing by hand.'
       },
+      approved_sha256: {
+        type: 'string',
+        description: 'Optional (#392): hex SHA-256 over UTF-8 of "<recipient>\n<message>" — recipient lowercased without a leading @, message trimmed — binding this send to exactly what the person approved. The server refuses a send that would store anything different. Drafting tools set it.'
+      },
       origin: {
         type: 'string',
         description: "How this message came to be. Omit for a normal message you're composing. Pass the value the drafting tool told you to use when sending a draft it produced: 'intro' (vibe_intro), 'stuck_solver' (vibe_weave solve), 'held_half' (a Fable-held reply), 'fable'."
@@ -58,7 +62,7 @@ async function handler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
 
-  const { handle, message, artifact_slug, payload, reply_to, tip_amount_cents, origin, idempotency_key } = args;
+  const { handle, message, artifact_slug, payload, reply_to, tip_amount_cents, origin, idempotency_key, approved_sha256 } = args;
   const myHandle = config.getHandle();
   const them = normalizeHandle(handle);
 
@@ -118,6 +122,7 @@ async function handler(args) {
   const result = await store.sendMessage(myHandle, them, finalMessage || null, 'dm', finalPayload, {
     replyTo: reply_to || null,
     idempotencyKey: typeof idempotency_key === 'string' && idempotency_key ? idempotency_key : undefined,
+    approvedSha256: typeof approved_sha256 === 'string' && approved_sha256 ? approved_sha256 : undefined,
     // Default to 'composed' (a human wrote it); drafting tools pass their own
     // origin so the network's derived messages are distinguishable in the funnel.
     // 'context_move' is not yet in the platform's MESSAGE_ORIGINS allowlist
@@ -160,7 +165,10 @@ async function handler(args) {
     // connection internally, so even a server refusal on the final attempt
     // does not prove an earlier attempt wrote nothing. Definite = never
     // reached the network at all.
-    const DEFINITE = new Set(['not_signed_in', 'self_dm', 'message_too_long']);
+    // The composition-boundary refusals (#392/#394) are checked before any
+    // write and are idempotent on retry (same content → same verdict), so a
+    // retried exchange cannot have committed first: definite.
+    const DEFINITE = new Set(['not_signed_in', 'self_dm', 'message_too_long', 'approved_content_mismatch', 'approved_sha256_malformed', 'approved_send_unsupported_route', 'private_composition_data']);
     return {
       display: (result && REMEDY_CARRYING.has(result.error))
         ? detail

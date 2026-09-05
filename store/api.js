@@ -533,6 +533,10 @@ async function sendMessage(from, to, body, type = 'dm', payload = null, options 
         idempotency_key: idempotencyKey,
         reply_to: options.replyTo || undefined,  // Threaded reply support
         origin: options.origin || undefined,     // work-object lifecycle state
+        // #392 approval digest: SHA-256 over "<stored recipient>\n<body>" as
+        // previewed. The server refuses a send whose stored text or recipient
+        // would differ. Absent → unchanged behaviour.
+        approved_sha256: options.approvedSha256 || undefined,
       };
       console.error('[vibe] Sending message via v2 API (Postgres-backed) to:', to, 'body length:', (body || '').length);
     }
