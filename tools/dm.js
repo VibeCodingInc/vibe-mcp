@@ -120,7 +120,10 @@ async function handler(args) {
     idempotencyKey: typeof idempotency_key === 'string' && idempotency_key ? idempotency_key : undefined,
     // Default to 'composed' (a human wrote it); drafting tools pass their own
     // origin so the network's derived messages are distinguishable in the funnel.
-    origin: origin || 'composed',
+    // 'context_move' is not yet in the platform's MESSAGE_ORIGINS allowlist
+    // (wired to Platform); until it is, the wire origin is 'composed' — the
+    // person approved the exact text — rather than an unclassified null.
+    origin: origin === 'context_move' ? 'composed' : (origin || 'composed'),
   });
 
   // Check for errors.

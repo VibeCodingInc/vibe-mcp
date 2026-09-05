@@ -152,7 +152,7 @@ test('Send sends exactly the previewed text, once, and records a private return 
   assert.equal(sends.length, 1);
   assert.equal(sends[0].to, 'linus');
   assert.equal(sends[0].message, 're: payments — retry backoff is exponential now');
-  assert.equal(sends[0].opts.origin, 'context_move');
+  assert.equal(sends[0].opts.origin, 'composed'); // wire origin until Platform allowlists context_move
   assert.match(s.display, /Sent to \*\*@linus\*\*/);
   const again = await send(id);
   assert.match(again.display, /already sent/); assert.equal(sends.length, 1);
@@ -517,4 +517,39 @@ test('a server refusal after an attempt is not definite either (transport may ha
   await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
   const e = await moves.vibe_draft.handler({ id: a.data.draft.id, message: 'y' });
   assert.match(e.display, /text is frozen/);
+});
+
+test('an agent that wrote you, absent from the roster, is excluded via the served identity', async () => {
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: THREADS.concat([{ handle: 'sedona_bot', unread: 1, lastFrom: 'sedona_bot', lastMessage: 'hi from a bot', lastTimestamp: NOW }]) }), getIdentityKind: async (h) => (h === 'sedona_bot' ? 'agent' : 'human') });
+  const r = await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential now' } });
+  assert.ok(!r.data.moves.some(m => m.to === 'sedona_bot'));
+  assert.ok(r.data.moves.some(m => m.to === 'linus'));
+});
+test('local-store message records fold into thread summaries', () => {
+  const recs = [
+    { from: 'linus', to: 'ada', body: 'did it land?', timestamp: NOW - 1000 },
+    { from: 'ada', to: 'linus', body: 'almost', timestamp: NOW - 500 },
+    { from: 'grace', to: 'ada', body: 'ping', timestamp: NOW },
+  ];
+  const t = moves.normalizeThreads(recs, 'ada');
+  const g = t.find(x => x.handle === 'grace'); const l = t.find(x => x.handle === 'linus');
+  assert.equal(g.lastFrom, 'grace'); assert.equal(g.lastMessage, 'ping');
+  assert.equal(l.lastFrom, 'ada');
+});
+test('a binding-save failure does not suppress a confirmed send receipt', async () => {
+  stub(QUIET);
+  fs.mkdirSync(moves.BINDINGS_FILE, { recursive: true }); // a directory where the file should be
+  try {
+    const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'receipt first' });
+    const r = await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+    assert.match(r.display, /Sent to \*\*@linus\*\*/);
+    assert.match(r.display, /could not save the local return note/);
+    assert.equal(sends.length, 1);
+  } finally { fs.rmSync(moves.BINDINGS_FILE, { recursive: true, force: true }); }
+});
+test('the wire origin of a draft send is one the platform classifies', async () => {
+  stub(QUIET);
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'origin' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  assert.equal(sends[0].opts.origin, 'composed');
 });

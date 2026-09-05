@@ -210,7 +210,27 @@ function draftFor(kind, ctx) {
 }
 
 /** Build up to three moves from evidence. Returns { moves } or { ask }. Pure; never sends. */
-function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown = true } = {}) {
+/**
+ * The local store (VIBE_LOCAL=true) serves message records, not thread
+ * summaries. Fold them into the summary shape computeMoves reads.
+ */
+function normalizeThreads(list, me) {
+  if (!Array.isArray(list)) return [];
+  if (list.every(t => t && typeof t === 'object' && 'handle' in t)) return list;
+  const byPeer = new Map();
+  for (const m of list) {
+    if (!m || typeof m !== 'object') continue;
+    const peer = m.from === me ? m.to : m.from;
+    if (!peer) continue;
+    const ts = typeof m.timestamp === 'number' ? m.timestamp : (m.created_at ? new Date(m.created_at).getTime() : 0);
+    const cur = byPeer.get(peer);
+    if (!cur || ts >= cur.lastTimestamp) byPeer.set(peer, { handle: peer, lastFrom: m.from, lastMessage: m.body, lastTimestamp: ts, unread: cur ? cur.unread : 0, isAgent: m.isAgent });
+    if (m.from !== me && !m.read) byPeer.get(peer).unread += 1;
+  }
+  return [...byPeer.values()];
+}
+
+function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown = true, actorKinds = null } = {}) {
   const hasContext = Boolean(ctx.result || ctx.question || ctx.blocker || ctx.doing);
   if (!hasContext) {
     return { ask: "What are you working on right now, in one line — and is there a result to share or a question to ask? (I'll only suggest people I can name a reason for.)" };
@@ -219,6 +239,7 @@ function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown 
   const people = (roster || []).filter(u => u && u.handle && u.handle !== me && !u.isAgent);
   const byHandle = new Map(people.map(u => [u.handle, u]));
   const knownAgents = new Set((roster || []).filter(u => u && u.handle && u.isAgent).map(u => u.handle));
+  if (actorKinds) for (const [h, k] of actorKinds) if (k && k !== 'human') knownAgents.add(h);
   const candidates = [];
 
   // Evidence A: an open thread where THEY wrote last — someone waiting on you
@@ -315,12 +336,19 @@ async function movesHandler(args) {
   // no people. That is "unknown", not "nobody".
   const rosterKnown = Boolean(rosterRead.ok && !(rosterRead.users && rosterRead.users.anonymous));
   const roster = rosterKnown ? rosterRead.users : [];
-  const threads = inboxRead.ok ? inboxRead.threads : [];
+  const threads = normalizeThreads(inboxRead.ok ? inboxRead.threads : [], me);
+  // Thread evidence needs actor attribution the thread list does not carry:
+  // ask the served identity for each candidate peer (bounded, cached).
+  const actorKinds = new Map();
+  if (typeof store.getIdentityKind === 'function') {
+    const peers = [...new Set(threads.filter(t => t && t.handle && t.lastFrom && t.lastFrom !== me).map(t => t.handle))].slice(0, 8);
+    await Promise.all(peers.map(async h => { try { actorKinds.set(h, await store.getIdentityKind(h)); } catch { actorKinds.set(h, null); } }));
+  }
   const evidenceNote = (!rosterKnown || !inboxRead.ok)
     ? `\n_(could not read ${[!rosterKnown && 'who is around', !inboxRead.ok && 'your inbox'].filter(Boolean).join(' or ')} — suggestions above use only what was readable)_`
     : '';
 
-  const out = computeMoves(ctx, me, roster, threads, Date.now(), { rosterKnown });
+  const out = computeMoves(ctx, me, roster, threads, Date.now(), { rosterKnown, actorKinds });
   if (out.ask) return { display: out.ask + evidenceNote, data: { ask: out.ask, moves: [] } };
 
   // Write the drafts locally so that a later "select" is a state change on
@@ -543,7 +571,13 @@ async function sendHandler(args) {
     if (sent) { cur.sentAt = sentAt; cur.messageId = outcome.message_id || null; }
   });
   if (sent) {
-    withBindings(b => { b[s.to] = { from: me, project: s.context && s.context.project ? s.context.project : null, draftId: s.id, kind: s.kind, sentAt, messageId: outcome.message_id || null, firstLine: (s.body || '').split('\n')[0].slice(0, 80) }; });
+    // The receipt is the fact; the binding is a convenience. A failure to
+    // save it must never turn a confirmed delivery into an error (codex P2).
+    try {
+      withBindings(b => { b[s.to] = { from: me, project: s.context && s.context.project ? s.context.project : null, draftId: s.id, kind: s.kind, sentAt, messageId: outcome.message_id || null, firstLine: (s.body || '').split('\n')[0].slice(0, 80) }; });
+    } catch (e) {
+      result = { ...result, display: `${result.display}\n\n_(sent; could not save the local return note: ${e && e.message ? e.message : 'unknown'} — the reply will not be labeled with this work)_` };
+    }
   } else if (!definite && result && typeof result.display === 'string') {
     result = { ...result, display: `${result.display}\n\n_Draft ${s.id} is kept as unconfirmed: Send again retries exactly this text (delivers once), or Cancel._` };
   }
@@ -557,5 +591,5 @@ module.exports = {
   vibe_discard_draft: { definition: discardDefinition, handler: discardHandler },
   vibe_send_draft: { definition: sendDefinition, handler: sendHandler },
   // exported for tests and for vibe_inbox / vibe_dm
-  computeMoves, cleanContext, getReturnBinding, clearReturnBinding, loadDrafts, transact, DRAFTS_FILE, BINDINGS_FILE,
+  computeMoves, cleanContext, normalizeThreads, getReturnBinding, clearReturnBinding, loadDrafts, transact, DRAFTS_FILE, BINDINGS_FILE,
 };

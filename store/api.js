@@ -1475,7 +1475,29 @@ async function getPeople() {
   }
 }
 
+/**
+ * Who a handle IS, from the served identity (#384: seven public fields, no
+ * credentials). Drafting tools use `kind` so an agent that wrote you is
+ * never suggested as a person — the thread list does not carry actor
+ * metadata yet. Returns 'human' | 'agent' | 'automated' | null (unknown).
+ */
+const identityKindCache = new Map();
+async function getIdentityKind(handle) {
+  const h = String(handle || '').replace(/^@+/, '').toLowerCase();
+  if (!h) return null;
+  if (identityKindCache.has(h)) return identityKindCache.get(h);
+  let kind = null;
+  try {
+    const r = await request('GET', `/api/identity/${encodeURIComponent(h)}`);
+    const k = r && (r.kind || (r.identity && r.identity.kind) || (r.data && r.data.kind));
+    if (k === 'human' || k === 'agent' || k === 'automated') kind = k;
+  } catch (e) { kind = null; }
+  identityKindCache.set(h, kind);
+  return kind;
+}
+
 module.exports = {
+  getIdentityKind,
   setNotificationPace,
   // People (opt-in discovery)
   setListed,
