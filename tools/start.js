@@ -302,7 +302,16 @@ async function handler(args) {
     display += '\n';
     unreadSenders.slice(0, 5).forEach((t) => {
       const id = t.lastMessageId ? ` · #${cell(t.lastMessageId, 40)}` : '';
-      display += `\n@${cell(t.handle, 39)} (${t.unread})${id}`;
+      // A reply to what you sent from a piece of work is news beside that
+      // work (private binding; verified only when their message carries
+      // reply_to = the id you sent).
+      let back = '';
+      try {
+        const { getReturnBinding } = require('./moves');
+        const b = getReturnBinding(t.handle);
+        if (b && t.lastTimestamp && t.lastTimestamp > b.sentAt) back = ` · ↩ ${b.messageId && t.lastReplyTo === b.messageId ? 'reply to' : 'after'} what you sent${b.project ? ` from ${b.project}` : ''}`;
+      } catch {}
+      display += `\n@${cell(t.handle, 39)} (${t.unread})${id}${back}`;
     });
     if (unreadSenders.length > 5) {
       display += `\n_+${unreadSenders.length - 5} more_`;

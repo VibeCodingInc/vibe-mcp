@@ -342,10 +342,18 @@ function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown 
         continue;
       }
       const kind = ctx.result ? 'answer' : (ctx.question || ctx.blocker) ? 'ask' : 'update';
+      const ago = ageH != null ? ` ${ageH < 1 ? 'under an hour' : Math.round(ageH) + 'h'} ago` : '';
       candidates.push({
-        kind, to: t.handle,
-        why: `they wrote you${ageH != null ? ` ${ageH < 1 ? 'under an hour' : Math.round(ageH) + 'h'} ago` : ''} (their words): ${theirWords(t.lastMessage)}`,
-        score: 6 + (ageH != null && ageH < 24 ? 1 : 0),
+        kind, to: t.handle, source: 'they wrote you',
+        hook: inertField(String(t.lastMessage), 160),
+        why: `they wrote you${ago} (their words): ${theirWords(t.lastMessage)}`,
+        why_now: kind === 'answer'
+          ? `You've got what @${t.handle} asked about${ago} — answer them with it.`
+          : `@${t.handle} wrote you${ago} about this — a good moment to ${kind === 'ask' ? 'ask them' : 'say where you are'}.`,
+        replyTo: t.lastMessageId || null,
+        // Relevance first: their message is ABOUT this work. Recency and
+        // presence are tiebreakers, never the reason.
+        score: 6 + Math.min(3, overlap(ctxTok, tokens(String(t.lastMessage))).length) + (ageH != null && ageH < 24 ? 0.5 : 0),
       });
     }
   }
@@ -363,11 +371,16 @@ function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown 
     const ovD = overlap(tokens(`${ctx.project || ''} ${ctx.doing || ''}`), line);
     if (!ovQ.length && !ovR.length && !ovD.length) continue;
     const here = isHereNow(u);
-    const why = (ov) => `their one-liner (their words): ${theirWords(personLine(u))} — overlap: ${ov.slice(0, 3).join(', ')}${here ? ' · here now' : ''}`;
-    if ((ctx.question || ctx.blocker) && ovQ.length) candidates.push({ kind: 'ask', to: u.handle, why: why(ovQ), score: 2 + ovQ.length + (here ? 1 : 0) });
-    if (ctx.result && ovR.length) candidates.push({ kind: 'feedback', to: u.handle, why: why(ovR), score: 1 + ovR.length + (here ? 1 : 0) });
-    if (ctx.result && ovR.length) candidates.push({ kind: 'share', to: u.handle, why: why(ovR), score: 1 + ovR.length + (here ? 1 : 0) - 0.5 });
-    if (!ctx.result && !ctx.question && !ctx.blocker && ctx.doing && ovD.length) candidates.push({ kind: 'update', to: u.handle, why: why(ovD), score: 1 + ovD.length + (here ? 1 : 0) });
+    const pl = personLine(u);
+    const src = u._source || 'one-liner';
+    const why = (ov) => `their ${src} (their words): ${theirWords(pl)} — overlap: ${ov.slice(0, 3).join(', ')}${here ? ' · here now' : ''}`;
+    const whyNow = (ov, verb) => `@${u.handle} ${src === 'listing' ? 'listed' : 'says they\'re on'} ${theirWords(pl, 60)} — ${verb} about ${ov.slice(0, 2).join(' and ')}.`;
+    const base = (ov) => 2 + Math.min(3, ov.length) + (here ? 0.5 : 0); // presence is a tiebreaker
+    const mk = (kind, ov, verb, adj = 0) => ({ kind, to: u.handle, source: src, hook: inertField(pl, 160), why: why(ov), why_now: whyNow(ov, verb), replyTo: null, score: base(ov) + adj });
+    if ((ctx.question || ctx.blocker) && ovQ.length) candidates.push(mk('ask', ovQ, 'worth asking them'));
+    if (ctx.result && ovR.length) candidates.push(mk('feedback', ovR, 'worth their eyes', -0.5));
+    if (ctx.result && ovR.length) candidates.push(mk('share', ovR, 'worth telling them', -1));
+    if (!ctx.result && !ctx.question && !ctx.blocker && ctx.doing && ovD.length) candidates.push(mk('update', ovD, 'worth a line to them', -0.5));
   }
 
   const note = unanswered.length
@@ -389,9 +402,9 @@ function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown 
     used.add(c.to);
     const person = byHandle.get(c.to) || { handle: c.to };
     const body = draftFor(c.kind, ctx);
-    moves.push({ kind: c.kind, to: c.to, why: c.why, body, refs: ctx.refs, message: body + refLines(ctx.refs), here: isHereNow(person) });
+    moves.push({ kind: c.kind, to: c.to, source: c.source, hook: c.hook, why: c.why, why_now: c.why_now, replyTo: c.replyTo || null, body, refs: ctx.refs, message: body + refLines(ctx.refs), here: isHereNow(person), strength: c.score });
   }
-  return { moves, note };
+  return { moves, note, primary: moves[0], alternatives: moves.slice(1) };
 }
 
 const KIND_LABEL = { ask: 'ask a question', share: 'share the result', feedback: 'request feedback', answer: 'answer with the result', update: 'say where you are' };
@@ -438,7 +451,20 @@ async function movesHandler(args) {
   // A signed-out read comes back ok:true with users.anonymous — counts only,
   // no people. That is "unknown", not "nobody".
   const rosterKnown = Boolean(rosterRead.ok && !(rosterRead.users && rosterRead.users.anonymous));
-  const roster = rosterKnown ? rosterRead.users : [];
+  let roster = rosterKnown ? rosterRead.users.slice() : [];
+  // What people CHOSE to share: the opt-in directory (vibe_people). A listed
+  // person is relevant by their own words even when they are offline — a
+  // green dot is not relevance, and its absence is not irrelevance.
+  try {
+    const dir = typeof store.getDirectoryResult === 'function' ? await store.getDirectoryResult() : (typeof store.getDirectory === 'function' ? await store.getDirectory() : null);
+    const listings = dir && dir.ok !== false && Array.isArray(dir.listings) ? dir.listings : [];
+    const seen = new Set(roster.map(u => u && u.handle));
+    for (const l of listings) {
+      if (!l || !l.handle || !l.building) continue;
+      if (seen.has(l.handle)) { const u = roster.find(x => x && x.handle === l.handle); if (u && !personLine(u)) u.one_liner = String(l.building); continue; }
+      roster.push({ handle: l.handle, one_liner: String(l.building), isAgent: l.kind === 'agent' || l.isAgent === true, status: 'offline', lastSeen: null, _source: 'listing' });
+    }
+  } catch {}
   const threads = normalizeThreads(inboxRead.ok ? inboxRead.threads : [], me);
   // Thread evidence needs actor attribution the thread list does not carry:
   // ask the served identity for each candidate peer (bounded, cached).
@@ -451,14 +477,29 @@ async function movesHandler(args) {
     ? `\n_(could not read ${[!rosterKnown && 'who is around', !inboxRead.ok && 'your inbox'].filter(Boolean).join(' or ')} — suggestions above use only what was readable)_`
     : '';
 
+  // Replies to what you sent FROM this work come back beside it — with the
+  // work named, so nobody carries context. Verified when their newest
+  // message carries reply_to = the id we sent; otherwise labeled as newer
+  // than what you sent. Returning a reply authorizes nothing.
+  const replies = [];
+  for (const t of threads) {
+    if (!t || !t.handle || t.lastFrom !== t.handle) continue;
+    const b = getReturnBinding(t.handle);
+    if (!b || !t.lastTimestamp || t.lastTimestamp <= b.sentAt) continue;
+    const verified = Boolean(b.messageId && t.lastReplyTo && t.lastReplyTo === b.messageId);
+    replies.push({ from: t.handle, project: b.project || null, you_wrote: b.firstLine || '', their_words: inertField(String(t.lastMessage || ''), 200), verified, message_id: t.lastMessageId || null });
+  }
+  const replyLines = replies.slice(0, 3).map(r => `↩ @${r.from} ${r.verified ? 'replied to' : 'wrote after'} what you sent${r.project ? ` from **${r.project}**` : ''} ("${inertField(r.you_wrote, 60)}"): "${r.their_words}"`);
+  const replyBlock = replyLines.length ? `${replyLines.join('\n')}\n_(a reply is news beside the work — suggest one next step; do nothing until asked)_\n\n` : '';
+
   const out = computeMoves(ctx, me, roster, threads, Date.now(), { rosterKnown, actorKinds });
-  if (out.ask) return { display: `No useful move from this work right now. ${out.ask}${evidenceNote}`, data: { ask: out.ask, moves: [] } };
+  if (out.ask) return { display: `${replyBlock}No useful move from this work right now. ${out.ask}${evidenceNote}`, data: { ask: out.ask, moves: [], replies } };
 
   // Write the drafts locally so that a later "select" is a state change on
   // disk and never a send. Earlier unselected suggestions are replaced.
   const moves = out.moves.map((m, i) => ({
     id: newId(`m${i + 1}-`), status: 'suggested', createdAt: Date.now(), from: me, flow: FLOW,
-    kind: m.kind, to: m.to, why: m.why, body: m.body, refs: m.refs,
+    kind: m.kind, to: m.to, source: m.source, hook: m.hook, why: m.why, why_now: m.why_now, replyTo: m.replyTo || null, body: m.body, refs: m.refs,
     context: { project: ctx.project || null },
   }));
   transact(drafts => {
@@ -466,13 +507,16 @@ async function movesHandler(args) {
     drafts.push(...moves);
   });
 
-  const lines = moves.map((m, i) => { const text = compose(m); return `${i + 1}. **${KIND_LABEL[m.kind] || m.kind}** → @${m.to}${out.moves[i].here ? ' (here now)' : ''}\n   why: ${m.why}\n   draft: "${text.split('\n')[0].slice(0, 120)}${text.length > 120 || text.includes('\n') ? '…' : ''}"  _(id ${m.id})_`; });
-  const display = `${moves.length === 1 ? 'One candidate' : `${moves.length} candidates`} from what you're doing${ctx.project ? ` on ${ctx.project}` : ''} — these are suggestions, nothing is drafted or sent:\n\n${lines.join('\n\n')}\n\nChoosing one OPENS A DRAFT to review; it does not send. Drop any that look wrong, or say not now.${out.note ? `\n\n${out.note}` : ''}${evidenceNote}`;
+  const line = (m, i) => `${i === 0 ? '**Strongest:**' : `${i + 1}.`} ${KIND_LABEL[m.kind] || m.kind} → @${m.to}${out.moves[i].here ? ' (here now)' : ''}\n   why now: ${m.why_now}\n   they said: "${m.hook}"${m.replyTo ? `\n   answers: #${m.replyTo}` : ''}  _(id ${m.id})_`;
+  const display = `${replyBlock}${moves.length === 1 ? 'One move' : `One strong move (${moves.length - 1} alternative${moves.length > 2 ? 's' : ''} if wanted)`} from what you're doing${ctx.project ? ` on ${ctx.project}` : ''} — a suggestion, nothing drafted or sent:\n\n${moves.map(line).join('\n\n')}\n\nWrite the message yourself — one to three sentences that respond to what they said — then open it with vibe_draft (id + your text). Choosing opens a draft; it does not send.${out.note ? `\n\n${out.note}` : ''}${evidenceNote}`;
   return {
     display,
     data: {
-      moves: moves.map(m => ({ id: m.id, kind: m.kind, label: `${KIND_LABEL[m.kind] || m.kind} → @${m.to}`, to: m.to, why: m.why, message: compose(m) })),
-      host_instructions: 'These are CANDIDATES. Judge them: drop any whose recipient is wrong, whose draft does not address that person, or who you know is a test/QA account — never present a candidate you have recognized as a mismatch. Present the survivors as choices titled "Open a draft?" (never "Send"); choosing one calls vibe_draft with its id and only opens the preview. Zero survivors is a valid answer: say there is no useful move from this work. Nothing is sent until vibe_send_draft.',
+      primary: moves[0] ? { id: moves[0].id, kind: moves[0].kind, to: moves[0].to, why_now: moves[0].why_now, hook: moves[0].hook, reply_to: moves[0].replyTo || null, fallback_message: compose(moves[0]) } : null,
+      alternatives: moves.slice(1).map(m => ({ id: m.id, kind: m.kind, to: m.to, why_now: m.why_now, hook: m.hook, reply_to: m.replyTo || null, fallback_message: compose(m) })),
+      moves: moves.map(m => ({ id: m.id, kind: m.kind, label: `${KIND_LABEL[m.kind] || m.kind} → @${m.to}`, to: m.to, why: m.why, why_now: m.why_now, hook: m.hook, reply_to: m.replyTo || null, message: compose(m) })),
+      replies,
+      host_instructions: 'One strong move, alternatives only if wanted. Judge it first — drop it if the recipient is wrong, if the draft would not respond to what they said, or if you know the handle is a test/QA account; a recognized mismatch is suppressed, never shown with a warning. YOU write the message: one to three specific sentences that respond to `hook` from the work in this session — never a summary of the session, never invented. Open it with vibe_draft {id, message, reply_to} (reply_to as given); that opens the preview only. Show the person: recipient, why now, the exact message. Then Send / Edit / Not now. Zero moves is a valid answer.',
     },
   };
 }
@@ -489,6 +533,7 @@ const draftDefinition = {
       handle: { type: 'string', description: 'Recipient, for a free-written draft' },
       message: { type: 'string', description: 'Message text (free-written, or the edited text for an existing draft)' },
       refs: { type: 'array', description: 'Links to attach', items: { type: 'object', properties: { title: { type: 'string' }, url: { type: 'string' } } } },
+      reply_to: { type: 'string', description: 'The id of their message this answers (vibe_moves gives it as reply_to) — makes the reply verifiable on their side' },
     },
   },
 };
@@ -498,7 +543,7 @@ function preview(d, person) {
   const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
   const message = compose(d);
   const rev = revOf(d);
-  const head = `**To:** @${d.to} (${where})\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n\n`;
+  const head = `**To:** @${d.to} (${where})${d.why_now ? `\n**Why now:** ${d.why_now}` : ''}\n**Message (exact):**\n${message}\n**Attachments:** ${att}${d.replyTo ? `\n**Answers:** #${d.replyTo}` : ''}\n\n`;
   if (d.status === 'unknown') {
     // The earlier Send did not confirm: it may already have reached them.
     // Only the two honest actions exist (codex P2).
@@ -541,7 +586,7 @@ async function draftHandler(args) {
       // An approval-bound send targets a durable conversation; the live
       // session route stores nothing and the platform refuses it (CB-007).
       if (to.endsWith('/claude')) return { display: `Drafts go to a person's durable conversation, not a live session — use @${to.replace(/\/claude$/, '')} instead. Nothing drafted.` };
-      d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), from: me, flow: FLOW, kind: 'free', to, why: 'you named them', body: message, refs: cleanContext({ refs: args.refs }).refs, context: { project: null } };
+      d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), from: me, flow: FLOW, kind: 'free', to, why: 'you named them', body: message, refs: cleanContext({ refs: args.refs }).refs, replyTo: typeof args.reply_to === 'string' && args.reply_to ? args.reply_to : null, context: { project: null } };
       drafts.push(d);
     } else {
       // A finished draft stays finished; an unconfirmed one may only be
@@ -563,6 +608,7 @@ async function draftHandler(args) {
           d.edited = true;
         }
         if (args.refs) { d.refs = cleanContext({ refs: args.refs }).refs; }
+        if (typeof args.reply_to === 'string') d.replyTo = args.reply_to || null;
         d.status = 'previewed';
       }
     }
@@ -647,7 +693,7 @@ async function sendHandler(args) {
     d.idempotencyKey = sendKey(d);
     const message = compose(d).trim();
     d.approvedSha256 = approvedDigest(d.to, message);
-    return { snapshot: { id: d.id, to: d.to, kind: d.kind, body: d.body, refs: d.refs, context: d.context, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256 } };
+    return { snapshot: { id: d.id, to: d.to, kind: d.kind, body: d.body, refs: d.refs, context: d.context, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, replyTo: d.replyTo || null } };
   });
   if (claim.display) return claim;
   const s = claim.snapshot;
@@ -656,7 +702,7 @@ async function sendHandler(args) {
   let result;
   try {
     const dm = require('./dm');
-    result = await dm.handler({ handle: s.to, message: s.message, origin: 'context_move', idempotency_key: s.key, approved_sha256: s.approvedSha256 });
+    result = await dm.handler({ handle: s.to, message: s.message, origin: 'context_move', idempotency_key: s.key, approved_sha256: s.approvedSha256, reply_to: s.replyTo || undefined });
   } catch (e) {
     result = { display: `That didn't send — ${e && e.message ? e.message : 'unknown error'}. Nothing confirmed; the draft is still here.`, data: { sent: false, definite: false } };
   }
