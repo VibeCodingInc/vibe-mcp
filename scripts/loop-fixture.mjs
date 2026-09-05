@@ -4,6 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 export const LIVE_API = 'https://www.slashvibe.dev';
+export function assertRunning(stopping) {
+  if (stopping) throw new Error('Loop fixture is shutting down; no new work');
+}
 export function validatePair(a, b, api) {
   if (api !== LIVE_API || a.handle !== 'vibecanary' || b.handle !== 'vibecanary2') {
     throw new Error('Only the dedicated canary pair at the canonical production origin is allowed');

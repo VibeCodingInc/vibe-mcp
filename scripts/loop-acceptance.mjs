@@ -19,7 +19,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validatePair, redactor, mintSession, signedInHome, childEnvironment, childCloser, cleanHomes } from './loop-fixture.mjs';
+import { assertRunning, validatePair, redactor, mintSession, signedInHome, childEnvironment, childCloser, cleanHomes } from './loop-fixture.mjs';
 
 const VERSION = process.argv[2] || 'local';
 const API = process.env.VIBE_API_URL || 'https://www.slashvibe.dev';
@@ -41,12 +41,13 @@ function need(k) { const v = process.env[k]; if (!v) { console.error(`missing ${
 
 /** One MCP session over stdio. */
 function session(side, home) {
+  assertRunning(shuttingDown);
   const child = spawn(process.execPath, [path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'index.js')], { env: childEnvironment(home), stdio: ['pipe', 'pipe', 'pipe'] });
   let buf = ''; const waiters = new Map(); let nextId = 1;
   child.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); try { const o = JSON.parse(line); if (o.id && waiters.has(o.id)) { waiters.get(o.id)(o); waiters.delete(o.id); } } catch {} } });
   child.stderr.on('data', () => {});
   child.on('error', () => {}); // RPC timeout is the bounded failure; never echo spawn env.
-  const rpc = (method, params) => new Promise((resolve, reject) => { const id = nextId++; const timer = setTimeout(() => { if (waiters.has(id)) { waiters.delete(id); reject(new Error(`timeout: ${method}`)); } }, 60000); waiters.set(id, value => { clearTimeout(timer); resolve(value); }); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
+  const rpc = (method, params) => new Promise((resolve, reject) => { assertRunning(shuttingDown); const id = nextId++; const timer = setTimeout(() => { if (waiters.has(id)) { waiters.delete(id); reject(new Error(`timeout: ${method}`)); } }, 60000); waiters.set(id, value => { clearTimeout(timer); resolve(value); }); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
   const call = async (name, args) => { const r = await rpc('tools/call', { name, arguments: args }); const text = (r.result && r.result.content || []).map(c => c.text || '').join('\n'); let data = null; try { data = r.result && r.result.structuredContent ? r.result.structuredContent : null; } catch {} return { text, data, raw: r }; };
   const instance = { side, child, async init() { await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'loop-acceptance', version: '0' } }); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n'); }, call, close: childCloser(child, () => sessions.delete(instance)) };
   sessions.add(instance);

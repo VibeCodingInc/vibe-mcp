@@ -126,3 +126,23 @@ test('live runner only launches a pinned local checkout, not an npx process tree
   assert.match(text, /spawn\(process\.execPath/);
   assert.doesNotMatch(text, /\['npx',/);
 });
+
+test('shutdown during a leg close forbids the next leg before cleanup proceeds', async () => {
+  const { EventEmitter } = require('node:events');
+  const { childCloser, assertRunning } = await fixture;
+  const child = new EventEmitter();
+  Object.assign(child, { pid: 123, exitCode: null, signalCode: null, stdin: { end() {} }, kill() {} });
+  const close = childCloser(child, () => {});
+  let stopping = false, nextSpawned = false;
+  // main registers its continuation first, as in the reproduced shutdown race.
+  const main = (async () => { await close(); assertRunning(stopping); nextSpawned = true; })();
+  const rejected = assert.rejects(main, /shutting down/);
+  stopping = true;
+  const shutdown = close();
+  child.emit('close');
+  await Promise.all([shutdown, rejected]);
+  assert.equal(nextSpawned, false);
+  const text = fs.readFileSync(path.join(__dirname, '../scripts/loop-acceptance.mjs'), 'utf8');
+  assert.match(text, /function session\(side, home\) \{\s*assertRunning\(shuttingDown\)/);
+  assert.match(text, /const rpc = .*assertRunning\(shuttingDown\)/);
+});
