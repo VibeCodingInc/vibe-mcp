@@ -608,11 +608,11 @@ test('a domain one-liner meets the plain word: "automata.art" ↔ "automata"', (
   const a = (out.moves || []).find(m => m.to === 'ameesia');
   assert.ok(a, 'ameesia is offered'); assert.equal(a.kind, 'ask'); assert.match(a.why, /automata/);
 });
-test('someone who just wrote you, off-topic, is still a fair person to ASK when you have a question', () => {
+test('someone who just wrote you, off-topic, is reported as waiting — never proposed as a recipient for this work', () => {
   const threads = [{ handle: 'tester', unread: 1, lastFrom: 'tester', lastMessage: 'lunch?', lastTimestamp: NOW - 30 * 60000 }];
   const out = moves.computeMoves(moves.cleanContext({ project: 'paris photo', question: 'who has done a booth wall with themed photo-worlds?' }), 'ada', ROSTER, threads, NOW);
-  const t = (out.moves || []).find(m => m.to === 'tester');
-  assert.ok(t); assert.equal(t.kind, 'ask'); assert.match(t.why, /not about this work/);
+  assert.ok(!(out.moves || []).some(m => m.to === 'tester'));
+  assert.match(out.ask || out.note || '', /@tester asked "lunch\?"/);
 });
 
 test('a /claude session route is refused as a draft recipient (CB-007)', async () => {
@@ -636,4 +636,18 @@ test('zero useful moves is a valid answer and says so; the chooser step is frame
   assert.match(some.display, /OPENS A DRAFT to review; it does not send/);
   assert.match(some.data.host_instructions, /never present a candidate you have recognized as a mismatch/);
   assert.match(some.data.host_instructions, /"Open a draft\?" \(never "Send"\)/);
+});
+
+test('the screenshot scenario, exactly: one useful candidate, no non-sequitur, no feedback draft of an unrelated result', () => {
+  const roster = [
+    { handle: 'amee_fixture', one_liner: 'Digital art platform automata.art', status: 'active', lastSeen: NOW },
+    { handle: 'zed_fixture', one_liner: 'MicroSaaS for common pains', status: 'active', lastSeen: NOW },
+    { handle: 'peer_x', one_liner: '', status: 'away', lastSeen: NOW - 40 * 60000 },
+  ];
+  const threads = [{ handle: 'peer_x', unread: 1, lastFrom: 'peer_x', lastMessage: 'quick one: does the drafts lock in moves.js survive a crash mid-send, or can two sessions end up sending the same draft?', lastTimestamp: NOW - 30 * 60000 }];
+  const ctx = moves.cleanContext({ project: 'vibeconf', result: "answered Leo's vibeconferencing question: it takes any openai-compatible url; three keys in config.json; proposed a standing weekly pair slot", blocker: 'the Paris Photo booth wall concept — themed photo-worlds and automata; who in the room might have real input?' });
+  const out = moves.computeMoves(ctx, 'ada', roster, threads, NOW);
+  assert.equal(out.moves.length, 1, JSON.stringify(out.moves.map(m => [m.kind, m.to])));
+  assert.equal(out.moves[0].to, 'amee_fixture'); assert.equal(out.moves[0].kind, 'ask');
+  assert.match(out.note, /@peer_x asked "quick one: does the drafts lock/);
 });

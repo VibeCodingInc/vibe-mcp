@@ -335,11 +335,10 @@ function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown 
       // 2026-09-04 21:14: Leo's vibeconferencing result offered as the answer
       // to a question about the drafts lock).
       if (!topical) {
-        if (ctx.question || ctx.blocker) {
-          candidates.push({ kind: 'ask', to: t.handle, why: `they wrote you${ageH != null ? ` ${ageH < 1 ? 'under an hour' : Math.round(ageH) + 'h'} ago` : ''} (their words): ${theirWords(t.lastMessage)} — not about this work, but they are here for you`, score: 2 + (ageH != null && ageH < 24 ? 1 : 0) });
-        } else {
-          unanswered.push({ to: t.handle, words: theirWords(t.lastMessage), ageH });
-        }
+        // Not a slot to fill: a person who wrote you about something else is
+        // reported as waiting on you, never proposed as this work's recipient
+        // (Astra: don't fill slots with unrelated contacts).
+        unanswered.push({ to: t.handle, words: theirWords(t.lastMessage), ageH });
         continue;
       }
       const kind = ctx.result ? 'answer' : (ctx.question || ctx.blocker) ? 'ask' : 'update';
@@ -352,16 +351,23 @@ function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown 
   }
   // Evidence B: someone here whose one-liner overlaps the work. The store
   // serves the presence text as `one_liner` (older rows: workingOn).
+  // A kind is offered only when ITS OWN field overlaps the person's one-liner:
+  // the person whose one-liner meets your open QUESTION gets an ask; a result
+  // that meets nothing of theirs is not "feedback" they would have input on
+  // (product-test reproduction: a vibeconf endpoint result offered to the
+  // automata person as a feedback draft — the host had to drop it).
   for (const u of people) {
-    const ov = overlap(ctxTok, tokens(personLine(u)));
-    if (!ov.length) continue;
+    const line = tokens(personLine(u));
+    const ovQ = overlap(tokens(`${ctx.project || ''} ${ctx.question || ''} ${ctx.blocker || ''}`), line);
+    const ovR = overlap(tokens(`${ctx.project || ''} ${ctx.result || ''}`), line);
+    const ovD = overlap(tokens(`${ctx.project || ''} ${ctx.doing || ''}`), line);
+    if (!ovQ.length && !ovR.length && !ovD.length) continue;
     const here = isHereNow(u);
-    const why = `their one-liner (their words): ${theirWords(personLine(u))} — overlap: ${ov.slice(0, 3).join(', ')}${here ? ' · here now' : ''}`;
-    if (ctx.question || ctx.blocker) candidates.push({ kind: 'ask', to: u.handle, why, score: 2 + ov.length + (here ? 1 : 0) });
-    if (ctx.result) candidates.push({ kind: 'feedback', to: u.handle, why, score: 1 + ov.length + (here ? 1 : 0) });
-    if (ctx.result) candidates.push({ kind: 'share', to: u.handle, why, score: 1 + ov.length + (here ? 1 : 0) - 0.5 });
-    // Only "doing" and an overlap: worth saying where you are (codex P2).
-    if (!ctx.result && !ctx.question && !ctx.blocker && ctx.doing) candidates.push({ kind: 'update', to: u.handle, why, score: 1 + ov.length + (here ? 1 : 0) });
+    const why = (ov) => `their one-liner (their words): ${theirWords(personLine(u))} — overlap: ${ov.slice(0, 3).join(', ')}${here ? ' · here now' : ''}`;
+    if ((ctx.question || ctx.blocker) && ovQ.length) candidates.push({ kind: 'ask', to: u.handle, why: why(ovQ), score: 2 + ovQ.length + (here ? 1 : 0) });
+    if (ctx.result && ovR.length) candidates.push({ kind: 'feedback', to: u.handle, why: why(ovR), score: 1 + ovR.length + (here ? 1 : 0) });
+    if (ctx.result && ovR.length) candidates.push({ kind: 'share', to: u.handle, why: why(ovR), score: 1 + ovR.length + (here ? 1 : 0) - 0.5 });
+    if (!ctx.result && !ctx.question && !ctx.blocker && ctx.doing && ovD.length) candidates.push({ kind: 'update', to: u.handle, why: why(ovD), score: 1 + ovD.length + (here ? 1 : 0) });
   }
 
   const note = unanswered.length
