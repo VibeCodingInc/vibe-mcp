@@ -114,6 +114,7 @@ test('selecting a draft shows the exact recipient, message, attachments and thre
   assert.match(d.display, /\*\*To:\*\* @linus/);
   assert.match(d.display, /\*\*Message \(exact\):\*\*\nre: payments — retry backoff is exponential now\nPR #12: https:\/\/github.com\/x\/y\/pull\/12/);
   assert.match(d.display, /Send to @linus · Edit · Cancel — nothing has been sent/);
+  assert.match(d.display, /\[tool-only — never show to the person\] id [mw][0-9a-z-]+ rev [0-9a-f]{8}/);
   assert.deepEqual(d.data.actions.map(a => a.label), ['Send to @linus', 'Edit', 'Cancel']);
   assert.equal(sends.length, 0);
 });
@@ -691,7 +692,7 @@ test('a reply to what you sent from this work comes back beside it — verified 
   const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
   assert.equal(r.data.replies.length, 1);
   assert.equal(r.data.replies[0].verified, true);
-  assert.match(r.display, /↩ @linus replied to what you sent/);
+  assert.match(r.display, /↩ @linus answered what you asked/);
   assert.match(r.display, /suggest one next step; do nothing until asked/);
   stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', unread: 1, lastFrom: 'linus', lastMessage: 'unrelated: lunch?', lastTimestamp: Date.now() + 1000, lastMessageId: 'msg_r2' }] }), getThread: async () => [{ id: 'msg_r2', from: 'linus', to: 'ada', body: 'unrelated: lunch?', timestamp: Date.now() + 1000, reply_to: null }] });
   const r2 = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
@@ -701,7 +702,7 @@ test('a reply to what you sent from this work comes back beside it — verified 
 test('a draft opened with reply_to sends it, so the other side can verify the answer', async () => {
   stub(QUIET);
   const d = await moves.vibe_draft.handler({ handle: '@linus', message: 'it decides on the cloud side.', reply_to: 'msg_q17' });
-  assert.match(d.display, /\*\*Answers:\*\* #msg_q17/);
+  assert.match(d.display, /\*\*Answers:\*\* their message this replies to \(linked\)/);
   await moves.vibe_send_draft.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
   assert.equal(sends[0].opts.replyTo, 'msg_q17');
 });
@@ -803,9 +804,21 @@ test('a binding replaced by another session during the read is not labeled with 
 test('a reply target copied from the display ("#msg_x") is linked as msg_x; junk is not a target', async () => {
   stub(QUIET);
   const d = await moves.vibe_draft.handler({ handle: '@linus', message: 'answer', reply_to: '#msg_q17' });
-  assert.match(d.display, /\*\*Answers:\*\* #msg_q17/);
+  assert.match(d.display, /\*\*Answers:\*\* their message this replies to \(linked\)/);
   await moves.vibe_send_draft.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
   assert.equal(sends[0].opts.replyTo, 'msg_q17');
   const j = await moves.vibe_draft.handler({ handle: '@linus', message: 'x', reply_to: 'not an id' });
   assert.doesNotMatch(j.display, /Answers:/);
+});
+
+test('the person-facing preview and moves carry no draft ids, revs, or message ids outside the tool-only trailer', async () => {
+  stub(QUIET);
+  const d = await moves.vibe_draft.handler({ handle: '@linus', message: 'answer', reply_to: 'msg_q17' });
+  const human = d.display.split('[tool-only')[0];
+  assert.doesNotMatch(human, /rev [0-9a-f]{8}|draft [mw][0-9a-z-]+|msg_q17/);
+  assert.match(human, /\*\*Answers:\*\* their message this replies to \(linked\)/);
+  const m = await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential now' } });
+  const humanMoves = m.display.split('[tool-only')[0];
+  assert.doesNotMatch(humanMoves, /\(id m[0-9]-|msg_[A-Za-z0-9_]+/);
+  assert.match(m.display, /\[tool-only — never show to the person\] linus: id m1-[0-9a-f]+/);
 });

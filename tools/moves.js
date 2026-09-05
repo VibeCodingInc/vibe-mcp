@@ -553,7 +553,7 @@ async function movesHandler(args) {
     if (!t.lastTimestamp || t.lastTimestamp <= b.sentAt) continue;
     replies.push({ from: t.handle, project: b.project || null, you_wrote: b.firstLine || '', their_words: inertField(String(t.lastMessage || ''), 200), verified: false, message_id: t.lastMessageId || null });
   }
-  const replyLines = replies.slice(0, 3).map(r => `↩ @${r.from} ${r.verified ? 'replied to' : 'wrote after'} what you sent${r.project ? ` from **${r.project}**` : ''} ("${inertField(r.you_wrote, 60)}"): "${r.their_words}"${r.partial ? ' _(more followed — read the thread for the latest)_' : ''}`);
+  const replyLines = replies.slice(0, 3).map(r => `↩ @${r.from} ${r.verified ? 'answered what you asked' : 'wrote after what you sent'}${r.project ? ` from **${r.project}**` : ''} ("${inertField(r.you_wrote, 60)}"): "${r.their_words}"${r.partial ? ' _(more followed — read the thread for the latest)_' : ''}`);
   const replyBlock = replyLines.length ? `${replyLines.join('\n')}\n_(a reply is news beside the work — suggest one next step; do nothing until asked)_\n\n` : '';
 
   const out = computeMoves(ctx, me, roster, threads, Date.now(), { rosterKnown, actorKinds });
@@ -571,8 +571,11 @@ async function movesHandler(args) {
     drafts.push(...moves);
   });
 
-  const line = (m, i) => `${i === 0 ? '**Strongest:**' : `${i + 1}.`} ${KIND_LABEL[m.kind] || m.kind} → @${m.to}${out.moves[i].here ? ' (here now)' : ''}\n   why now: ${m.why_now}\n   they said: "${m.hook}"${m.replyTo ? `\n   answers: #${m.replyTo}` : ''}  _(id ${m.id})_`;
-  const display = `${replyBlock}${moves.length === 1 ? 'One move' : `One strong move (${moves.length - 1} alternative${moves.length > 2 ? 's' : ''} if wanted)`} from what you're doing${ctx.project ? ` on ${ctx.project}` : ''} — a suggestion, nothing drafted or sent:\n\n${moves.map(line).join('\n\n')}\n\nWrite the message yourself — one to three sentences that respond to what they said — then open it with vibe_draft (id + your text). Choosing opens a draft; it does not send.${out.note ? `\n\n${out.note}` : ''}${evidenceNote}`;
+  const line = (m, i) => `${i === 0 ? '**Strongest:**' : `${i + 1}.`} ${KIND_LABEL[m.kind] || m.kind} → @${m.to}${out.moves[i].here ? ' (here now)' : ''}\n   why now: ${m.why_now}\n   they said: "${m.hook}"${m.replyTo ? '\n   (this would answer that message)' : ''}`;
+  // Identifiers the HOST needs for the next tool call, kept out of what the
+  // person is shown (Seth: hide internal ids and revisions).
+  const toolOnly = `\n\n[tool-only — never show to the person] ${moves.map(m => `${m.to}: id ${m.id}${m.replyTo ? ` reply_to ${m.replyTo}` : ''}`).join(' · ')}`;
+  const display = `${replyBlock}${moves.length === 1 ? 'One move' : `One strong move (${moves.length - 1} alternative${moves.length > 2 ? 's' : ''} if wanted)`} from what you're doing${ctx.project ? ` on ${ctx.project}` : ''} — a suggestion, nothing drafted or sent:\n\n${moves.map(line).join('\n\n')}\n\nWrite the message yourself — one to three sentences that respond to what they said — then open it with vibe_draft (id + your text). Choosing opens a draft; it does not send.${out.note ? `\n\n${out.note}` : ''}${evidenceNote}${toolOnly}`;
   return {
     display,
     data: {
@@ -607,17 +610,19 @@ function preview(d, person) {
   const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
   const message = compose(d);
   const rev = revOf(d);
-  const head = `**To:** @${d.to} (${where})${d.why_now ? `\n**Why now:** ${d.why_now}` : ''}\n**Message (exact):**\n${message}\n**Attachments:** ${att}${d.replyTo ? `\n**Answers:** #${d.replyTo}` : ''}\n\n`;
+  const head = `**To:** @${d.to} (${where})${d.why_now ? `\n**Why now:** ${d.why_now}` : ''}\n**Message (exact):**\n${message}\n**Attachments:** ${att}${d.replyTo ? `\n**Answers:** their message this replies to (linked)` : ''}\n\n`;
+  // The host needs id + rev for Send; the person never does.
+  const toolOnly = `\n\n[tool-only — never show to the person] id ${d.id} rev ${rev}`;
   if (d.status === 'unknown') {
     // The earlier Send did not confirm: it may already have reached them.
     // Only the two honest actions exist (codex P2).
     return {
-      display: `${head}the last Send did not confirm — it may or may not have reached @${d.to}. Send again retries exactly this text (delivers once) · Cancel. Editing is off for this draft.  _(draft ${d.id} · rev ${rev})_`,
+      display: `${head}the last Send did not confirm — it may or may not have reached @${d.to}. Send again retries exactly this text (delivers once) · Cancel. Editing is off for this draft.${toolOnly}`,
       data: { draft: { id: d.id, to: d.to, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to} again`, tool: 'vibe_send_draft', args: { id: d.id, rev } }, { label: 'Cancel', tool: 'vibe_discard_draft', args: { id: d.id } }] },
     };
   }
   return {
-    display: `${head}Send to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_`,
+    display: `${head}Send to @${d.to} · Edit · Cancel — nothing has been sent.${toolOnly}`,
     data: { draft: { id: d.id, to: d.to, body: d.body, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to}`, tool: 'vibe_send_draft', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_draft', args: { id: d.id, message: '<new body text — links are kept separately>' } }, { label: 'Cancel', tool: 'vibe_discard_draft', args: { id: d.id } }] },
   };
 }
