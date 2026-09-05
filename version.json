@@ -1,11 +1,9 @@
 {
-  "version": "0.8.25",
-  "updated": "2026-09-02",
-  "changelog": "Waiting means their words. After you replied to someone, their next session could open with their own message echoed back as if it had just arrived; now a waiting message is always the other person's newest words. And handles keep their dashes — a GitHub login like synth-stan is looked up as written, so the thread opens instead of coming back empty.",
+  "version": "0.8.26",
+  "updated": "2026-09-04",
+  "changelog": "A failed read is not an empty inbox. When the inbox could not be reached, vibe_inbox said \"no messages yet\" and every host repeated it as \"you're caught up\" — six out of six runs in the Sep 4 routing corpus. Now it says what is actually known: could not check your inbox, unread is unknown, not zero. A real empty inbox still reads as empty.",
   "features": [
-    "A waiting message at session start is always the other person's newest message, never your own reply",
-    "Handles with dashes open the right thread",
-    "Long threads read from the end, and the startup check finishes inside its time budget"
+    "vibe_inbox reports a failed read as unknown, never as caught up (routing corpus R02)"
   ],
   "deprecated": [],
   "breaking": false,
