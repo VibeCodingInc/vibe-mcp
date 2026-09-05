@@ -41,6 +41,10 @@ const definition = {
         type: 'number',
         description: 'Optional: Attach an instant USDC tip (100 = $1, 500 = $5, 1000 = $10)'
       },
+      idempotency_key: {
+        type: 'string',
+        description: 'Optional: a stable key for this exact send, so a retry delivers once. Drafting tools set it; omit when composing by hand.'
+      },
       origin: {
         type: 'string',
         description: "How this message came to be. Omit for a normal message you're composing. Pass the value the drafting tool told you to use when sending a draft it produced: 'intro' (vibe_intro), 'stuck_solver' (vibe_weave solve), 'held_half' (a Fable-held reply), 'fable'."
@@ -54,7 +58,7 @@ async function handler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
 
-  const { handle, message, artifact_slug, payload, reply_to, tip_amount_cents, origin } = args;
+  const { handle, message, artifact_slug, payload, reply_to, tip_amount_cents, origin, idempotency_key } = args;
   const myHandle = config.getHandle();
   const them = normalizeHandle(handle);
 
@@ -112,6 +116,7 @@ async function handler(args) {
 
   const result = await store.sendMessage(myHandle, them, finalMessage || null, 'dm', finalPayload, {
     replyTo: reply_to || null,
+    idempotencyKey: typeof idempotency_key === 'string' && idempotency_key ? idempotency_key : undefined,
     // Default to 'composed' (a human wrote it); drafting tools pass their own
     // origin so the network's derived messages are distinguishable in the funnel.
     origin: origin || 'composed',

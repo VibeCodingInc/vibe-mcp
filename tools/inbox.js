@@ -173,7 +173,14 @@ function formatThreadDisplay(myHandle, them, thread, { guestSection = '', typing
     const b = getReturnBinding(them);
     if (b && b.sentAt) {
       const when = store.formatTimeAgo(b.sentAt);
-      display += `↩ this is the reply to what you sent${b.project ? ` from **${b.project}**` : ''} ${when}: "${inertField(b.firstLine || '', 80)}"\n\n`;
+      const from = b.project ? ` from **${b.project}**` : '';
+      const yours = `"${inertField(b.firstLine || '', 80)}"`;
+      // A reply is claimed only when something from them arrived AFTER the
+      // send; otherwise this is prior outgoing context, not a reply (codex P2).
+      const replied = latestFromThem && (latestFromThem.timestamp || 0) > b.sentAt;
+      display += replied
+        ? `↩ their reply to what you sent${from} ${when}: ${yours}\n\n`
+        : `↩ you wrote them${from} ${when}: ${yours} — no reply yet\n\n`;
     }
   } catch {}
 

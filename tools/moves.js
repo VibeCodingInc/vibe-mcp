@@ -39,6 +39,7 @@ const path = require('path');
 const config = require('../config');
 const store = require('../store');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
+const { inertField } = require('../incoming');
 
 const DRAFTS_FILE = path.join(config.VIBE_DIR, 'drafts.json');
 const BINDINGS_FILE = path.join(config.VIBE_DIR, 'return-bindings.json');
@@ -98,17 +99,23 @@ function cleanContext(raw) {
   };
 }
 
-function refLines(refs) { return refs.length ? '\n' + refs.map(r => `${r.title}: ${r.url}`).join('\n') : ''; }
+function refLines(refs) { return refs && refs.length ? '\n' + refs.map(r => `${r.title}: ${r.url}`).join('\n') : ''; }
+/** The one representation that is previewed AND sent: body, then the chosen links. */
+function compose(d) { return `${d.body || ''}${refLines(d.refs)}`; }
+/** What the other person wrote / says about themselves is data: flattened, bounded, labeled. */
+function theirWords(text, max = 80) { return `"${inertField(text, max)}"`; }
+function personLine(u) { return String(u.one_liner || u.workingOn || u.project || ''); }
 
 // The drafts are plain and short. The person will read them before anything
 // happens; the point is that they do not have to TYPE them.
-function draftFor(kind, ctx, person) {
+function draftFor(kind, ctx) {
   const re = ctx.project ? `re: ${ctx.project} — ` : '';
-  if (kind === 'share') return `${re}${ctx.result}${refLines(ctx.refs)}`;
-  if (kind === 'ask') return `${re}quick one: ${ctx.question || ctx.blocker}${refLines(ctx.refs)}`;
-  if (kind === 'feedback') return `${re}would you look at this and tell me what's off? ${ctx.result}${refLines(ctx.refs)}`;
-  if (kind === 'answer') return `${re}${ctx.result || ctx.doing}${refLines(ctx.refs)}`;
-  return `${re}${ctx.result || ctx.question || ctx.doing}${refLines(ctx.refs)}`;
+  if (kind === 'share') return `${re}${ctx.result}`;
+  if (kind === 'ask') return `${re}quick one: ${ctx.question || ctx.blocker}`;
+  if (kind === 'feedback') return `${re}would you look at this and tell me what's off? ${ctx.result}`;
+  if (kind === 'answer') return `${re}${ctx.result}`;
+  if (kind === 'update') return `${re}${ctx.doing}`;
+  return `${re}${ctx.result || ctx.question || ctx.blocker || ctx.doing}`;
 }
 
 /**
@@ -131,10 +138,13 @@ function computeMoves(ctx, me, roster, threads, now = Date.now()) {
     if (!t || !t.handle || t.handle === me) continue;
     if (t.lastFrom && t.lastFrom !== me && t.lastMessage) {
       const ageH = t.lastTimestamp ? Math.max(0, (now - t.lastTimestamp) / 3600000) : null;
+      // The draft kind follows what the context actually holds — never a
+      // template with a hole in it (codex P2: "quick one: undefined").
+      const kind = ctx.result ? 'answer' : (ctx.question || ctx.blocker) ? 'ask' : 'update';
       candidates.push({
-        kind: ctx.result ? 'answer' : 'ask',
+        kind,
         to: t.handle,
-        why: `they wrote you${ageH != null ? ` ${ageH < 1 ? 'under an hour' : Math.round(ageH) + 'h'} ago` : ''}: "${String(t.lastMessage).slice(0, 80)}"`,
+        why: `they wrote you${ageH != null ? ` ${ageH < 1 ? 'under an hour' : Math.round(ageH) + 'h'} ago` : ''} (their words): ${theirWords(t.lastMessage)}`,
         // Someone waiting on you outranks any keyword overlap: their question
         // is the strongest evidence a message would be welcome.
         score: 6 + (ageH != null && ageH < 24 ? 1 : 0),
@@ -143,13 +153,14 @@ function computeMoves(ctx, me, roster, threads, now = Date.now()) {
   }
   // Evidence B: someone here whose one-liner overlaps the work.
   for (const u of people) {
-    const ov = overlap(ctxTok, tokens(`${u.workingOn || ''} ${u.project || ''}`));
+    // The store serves the presence text as `one_liner` (older rows: workingOn).
+    const ov = overlap(ctxTok, tokens(personLine(u)));
     if (!ov.length) continue;
     const here = isHereNow(u);
-    const line = String(u.workingOn || u.project || '').slice(0, 80);
-    if (ctx.question || ctx.blocker) candidates.push({ kind: 'ask', to: u.handle, why: `their one-liner: "${line}" (${ov.slice(0, 3).join(', ')})${here ? ' · here now' : ''}`, score: 2 + ov.length + (here ? 1 : 0) });
-    if (ctx.result) candidates.push({ kind: 'feedback', to: u.handle, why: `their one-liner: "${line}" (${ov.slice(0, 3).join(', ')})${here ? ' · here now' : ''}`, score: 1 + ov.length + (here ? 1 : 0) });
-    if (ctx.result) candidates.push({ kind: 'share', to: u.handle, why: `their one-liner: "${line}" (${ov.slice(0, 3).join(', ')})${here ? ' · here now' : ''}`, score: 1 + ov.length + (here ? 1 : 0) - 0.5 });
+    const why = `their one-liner (their words): ${theirWords(personLine(u))} — overlap: ${ov.slice(0, 3).join(', ')}${here ? ' · here now' : ''}`;
+    if (ctx.question || ctx.blocker) candidates.push({ kind: 'ask', to: u.handle, why, score: 2 + ov.length + (here ? 1 : 0) });
+    if (ctx.result) candidates.push({ kind: 'feedback', to: u.handle, why, score: 1 + ov.length + (here ? 1 : 0) });
+    if (ctx.result) candidates.push({ kind: 'share', to: u.handle, why, score: 1 + ov.length + (here ? 1 : 0) - 0.5 });
   }
 
   if (!candidates.length) {
@@ -167,12 +178,12 @@ function computeMoves(ctx, me, roster, threads, now = Date.now()) {
     if (used.has(c.to) && candidates.some(o => !used.has(o.to) && o !== c)) continue;
     used.add(c.to);
     const person = byHandle.get(c.to) || { handle: c.to };
-    moves.push({ kind: c.kind, to: c.to, why: c.why, message: draftFor(c.kind, ctx, person), here: isHereNow(person) });
+    moves.push({ kind: c.kind, to: c.to, why: c.why, body: draftFor(c.kind, ctx), refs: ctx.refs, message: draftFor(c.kind, ctx) + refLines(ctx.refs), here: isHereNow(person) });
   }
   return { moves };
 }
 
-const KIND_LABEL = { ask: 'ask a question', share: 'share the result', feedback: 'request feedback', answer: 'answer with the result' };
+const KIND_LABEL = { ask: 'ask a question', share: 'share the result', feedback: 'request feedback', answer: 'answer with the result', update: 'reply with where you are' };
 
 // ── vibe_moves ───────────────────────────────────────────────────────────────
 
@@ -225,17 +236,17 @@ async function movesHandler(args) {
   const batch = Date.now().toString(36).slice(-4);
   const moves = out.moves.map((m, i) => ({
     id: `m${i + 1}-${batch}`, status: 'suggested', createdAt: Date.now(),
-    kind: m.kind, to: m.to, why: m.why, message: m.message, refs: ctx.refs,
+    kind: m.kind, to: m.to, why: m.why, body: m.body, refs: m.refs,
     context: { project: ctx.project || null },
   }));
   saveDrafts(drafts.concat(moves));
 
-  const lines = moves.map((m, i) => `${i + 1}. **${KIND_LABEL[m.kind] || m.kind}** → @${m.to}${m.here ? ' (here now)' : ''}\n   why: ${m.why}\n   draft: "${m.message.split('\n')[0].slice(0, 120)}${m.message.length > 120 || m.message.includes('\n') ? '…' : ''}"  _(id ${m.id})_`);
+  const lines = moves.map((m, i) => { const text = compose(m); return `${i + 1}. **${KIND_LABEL[m.kind] || m.kind}** → @${m.to}${out.moves[i].here ? ' (here now)' : ''}\n   why: ${m.why}\n   draft: "${text.split('\n')[0].slice(0, 120)}${text.length > 120 || text.includes('\n') ? '…' : ''}"  _(id ${m.id})_`; });
   const display = `${moves.length === 1 ? 'One move' : `${moves.length} moves`} from what you're doing${ctx.project ? ` on ${ctx.project}` : ''} — nothing sent:\n\n${lines.join('\n\n')}\n\nPick one to see the exact message before anything goes out, write your own, or not now.${evidenceNote}`;
   return {
     display,
     data: {
-      moves: moves.map(m => ({ id: m.id, kind: m.kind, label: `${KIND_LABEL[m.kind] || m.kind} → @${m.to}`, to: m.to, why: m.why, message: m.message })),
+      moves: moves.map(m => ({ id: m.id, kind: m.kind, label: `${KIND_LABEL[m.kind] || m.kind} → @${m.to}`, to: m.to, why: m.why, message: compose(m) })),
       host_instructions: 'Present these as choices (native question control if the host has one; numbered list otherwise) plus "write my own" and "not now". On a choice call vibe_draft with its id. Nothing is sent until vibe_send_draft.',
     },
   };
@@ -260,9 +271,10 @@ const draftDefinition = {
 function preview(d, person) {
   const where = person ? (isHereNow(person) ? 'here now' : (person.status === 'away' ? 'away' : 'not around — it waits for their next turn')) : 'presence unknown — it waits for their next turn';
   const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
+  const message = compose(d);
   return {
-    display: `**To:** @${d.to} (${where})\n**Message (exact):**\n${d.message}\n**Attachments:** ${att}\n\nSend to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id})_`,
-    data: { draft: { id: d.id, to: d.to, message: d.message, refs: d.refs || [], status: d.status }, actions: [{ label: `Send to @${d.to}`, tool: 'vibe_send_draft', args: { id: d.id } }, { label: 'Edit', tool: 'vibe_draft', args: { id: d.id, message: '<new text>' } }, { label: 'Cancel', tool: 'vibe_discard_draft', args: { id: d.id } }] },
+    display: `**To:** @${d.to} (${where})\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n\nSend to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id})_`,
+    data: { draft: { id: d.id, to: d.to, message, refs: d.refs || [], status: d.status }, actions: [{ label: `Send to @${d.to}`, tool: 'vibe_send_draft', args: { id: d.id } }, { label: 'Edit', tool: 'vibe_draft', args: { id: d.id, message: '<new text>' } }, { label: 'Cancel', tool: 'vibe_discard_draft', args: { id: d.id } }] },
   };
 }
 
@@ -287,14 +299,19 @@ async function draftHandler(args) {
     const to = normalizeHandle(args.handle);
     if (to === me) return { display: "You can't draft to yourself." };
     const ctx = cleanContext({ refs: args.refs });
-    d = { id: `w${Date.now().toString(36).slice(-5)}`, status: 'previewed', createdAt: Date.now(), kind: 'free', to, why: 'you named them', message: message + refLines(ctx.refs), refs: ctx.refs, context: { project: null } };
+    d = { id: `w${Date.now().toString(36).slice(-5)}`, status: 'previewed', createdAt: Date.now(), kind: 'free', to, why: 'you named them', body: message, refs: ctx.refs, context: { project: null } };
     drafts.push(d);
   } else {
-    if (message) { d.message = message; d.edited = true; }
+    // A finished draft stays finished: reopening a sent one must not make it
+    // sendable again, and a cancelled one needs a fresh draft (codex P2).
+    if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — nothing changed. Open a new draft to say more.` };
+    if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — open a new draft (vibe_draft with handle + message, or vibe_moves again). Nothing sent.` };
+    if (d.status === 'sending') return { display: `Draft ${d.id} is being sent right now — nothing to edit.` };
+    if (message) { d.body = message; d.edited = true; }
     if (args.refs) { d.refs = cleanContext({ refs: args.refs }).refs; }
     d.status = 'previewed';
   }
-  if (d.message.length > 2000) return { display: `Not ready — the message is ${d.message.length} chars and the limit is 2000. Edit it shorter; nothing was sent.` };
+  if (compose(d).length > 2000) return { display: `Not ready — the message is ${compose(d).length} chars and the limit is 2000. Edit it shorter; nothing was sent.` };
   saveDrafts(drafts);
   return preview(d, await findPerson(d.to));
 }
@@ -332,16 +349,40 @@ async function sendHandler(args) {
   if (!d) return { display: `No draft ${args && args.id} — nothing sent. Open it with vibe_draft first.` };
   if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — not sending it twice.` };
   if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.` };
+  if (d.status === 'sending') return { display: `Draft ${d.id} is already being sent — not sending it twice.` };
   if (d.status !== 'previewed') return { display: `Draft ${d.id} has not been reviewed yet — open it with vibe_draft so you see the exact message first. Nothing sent.` };
 
-  const dm = require('./dm');
-  const result = await dm.handler({ handle: d.to, message: d.message, origin: 'context_move' });
+  // Claim the draft ATOMICALLY before anything leaves the machine: an
+  // exclusive lock file (O_EXCL) plus a persisted 'sending' state and a
+  // stable idempotency key per draft. Two overlapping Sends, or a retry
+  // after a timeout, deliver once (codex P1).
+  const lock = `${DRAFTS_FILE}.${d.id}.lock`;
+  try { fs.writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 }); }
+  catch (e) { if (e && e.code === 'EEXIST') return { display: `Draft ${d.id} is already being sent — not sending it twice.` }; throw e; }
+  const message = compose(d);
+  const idempotencyKey = d.idempotencyKey || `draft-${d.id}`;
+  d.status = 'sending'; d.idempotencyKey = idempotencyKey;
+  saveDrafts(drafts);
+
+  let result;
+  try {
+    const dm = require('./dm');
+    result = await dm.handler({ handle: d.to, message, origin: 'context_move', idempotency_key: idempotencyKey });
+  } catch (e) {
+    result = { display: `That didn't send — ${e && e.message ? e.message : 'unknown error'}. Nothing was delivered; the draft is still here.` };
+  } finally {
+    try { fs.unlinkSync(lock); } catch {}
+  }
   const sent = result && typeof result.display === 'string' && /^Sent to \*\*@/.test(result.display);
+  // Merge the outcome into the LATEST stored state — other drafts may have
+  // been created or edited while delivery was in flight (codex P2).
+  const latest = loadDrafts();
+  const cur = latest.find(x => x.id === d.id);
+  if (cur) { cur.status = sent ? 'sent' : 'previewed'; cur.idempotencyKey = idempotencyKey; if (sent) cur.sentAt = Date.now(); }
+  saveDrafts(latest);
   if (sent) {
-    d.status = 'sent'; d.sentAt = Date.now();
-    saveDrafts(drafts);
     const b = loadBindings();
-    b[d.to] = { project: d.context && d.context.project ? d.context.project : null, draftId: d.id, kind: d.kind, sentAt: d.sentAt, firstLine: d.message.split('\n')[0].slice(0, 80) };
+    b[d.to] = { project: d.context && d.context.project ? d.context.project : null, draftId: d.id, kind: d.kind, sentAt: cur ? cur.sentAt : Date.now(), firstLine: (d.body || '').split('\n')[0].slice(0, 80) };
     saveBindings(b);
   }
   return result;
