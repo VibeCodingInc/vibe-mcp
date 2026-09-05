@@ -43,6 +43,7 @@ function restore() { for (const [k, v] of Object.entries(originals)) store[k] = 
 const QUIET = {
   getActiveUsersResult: async () => ({ ok: true, users: ROSTER }),
   getActiveUsers: async () => ROSTER,
+  getPeople: async () => ({ ok: true, listings: [] }),
   getInboxResult: async () => ({ ok: true, threads: THREADS }),
   getInbox: async () => THREADS,
   getUnreadCount: async () => 0,
@@ -99,7 +100,7 @@ test('context is cleaned: only http(s) refs survive, nothing else is kept', () =
 test('vibe_moves writes drafts locally and sends nothing', async () => {
   stub(QUIET);
   const res = await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential now' } });
-  assert.match(res.display, /nothing is drafted or sent/);
+  assert.match(res.display, /nothing drafted or sent/);
   assert.ok(res.data.moves.length >= 1);
   const drafts = JSON.parse(fs.readFileSync(moves.DRAFTS_FILE, 'utf8'));
   assert.ok(drafts.every(d => d.status === 'suggested'));
@@ -113,6 +114,7 @@ test('selecting a draft shows the exact recipient, message, attachments and thre
   assert.match(d.display, /\*\*To:\*\* @linus/);
   assert.match(d.display, /\*\*Message \(exact\):\*\*\nre: payments — retry backoff is exponential now\nPR #12: https:\/\/github.com\/x\/y\/pull\/12/);
   assert.match(d.display, /Send to @linus · Edit · Cancel — nothing has been sent/);
+  assert.match(d.display, /\[tool-only — never show to the person\] id [mw][0-9a-z-]+ rev [0-9a-f]{8}/);
   assert.deepEqual(d.data.actions.map(a => a.label), ['Send to @linus', 'Edit', 'Cancel']);
   assert.equal(sends.length, 0);
 });
@@ -219,7 +221,7 @@ test('the idempotency key names the exact text: an edit before Send changes it',
   await moves.vibe_draft.handler({ id, message: 'second text' });
   await send(id);
   const crypto = require('node:crypto');
-  const expect = `draft-${id}-${crypto.createHash('sha1').update('second text').digest('hex').slice(0, 10)}`;
+  const expect = `draft-${id}-${crypto.createHash('sha1').update('second text\n@reply_to:').digest('hex').slice(0, 10)}`;
   assert.equal(sends[0].opts.idempotencyKey, expect);
 });
 test('an unconfirmed send freezes the text: retry sends the same text with the same key; edit is refused; cancel warns', async () => {
@@ -235,7 +237,7 @@ test('an unconfirmed send freezes the text: retry sends the same text with the s
   assert.match(retry.display, /Sent to \*\*@linus\*\*/);
   assert.equal(sends.length, 1); assert.equal(sends[0].message, 'frozen text');
   const crypto = require('node:crypto');
-  assert.equal(sends[0].opts.idempotencyKey, `draft-${id}-${crypto.createHash('sha1').update('frozen text').digest('hex').slice(0, 10)}`);
+  assert.equal(sends[0].opts.idempotencyKey, `draft-${id}-${crypto.createHash('sha1').update('frozen text\n@reply_to:').digest('hex').slice(0, 10)}`);
 });
 test('a refusal that never reached the network (too long) returns the draft to editable', async () => {
   stub(QUIET);
@@ -633,9 +635,9 @@ test('zero useful moves is a valid answer and says so; the chooser step is frame
   assert.match(none.display, /^No useful move from this work right now/);
   assert.equal(none.data.moves.length, 0);
   const some = await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential now' } });
-  assert.match(some.display, /OPENS A DRAFT to review; it does not send/);
-  assert.match(some.data.host_instructions, /never present a candidate you have recognized as a mismatch/);
-  assert.match(some.data.host_instructions, /"Open a draft\?" \(never "Send"\)/);
+  assert.match(some.display, /Choosing opens a draft; it does not send/);
+  assert.match(some.data.host_instructions, /a recognized mismatch is suppressed, never shown with a warning/);
+  assert.match(some.data.host_instructions, /YOU write the message/);
 });
 
 test('the screenshot scenario, exactly: one useful candidate, no non-sequitur, no feedback draft of an unrelated result', () => {
@@ -650,4 +652,199 @@ test('the screenshot scenario, exactly: one useful candidate, no non-sequitur, n
   assert.equal(out.moves.length, 1, JSON.stringify(out.moves.map(m => [m.kind, m.to])));
   assert.equal(out.moves[0].to, 'amee_fixture'); assert.equal(out.moves[0].kind, 'ask');
   assert.match(out.note, /@peer_x asked "quick one: does the drafts lock/);
+});
+
+// ── the loop: why now, hook, one strong move, verifiable answers, replies beside the work ──
+test('every move names why now and the exact thing the person said; an answer carries reply_to', () => {
+  const out = moves.computeMoves(moves.cleanContext({ project: 'payments', result: 'retry backoff is exponential now, 3 tries, tests green' }), 'ada', ROSTER, [{ ...THREADS[0], lastMessageId: 'msg_q17' }], NOW);
+  const a = out.primary;
+  assert.equal(a.to, 'linus'); assert.equal(a.kind, 'answer');
+  assert.equal(a.replyTo, 'msg_q17');
+  assert.match(a.why_now, /You've got what @linus asked about .* — answer them with it\./);
+  assert.equal(a.hook, 'did the payments retry fix land?');
+  assert.ok(Array.isArray(out.alternatives));
+  for (const m of out.moves) { assert.ok(m.why_now); assert.ok(m.hook); }
+});
+test('relevance outranks recency and presence: a topical one-liner beats an off-topic fresh writer, and an offline listed person beats a green dot with no overlap', () => {
+  const roster = [
+    { handle: 'green_dot', one_liner: 'weekend hiking', status: 'active', lastSeen: NOW },
+    { handle: 'stan', one_liner: 'local/cloud handoff for agent runtimes', status: 'offline', lastSeen: null, _source: 'listing' },
+  ];
+  const threads = [{ handle: 'chatty', unread: 1, lastFrom: 'chatty', lastMessage: 'lunch tomorrow?', lastTimestamp: NOW - 60000 }];
+  const out = moves.computeMoves(moves.cleanContext({ project: 'runtime', question: 'where should the local/cloud handoff decide which side runs the agent?' }), 'ada', roster, threads, NOW);
+  assert.equal(out.primary.to, 'stan');
+  assert.match(out.primary.why_now, /@stan listed "local\/cloud handoff/);
+  assert.ok(!out.moves.some(m => m.to === 'green_dot'));
+  assert.ok(!out.moves.some(m => m.to === 'chatty'));
+});
+test('the directory (what people chose to share) is evidence, including people who are offline', async () => {
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [] }), getPeople: async () => ({ ok: true, listings: [{ handle: 'stan', building: 'local/cloud handoff for agent runtimes', kind: 'human' }] }) });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', question: 'where should the local/cloud handoff decide which side runs the agent?' } });
+  assert.equal(r.data.primary.to, 'stan');
+  assert.match(r.display, /\*\*Strongest:\*\* ask a question → @stan/);
+  assert.match(r.display, /why now: @stan listed/);
+});
+test('a reply to what you sent from this work comes back beside it — verified only through reply_to', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_sent_9', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'where should the handoff decide?' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', unread: 1, lastFrom: 'linus', lastMessage: 'on the cloud side — the local one lies about capacity', lastTimestamp: Date.now() + 1000, lastMessageId: 'msg_r1' }] }), getThread: async () => [{ id: 'msg_r1', from: 'linus', to: 'ada', body: 'on the cloud side — the local one lies about capacity', timestamp: Date.now() + 1000, reply_to: { id: 'msg_sent_9', from: 'ada', body: 'where should the handoff decide?' } }] });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
+  assert.equal(r.data.replies.length, 1);
+  assert.equal(r.data.replies[0].verified, true);
+  assert.match(r.display, /↩ @linus answered what you asked/);
+  assert.match(r.display, /suggest one next step; do nothing until asked/);
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', unread: 1, lastFrom: 'linus', lastMessage: 'unrelated: lunch?', lastTimestamp: Date.now() + 1000, lastMessageId: 'msg_r2' }] }), getThread: async () => [{ id: 'msg_r2', from: 'linus', to: 'ada', body: 'unrelated: lunch?', timestamp: Date.now() + 1000, reply_to: null }] });
+  const r2 = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
+  assert.equal(r2.data.replies[0].verified, false);
+  assert.match(r2.display, /↩ @linus wrote after what you sent/);
+});
+test('a draft opened with reply_to sends it, so the other side can verify the answer', async () => {
+  stub(QUIET);
+  const d = await moves.vibe_draft.handler({ handle: '@linus', message: 'it decides on the cloud side.', reply_to: 'msg_q17' });
+  assert.match(d.display, /\*\*Answers:\*\* their message this replies to \(linked\)/);
+  await moves.vibe_send_draft.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
+  assert.equal(sends[0].opts.replyTo, 'msg_q17');
+});
+test('regression: an unrelated result is never an answer to the newest inbox question — suppressed, not warned', () => {
+  const threads = [{ handle: 'peer_x', unread: 1, lastFrom: 'peer_x', lastMessage: 'does the drafts lock survive a crash mid-send?', lastTimestamp: NOW - 30 * 60000, lastMessageId: 'msg_lock' }];
+  const out = moves.computeMoves(moves.cleanContext({ project: 'vibeconf', result: "Leo's answer: any openai-compatible url; three keys in config.json" }), 'ada', ROSTER, threads, NOW);
+  assert.ok(!(out.moves || []).some(m => m.to === 'peer_x'));
+  assert.ok(!(out.moves || []).some(m => /warning|mismatch/i.test(m.why_now || '')));
+});
+
+test('editing only the reply target invalidates the preview revision', async () => {
+  stub(QUIET);
+  const d = await moves.vibe_draft.handler({ handle: '@linus', message: 'on the cloud side.', reply_to: 'msg_A' });
+  const rev1 = d.data.draft.rev;
+  const e = await moves.vibe_draft.handler({ id: d.data.draft.id, reply_to: 'msg_B' });
+  assert.notEqual(e.data.draft.rev, rev1);
+  const stale = await moves.vibe_send_draft.handler({ id: d.data.draft.id, rev: rev1 });
+  assert.match(stale.display, /changed since that preview/);
+  assert.equal(sends.length, 0);
+});
+test('a reply that predates a retried sentAt is still recognized when its reply_to matches', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_sent_late', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'retried question' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  const earlier = Date.now() - 60000; // their reply "arrived" before our (retried) sentAt
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', unread: 1, lastFrom: 'linus', lastMessage: 'yes', lastTimestamp: earlier, lastMessageId: 'msg_early' }] }), getThread: async () => [{ id: 'msg_early', from: 'linus', to: 'ada', body: 'yes', timestamp: earlier, reply_to: { id: 'msg_sent_late' } }] });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
+  assert.equal(r.data.replies.length, 1); assert.equal(r.data.replies[0].verified, true);
+});
+
+test('a retried unconfirmed draft keeps the idempotency key it was first sent under', async () => {
+  let calls = 0;
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { calls++; if (calls === 1) return { error: 'transport_failed', message: 'socket hang up' }; sends.push({ from, to, message, opts }); return { id: 'msg_k', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'keep my key' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  // simulate an upgrade that changed the key formula: the persisted key is what must be reused
+  moves.transact(drafts => { const d = drafts.find(x => x.id === a.data.draft.id); d.idempotencyKey = 'draft-legacy-key-0001'; });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  assert.equal(sends.length, 1); assert.equal(sends[0].opts.idempotencyKey, 'draft-legacy-key-0001');
+});
+test('a directory listing that marks an agent keeps it out even when a presence row exists without the flag', async () => {
+  stub({ ...QUIET, getActiveUsersResult: async () => ({ ok: true, users: [{ handle: 'botty', one_liner: '', status: 'active', lastSeen: NOW }] }), getInboxResult: async () => ({ ok: true, threads: [] }), getPeople: async () => ({ ok: true, listings: [{ handle: 'botty', building: 'local/cloud handoff for agent runtimes', kind: 'agent' }] }) });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', question: 'where should the local/cloud handoff decide?' } });
+  assert.equal(r.data.moves.length, 0);
+});
+test("Platform's after_id read is the first source of a verified reply; the newest matching message wins", async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_q', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'which side decides?' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  let afterCalls = [];
+  stub({ ...QUIET,
+    getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 2, lastFrom: 'linus', lastMessage: 'correction: the cloud side', lastTimestamp: Date.now() + 2000, lastMessageId: 'msg_a2' }] }),
+    getThreadAfter: async (tid, after, limit) => { afterCalls.push([tid, after, limit]); return { ok: true, messages: [{ id: 'msg_a1', from: 'linus', body: 'the local side', reply_to: { id: 'msg_q' } }, { id: 'msg_a2', from: 'linus', body: 'correction: the cloud side', reply_to: { id: 'msg_q' } }], hasMore: false }; },
+    getThread: async () => { throw new Error('fallback must not be needed'); } });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
+  assert.deepEqual(afterCalls[0], ['thread_L', 'msg_q', 50]);
+  assert.equal(r.data.replies[0].verified, true); assert.equal(r.data.replies[0].message_id, 'msg_a2');
+  assert.match(r.data.replies[0].their_words, /correction: the cloud side/);
+});
+test('an unknown anchor from after_id is not treated as "no reply": the fallback still runs', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_q2', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'q2' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  stub({ ...QUIET,
+    getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 1, lastFrom: 'linus', lastMessage: 'ans', lastTimestamp: Date.now() + 2000, lastMessageId: 'msg_b1' }] }),
+    getThreadAfter: async () => ({ ok: false, error: 'after_not_in_thread' }),
+    getThread: async () => [{ id: 'msg_b1', from: 'linus', to: 'ada', body: 'ans', timestamp: Date.now() + 2000, reply_to: { id: 'msg_q2' } }] });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
+  assert.equal(r.data.replies[0].verified, true);
+});
+
+test('after_id paging: a corrected answer on a later page wins; a read cut short is marked partial', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_q3', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'q3' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  const page = (ids, hasMore) => ({ ok: true, hasMore, messages: ids.map(([id, body, rt]) => ({ id, from: 'linus', body, reply_to: rt ? { id: rt } : null })) });
+  const calls = [];
+  stub({ ...QUIET,
+    getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 3, lastFrom: 'linus', lastMessage: 'unrelated tail', lastTimestamp: Date.now() + 5000, lastMessageId: 'msg_tail' }] }),
+    getThreadAfter: async (tid, after) => { calls.push(after); if (after === 'msg_q3') return page([['msg_a1', 'first answer', 'msg_q3'], ['msg_x', 'noise', null]], true); if (after === 'msg_x') return page([['msg_a2', 'corrected answer', 'msg_q3'], ['msg_tail', 'unrelated tail', null]], false); return page([], false); },
+    getThread: async () => { throw new Error('fallback must not run'); } });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring' } });
+  assert.deepEqual(calls, ['msg_q3', 'msg_x']);
+  assert.equal(r.data.replies[0].message_id, 'msg_a2'); assert.equal(r.data.replies[0].partial, false);
+});
+test('a binding replaced by another session during the read is not labeled with the old answer', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_old', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'old question' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  stub({ ...QUIET,
+    getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 1, lastFrom: 'linus', lastMessage: 'old answer', lastTimestamp: Date.now() + 1000, lastMessageId: 'msg_oa' }] }),
+    getThreadAfter: async () => { // another session replaces the binding while we read
+      const fs2 = require('node:fs'); const b = JSON.parse(fs2.readFileSync(moves.BINDINGS_FILE, 'utf8')); b.linus = { ...b.linus, draftId: 'w_newer', messageId: 'msg_new', project: 'other work', sentAt: Date.now() }; fs2.writeFileSync(moves.BINDINGS_FILE, JSON.stringify(b));
+      return { ok: true, hasMore: false, messages: [{ id: 'msg_oa', from: 'linus', body: 'old answer', reply_to: { id: 'msg_old' } }] }; } });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring' } });
+  assert.equal(r.data.replies.length, 0);
+});
+
+test('a reply target copied from the display ("#msg_x") is linked as msg_x; junk is not a target', async () => {
+  stub(QUIET);
+  const d = await moves.vibe_draft.handler({ handle: '@linus', message: 'answer', reply_to: '#msg_q17' });
+  assert.match(d.display, /\*\*Answers:\*\* their message this replies to \(linked\)/);
+  await moves.vibe_send_draft.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
+  assert.equal(sends[0].opts.replyTo, 'msg_q17');
+  const j = await moves.vibe_draft.handler({ handle: '@linus', message: 'x', reply_to: 'not an id' });
+  assert.doesNotMatch(j.display, /Answers:/);
+});
+
+test('the person-facing preview and moves carry no draft ids, revs, or message ids outside the tool-only trailer', async () => {
+  stub(QUIET);
+  const d = await moves.vibe_draft.handler({ handle: '@linus', message: 'answer', reply_to: 'msg_q17' });
+  const human = d.display.split('[tool-only')[0];
+  assert.doesNotMatch(human, /rev [0-9a-f]{8}|draft [mw][0-9a-z-]+|msg_q17/);
+  assert.match(human, /\*\*Answers:\*\* their message this replies to \(linked\)/);
+  const m = await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential now' } });
+  const humanMoves = m.display.split('[tool-only')[0];
+  assert.doesNotMatch(humanMoves, /\(id m[0-9]-|msg_[A-Za-z0-9_]+/);
+  assert.match(m.display, /\[tool-only — never show to the person\] linus: id m1-[0-9a-f]+/);
+});
+
+test('a failed continuation read after an answer was seen marks the reply partial', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_q9', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'q9' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  let n = 0;
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 2, lastFrom: 'linus', lastMessage: 'tail', lastTimestamp: Date.now() + 5000, lastMessageId: 'msg_t' }] }),
+    getThreadAfter: async () => { n++; if (n === 1) return { ok: true, hasMore: true, messages: [{ id: 'msg_a1', from: 'linus', body: 'first answer', reply_to: { id: 'msg_q9' } }] }; throw new Error('network'); },
+    getThread: async () => { throw new Error('no fallback'); } });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring' } });
+  assert.equal(r.data.replies[0].partial, true);
+  assert.match(r.display, /more followed — read the thread for the latest/);
+});
+
+test('a full fallback page (no anchored read) marks the reply partial; a short page does not', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_qf', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'qf' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  const full = Array.from({ length: 200 }, (_, i) => ({ id: `msg_f${i}`, from: i === 5 ? 'linus' : 'ada', to: i === 5 ? 'ada' : 'linus', body: i === 5 ? 'old answer' : 'x', timestamp: Date.now() + i, reply_to: i === 5 ? { id: 'msg_qf' } : null }));
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 1, lastFrom: 'linus', lastMessage: 'tail', lastTimestamp: Date.now() + 9000, lastMessageId: 'msg_tail' }] }), getThreadAfter: async () => ({ ok: false, error: 'unsupported' }), getThread: async () => full });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring' } });
+  assert.equal(r.data.replies[0].verified, true); assert.equal(r.data.replies[0].partial, true);
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 1, lastFrom: 'linus', lastMessage: 'old answer', lastTimestamp: Date.now() + 9000, lastMessageId: 'msg_f5' }] }), getThreadAfter: async () => ({ ok: false, error: 'unsupported' }), getThread: async () => full.slice(0, 10) });
+  const r2 = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring' } });
+  assert.equal(r2.data.replies[0].partial, false);
 });
