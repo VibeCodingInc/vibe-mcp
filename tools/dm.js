@@ -125,10 +125,10 @@ async function handler(args) {
     approvedSha256: typeof approved_sha256 === 'string' && approved_sha256 ? approved_sha256 : undefined,
     // Default to 'composed' (a human wrote it); drafting tools pass their own
     // origin so the network's derived messages are distinguishable in the funnel.
-    // 'context_move' is not yet in the platform's MESSAGE_ORIGINS allowlist
-    // (wired to Platform); until it is, the wire origin is 'composed' — the
-    // person approved the exact text — rather than an unclassified null.
-    origin: origin === 'context_move' ? 'composed' : (origin || 'composed'),
+    // 'context_move' is allowlisted on the platform (main 5db38c4b, #392):
+    // the host agent prepared it from the active session; the person chose
+    // and explicitly sent.
+    origin: origin || 'composed',
   });
 
   // Check for errors.
@@ -168,7 +168,7 @@ async function handler(args) {
     // The composition-boundary refusals (#392/#394) are checked before any
     // write and are idempotent on retry (same content → same verdict), so a
     // retried exchange cannot have committed first: definite.
-    const DEFINITE = new Set(['not_signed_in', 'self_dm', 'message_too_long', 'approved_content_mismatch', 'approved_sha256_malformed', 'approved_send_unsupported_route', 'private_composition_data']);
+    const DEFINITE = new Set(['not_signed_in', 'self_dm', 'message_too_long', 'approved_content_mismatch', 'approved_sha256_malformed', 'approved_send_unsupported_route', 'private_composition_data', 'idempotency_conflict']);
     return {
       display: (result && REMEDY_CARRYING.has(result.error))
         ? detail

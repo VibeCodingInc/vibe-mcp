@@ -523,6 +523,9 @@ async function draftHandler(args) {
       // @echo is the feedback line with its own path and no receipt shape;
       // it is not a person to draft to (codex P2).
       if (to === 'echo') return { display: '@echo is the feedback line — send to it with vibe_dm directly. Nothing drafted.' };
+      // An approval-bound send targets a durable conversation; the live
+      // session route stores nothing and the platform refuses it (CB-007).
+      if (to.endsWith('/claude')) return { display: `Drafts go to a person's durable conversation, not a live session — use @${to.replace(/\/claude$/, '')} instead. Nothing drafted.` };
       d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), from: me, flow: FLOW, kind: 'free', to, why: 'you named them', body: message, refs: cleanContext({ refs: args.refs }).refs, context: { project: null } };
       drafts.push(d);
     } else {

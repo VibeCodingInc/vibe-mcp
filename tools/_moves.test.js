@@ -152,7 +152,7 @@ test('Send sends exactly the previewed text, once, and records a private return 
   assert.equal(sends.length, 1);
   assert.equal(sends[0].to, 'linus');
   assert.equal(sends[0].message, 're: payments — retry backoff is exponential now');
-  assert.equal(sends[0].opts.origin, 'composed'); // wire origin until Platform allowlists context_move
+  assert.equal(sends[0].opts.origin, 'context_move'); // allowlisted on the platform (main 5db38c4b)
   assert.match(s.display, /Sent to \*\*@linus\*\*/);
   const again = await send(id);
   assert.match(again.display, /already sent/); assert.equal(sends.length, 1);
@@ -551,7 +551,7 @@ test('the wire origin of a draft send is one the platform classifies', async () 
   stub(QUIET);
   const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'origin' });
   await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
-  assert.equal(sends[0].opts.origin, 'composed');
+  assert.equal(sends[0].opts.origin, 'context_move'); // allowlisted on the platform (main 5db38c4b)
 });
 
 test('lock: a stale lock from a dead process is reclaimed; release never frees a lock it does not own', () => {
@@ -613,4 +613,10 @@ test('someone who just wrote you, off-topic, is still a fair person to ASK when 
   const out = moves.computeMoves(moves.cleanContext({ project: 'paris photo', question: 'who has done a booth wall with themed photo-worlds?' }), 'ada', ROSTER, threads, NOW);
   const t = (out.moves || []).find(m => m.to === 'tester');
   assert.ok(t); assert.equal(t.kind, 'ask'); assert.match(t.why, /not about this work/);
+});
+
+test('a /claude session route is refused as a draft recipient (CB-007)', async () => {
+  stub(QUIET);
+  const r = await moves.vibe_draft.handler({ handle: '@floz/claude', message: 'x' });
+  assert.match(r.display, /durable conversation/);
 });
