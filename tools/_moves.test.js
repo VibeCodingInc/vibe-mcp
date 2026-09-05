@@ -799,3 +799,13 @@ test('a binding replaced by another session during the read is not labeled with 
   const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring' } });
   assert.equal(r.data.replies.length, 0);
 });
+
+test('a reply target copied from the display ("#msg_x") is linked as msg_x; junk is not a target', async () => {
+  stub(QUIET);
+  const d = await moves.vibe_draft.handler({ handle: '@linus', message: 'answer', reply_to: '#msg_q17' });
+  assert.match(d.display, /\*\*Answers:\*\* #msg_q17/);
+  await moves.vibe_send_draft.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
+  assert.equal(sends[0].opts.replyTo, 'msg_q17');
+  const j = await moves.vibe_draft.handler({ handle: '@linus', message: 'x', reply_to: 'not an id' });
+  assert.doesNotMatch(j.display, /Answers:/);
+});

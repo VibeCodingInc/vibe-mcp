@@ -212,6 +212,17 @@ function reconcileAbandoned(d) {
   return true;
 }
 
+/**
+ * A reply target as the HOST hands it back: displays show ids as "#msg_x",
+ * and a host copying from the display sends "#msg_x" — which the server
+ * cannot link (recorded miss, loop rehearsal 2026-09-05 00:17). Strip the
+ * display prefix; accept only a message id shape.
+ */
+function cleanReplyTo(v) {
+  if (typeof v !== 'string') return null;
+  const id = v.trim().replace(/^#+/, '');
+  return /^msg_[A-Za-z0-9_-]+$/.test(id) ? id : null;
+}
 const newId = (prefix) => `${prefix}${crypto.randomBytes(4).toString('hex')}`;
 /** This process's flow: vibe_moves replaces only ITS OWN earlier suggestions (codex P2). */
 const FLOW = `${process.pid}-${crypto.randomBytes(2).toString('hex')}`;
@@ -639,7 +650,7 @@ async function draftHandler(args) {
       // An approval-bound send targets a durable conversation; the live
       // session route stores nothing and the platform refuses it (CB-007).
       if (to.endsWith('/claude')) return { display: `Drafts go to a person's durable conversation, not a live session — use @${to.replace(/\/claude$/, '')} instead. Nothing drafted.` };
-      d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), from: me, flow: FLOW, kind: 'free', to, why: 'you named them', body: message, refs: cleanContext({ refs: args.refs }).refs, replyTo: typeof args.reply_to === 'string' && args.reply_to ? args.reply_to : null, context: { project: null } };
+      d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), from: me, flow: FLOW, kind: 'free', to, why: 'you named them', body: message, refs: cleanContext({ refs: args.refs }).refs, replyTo: cleanReplyTo(args.reply_to), context: { project: null } };
       drafts.push(d);
     } else {
       // A finished draft stays finished; an unconfirmed one may only be
@@ -661,7 +672,7 @@ async function draftHandler(args) {
           d.edited = true;
         }
         if (args.refs) { d.refs = cleanContext({ refs: args.refs }).refs; }
-        if (typeof args.reply_to === 'string') d.replyTo = args.reply_to || null;
+        if (typeof args.reply_to === 'string') d.replyTo = cleanReplyTo(args.reply_to);
         d.status = 'previewed';
       }
     }
