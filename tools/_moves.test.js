@@ -594,3 +594,23 @@ test('an over-long field is reported, never silently cut mid-word', async () => 
   assert.ok(ok.data.moves.length >= 1);
   assert.ok(ok.data.moves[0].message.endsWith('now.'), 'the draft ends where the result ends');
 });
+
+test("a fresh question the work does not address is information, never an 'answer with the result' draft", () => {
+  const threads = [{ handle: 'tester', unread: 1, lastFrom: 'tester', lastMessage: 'does the drafts lock in moves.js survive a crash mid-send?', lastTimestamp: NOW - 30 * 60000 }];
+  const out = moves.computeMoves(moves.cleanContext({ project: 'vibeconf', result: 'answered Leo: the ack endpoint takes any openai-compatible url; proposed a weekly pair slot' }), 'ada', ROSTER, threads, NOW);
+  assert.ok(!(out.moves || []).some(m => m.to === 'tester' && m.kind === 'answer'), 'no unrelated result shipped as an answer');
+  const text = out.ask || out.note || '';
+  assert.match(text, /@tester asked "does the drafts lock/);
+});
+test('a domain one-liner meets the plain word: "automata.art" ↔ "automata"', () => {
+  const roster = ROSTER.concat([{ handle: 'ameesia', one_liner: 'Digital art platform automata.art', status: 'active', lastSeen: NOW }]);
+  const out = moves.computeMoves(moves.cleanContext({ project: 'paris photo', blocker: 'the booth wall concept: themed photo-worlds and automata — who has real input?' }), 'ada', roster, [], NOW);
+  const a = (out.moves || []).find(m => m.to === 'ameesia');
+  assert.ok(a, 'ameesia is offered'); assert.equal(a.kind, 'ask'); assert.match(a.why, /automata/);
+});
+test('someone who just wrote you, off-topic, is still a fair person to ASK when you have a question', () => {
+  const threads = [{ handle: 'tester', unread: 1, lastFrom: 'tester', lastMessage: 'lunch?', lastTimestamp: NOW - 30 * 60000 }];
+  const out = moves.computeMoves(moves.cleanContext({ project: 'paris photo', question: 'who has done a booth wall with themed photo-worlds?' }), 'ada', ROSTER, threads, NOW);
+  const t = (out.moves || []).find(m => m.to === 'tester');
+  assert.ok(t); assert.equal(t.kind, 'ask'); assert.match(t.why, /not about this work/);
+});

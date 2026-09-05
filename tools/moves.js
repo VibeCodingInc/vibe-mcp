@@ -221,7 +221,9 @@ const revOf = (d) => textHash(d).slice(0, 8);
 const STOP = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'about', 'what', 'when', 'have', 'just', 'some', 'more', 'than', 'then', 'them', 'they', 'your', 'will', 'been', 'were', 'also', 'like', 'make', 'made', 'work', 'working', 'building', 'build', 'thing', 'things', 'using', 'used', 'over', 'under', 'want', 'need', 'still', 'there', 'here', 'right', 'now', 'today']);
 
 function tokens(text) {
-  return new Set(String(text || '').toLowerCase().replace(/[^a-z0-9\s./-]/g, ' ').split(/[\s/]+/).map(w => w.replace(/^[.-]+|[.-]+$/g, '')).filter(w => w.length >= 4 && !STOP.has(w)));
+  // Dots split as well as slashes: one-liners are often domains ("automata.art",
+  // "katalog.chat") and must meet the plain word in someone's context.
+  return new Set(String(text || '').toLowerCase().replace(/[^a-z0-9\s./-]/g, ' ').split(/[\s/.]+/).map(w => w.replace(/^[-]+|[-]+$/g, '')).filter(w => w.length >= 4 && !STOP.has(w)));
 }
 function overlap(a, b) { const out = []; for (const w of a) if (b.has(w)) out.push(w); return out; }
 function contextText(ctx) { return [ctx.project, ctx.doing, ctx.result, ctx.question, ctx.blocker].filter(Boolean).join(' '); }
@@ -299,6 +301,7 @@ function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown 
   const knownAgents = new Set((roster || []).filter(u => u && u.handle && u.isAgent).map(u => u.handle));
   if (actorKinds) for (const [h, k] of actorKinds) if (k && k !== 'human') knownAgents.add(h);
   const candidates = [];
+  const unanswered = []; // fresh questions this work does not address — shown, never drafted
 
   // Evidence A: an open thread where THEY wrote last — someone waiting on you
   // outranks any keyword overlap; their question is the strongest evidence a
@@ -317,6 +320,19 @@ function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown 
       const fresh = t.lastTimestamp ? (now - t.lastTimestamp) <= THREAD_EVIDENCE_FRESH_MS : false;
       const topical = overlap(ctxTok, tokens(String(t.lastMessage))).length > 0;
       if (!fresh && !topical) continue;
+      // "Answer with the result" must actually answer: a fresh question the
+      // work does not address is INFORMATION ("they asked you about X"), not
+      // a draft that ships an unrelated result at them (Seth's product test,
+      // 2026-09-04 21:14: Leo's vibeconferencing result offered as the answer
+      // to a question about the drafts lock).
+      if (!topical) {
+        if (ctx.question || ctx.blocker) {
+          candidates.push({ kind: 'ask', to: t.handle, why: `they wrote you${ageH != null ? ` ${ageH < 1 ? 'under an hour' : Math.round(ageH) + 'h'} ago` : ''} (their words): ${theirWords(t.lastMessage)} — not about this work, but they are here for you`, score: 2 + (ageH != null && ageH < 24 ? 1 : 0) });
+        } else {
+          unanswered.push({ to: t.handle, words: theirWords(t.lastMessage), ageH });
+        }
+        continue;
+      }
       const kind = ctx.result ? 'answer' : (ctx.question || ctx.blocker) ? 'ask' : 'update';
       candidates.push({
         kind, to: t.handle,
@@ -339,12 +355,15 @@ function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown 
     if (!ctx.result && !ctx.question && !ctx.blocker && ctx.doing) candidates.push({ kind: 'update', to: u.handle, why, score: 1 + ov.length + (here ? 1 : 0) });
   }
 
+  const note = unanswered.length
+    ? `Also waiting on you, not about this work: ${unanswered.slice(0, 2).map(u => `@${u.to} asked ${u.words}`).join('; ')} — answer that separately when you have it.`
+    : '';
   if (!candidates.length) {
     const topic = [...ctxTok].slice(0, 3).join(', ') || 'this';
     // An unreadable or anonymous roster is not an empty room (codex P2).
-    if (!rosterKnown) return { ask: `Who is this for? I couldn't check who's around right now, so I won't guess — name a handle, or tell me who would care about ${topic}.` };
+    if (!rosterKnown) return { ask: `Who is this for? I couldn't check who's around right now, so I won't guess — name a handle, or tell me who would care about ${topic}.${note ? ` ${note}` : ''}` };
     const around = people.filter(isHereNow).length;
-    return { ask: `Who is this for? ${around ? `${around} ${around === 1 ? 'person is' : 'people are'} around` : 'Nobody is around right now'} and none of their one-liners touch ${topic} — name a handle, or tell me who would care.` };
+    return { ask: `Who is this for? ${around ? `${around} ${around === 1 ? 'person is' : 'people are'} around` : 'Nobody is around right now'} and none of their one-liners touch ${topic} — name a handle, or tell me who would care.${note ? ` ${note}` : ''}` };
   }
 
   candidates.sort((a, b) => b.score - a.score);
@@ -357,7 +376,7 @@ function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown 
     const body = draftFor(c.kind, ctx);
     moves.push({ kind: c.kind, to: c.to, why: c.why, body, refs: ctx.refs, message: body + refLines(ctx.refs), here: isHereNow(person) });
   }
-  return { moves };
+  return { moves, note };
 }
 
 const KIND_LABEL = { ask: 'ask a question', share: 'share the result', feedback: 'request feedback', answer: 'answer with the result', update: 'say where you are' };
@@ -433,7 +452,7 @@ async function movesHandler(args) {
   });
 
   const lines = moves.map((m, i) => { const text = compose(m); return `${i + 1}. **${KIND_LABEL[m.kind] || m.kind}** → @${m.to}${out.moves[i].here ? ' (here now)' : ''}\n   why: ${m.why}\n   draft: "${text.split('\n')[0].slice(0, 120)}${text.length > 120 || text.includes('\n') ? '…' : ''}"  _(id ${m.id})_`; });
-  const display = `${moves.length === 1 ? 'One move' : `${moves.length} moves`} from what you're doing${ctx.project ? ` on ${ctx.project}` : ''} — nothing sent:\n\n${lines.join('\n\n')}\n\nPick one to see the exact message before anything goes out, write your own, or not now.${evidenceNote}`;
+  const display = `${moves.length === 1 ? 'One move' : `${moves.length} moves`} from what you're doing${ctx.project ? ` on ${ctx.project}` : ''} — nothing sent:\n\n${lines.join('\n\n')}\n\nPick one to see the exact message before anything goes out, write your own, or not now.${out.note ? `\n\n${out.note}` : ''}${evidenceNote}`;
   return {
     display,
     data: {
