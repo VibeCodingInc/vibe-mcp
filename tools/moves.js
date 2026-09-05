@@ -60,6 +60,15 @@ const LOCK_STALE_MS = 10 * 1000;         // a transaction never takes this long
 const CLAIM_STALE_MS = 60 * 1000;        // a send claim older than this from a dead process is abandoned
 const CLAIM_HARD_STALE_MS = 10 * 60 * 1000;
 const THREAD_EVIDENCE_FRESH_MS = 7 * 24 * 60 * 60 * 1000; // someone who wrote you within a week is waiting; older needs topical overlap
+/**
+ * Known QA / probe traffic never drives an ordinary collaboration suggestion
+ * (Astra, product test 2026-09-04): the platform quarantines these handles
+ * from human interpretation surfaces (vibe-platform#307); the package keeps
+ * the same line. Free writing to them still works — they are just never
+ * proposed.
+ */
+const QA_HANDLE = /^(vibetester\d*|qa_[a-z0-9_-]+|[a-z0-9_-]*canary[a-z0-9_-]*|[a-z0-9_-]*_probe|synth_[a-z0-9_-]+|vibe-bot|vibe_bot)$/i;
+function isQaHandle(h) { return QA_HANDLE.test(String(h || '').replace(/^@/, '')); }
 
 // ── local, private state (one file, one lock, atomic replace) ────────────────
 
@@ -296,7 +305,7 @@ function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown 
     return { ask: "What are you working on right now, in one line — and is there a result to share or a question to ask? (I'll only suggest people I can name a reason for.)" };
   }
   const ctxTok = tokens(contextText(ctx));
-  const people = (roster || []).filter(u => u && u.handle && u.handle !== me && !u.isAgent);
+  const people = (roster || []).filter(u => u && u.handle && u.handle !== me && !u.isAgent && !isQaHandle(u.handle));
   const byHandle = new Map(people.map(u => [u.handle, u]));
   const knownAgents = new Set((roster || []).filter(u => u && u.handle && u.isAgent).map(u => u.handle));
   if (actorKinds) for (const [h, k] of actorKinds) if (k && k !== 'human') knownAgents.add(h);
@@ -311,7 +320,7 @@ function computeMoves(ctx, me, roster, threads, now = Date.now(), { rosterKnown 
     // Agents are not people to draft to, whichever side the evidence came
     // from: the thread's own actor metadata (served with the last message)
     // first, the live roster second.
-    if (t.isAgent || t.lastIsAgent || t.lastActorKind === 'agent' || knownAgents.has(t.handle)) continue;
+    if (t.isAgent || t.lastIsAgent || t.lastActorKind === 'agent' || knownAgents.has(t.handle) || isQaHandle(t.handle)) continue;
     if (t.lastFrom && t.lastFrom !== me && t.lastMessage) {
       const ageH = t.lastTimestamp ? Math.max(0, (now - t.lastTimestamp) / 3600000) : null;
       // A stale thread is evidence only if it is about the work: filling a
@@ -437,7 +446,7 @@ async function movesHandler(args) {
     : '';
 
   const out = computeMoves(ctx, me, roster, threads, Date.now(), { rosterKnown, actorKinds });
-  if (out.ask) return { display: out.ask + evidenceNote, data: { ask: out.ask, moves: [] } };
+  if (out.ask) return { display: `No useful move from this work right now. ${out.ask}${evidenceNote}`, data: { ask: out.ask, moves: [] } };
 
   // Write the drafts locally so that a later "select" is a state change on
   // disk and never a send. Earlier unselected suggestions are replaced.
@@ -452,12 +461,12 @@ async function movesHandler(args) {
   });
 
   const lines = moves.map((m, i) => { const text = compose(m); return `${i + 1}. **${KIND_LABEL[m.kind] || m.kind}** → @${m.to}${out.moves[i].here ? ' (here now)' : ''}\n   why: ${m.why}\n   draft: "${text.split('\n')[0].slice(0, 120)}${text.length > 120 || text.includes('\n') ? '…' : ''}"  _(id ${m.id})_`; });
-  const display = `${moves.length === 1 ? 'One move' : `${moves.length} moves`} from what you're doing${ctx.project ? ` on ${ctx.project}` : ''} — nothing sent:\n\n${lines.join('\n\n')}\n\nPick one to see the exact message before anything goes out, write your own, or not now.${out.note ? `\n\n${out.note}` : ''}${evidenceNote}`;
+  const display = `${moves.length === 1 ? 'One candidate' : `${moves.length} candidates`} from what you're doing${ctx.project ? ` on ${ctx.project}` : ''} — these are suggestions, nothing is drafted or sent:\n\n${lines.join('\n\n')}\n\nChoosing one OPENS A DRAFT to review; it does not send. Drop any that look wrong, or say not now.${out.note ? `\n\n${out.note}` : ''}${evidenceNote}`;
   return {
     display,
     data: {
       moves: moves.map(m => ({ id: m.id, kind: m.kind, label: `${KIND_LABEL[m.kind] || m.kind} → @${m.to}`, to: m.to, why: m.why, message: compose(m) })),
-      host_instructions: 'Present these as choices (native question control if the host has one; numbered list otherwise) plus "write my own" and "not now". On a choice call vibe_draft with its id. Nothing is sent until vibe_send_draft.',
+      host_instructions: 'These are CANDIDATES. Judge them: drop any whose recipient is wrong, whose draft does not address that person, or who you know is a test/QA account — never present a candidate you have recognized as a mismatch. Present the survivors as choices titled "Open a draft?" (never "Send"); choosing one calls vibe_draft with its id and only opens the preview. Zero survivors is a valid answer: say there is no useful move from this work. Nothing is sent until vibe_send_draft.',
     },
   };
 }

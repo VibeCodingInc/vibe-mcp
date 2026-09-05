@@ -99,7 +99,7 @@ test('context is cleaned: only http(s) refs survive, nothing else is kept', () =
 test('vibe_moves writes drafts locally and sends nothing', async () => {
   stub(QUIET);
   const res = await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential now' } });
-  assert.match(res.display, /nothing sent/);
+  assert.match(res.display, /nothing is drafted or sent/);
   assert.ok(res.data.moves.length >= 1);
   const drafts = JSON.parse(fs.readFileSync(moves.DRAFTS_FILE, 'utf8'));
   assert.ok(drafts.every(d => d.status === 'suggested'));
@@ -619,4 +619,21 @@ test('a /claude session route is refused as a draft recipient (CB-007)', async (
   stub(QUIET);
   const r = await moves.vibe_draft.handler({ handle: '@floz/claude', message: 'x' });
   assert.match(r.display, /durable conversation/);
+});
+
+test('known QA / probe handles never drive a suggestion, on either kind of evidence', () => {
+  const roster = ROSTER.concat([{ handle: 'vibetester1', one_liner: 'payments retry queue', status: 'active', lastSeen: NOW }, { handle: 'qa_meld_7', one_liner: 'payments', status: 'active', lastSeen: NOW }]);
+  const threads = [{ handle: 'vibetester1', unread: 1, lastFrom: 'vibetester1', lastMessage: 'payments retry backoff — which curve?', lastTimestamp: NOW }, { handle: 'vibecanary', unread: 3, lastFrom: 'vibecanary', lastMessage: 'post-deploy canary payments', lastTimestamp: NOW }];
+  const out = moves.computeMoves(moves.cleanContext({ project: 'payments', result: 'retry backoff is exponential now', question: 'which curve?' }), 'ada', roster, threads, NOW);
+  for (const h of ['vibetester1', 'qa_meld_7', 'vibecanary']) assert.ok(!(out.moves || []).some(m => m.to === h), `${h} is never proposed`);
+});
+test('zero useful moves is a valid answer and says so; the chooser step is framed as opening a draft', async () => {
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [] }) });
+  const none = await moves.vibe_moves.handler({ context: { result: 'the solar array sizing spreadsheet is done' } });
+  assert.match(none.display, /^No useful move from this work right now/);
+  assert.equal(none.data.moves.length, 0);
+  const some = await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential now' } });
+  assert.match(some.display, /OPENS A DRAFT to review; it does not send/);
+  assert.match(some.data.host_instructions, /never present a candidate you have recognized as a mismatch/);
+  assert.match(some.data.host_instructions, /"Open a draft\?" \(never "Send"\)/);
 });
