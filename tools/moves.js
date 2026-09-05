@@ -48,6 +48,7 @@ const crypto = require('crypto');
 const config = require('../config');
 const store = require('../store');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
+const { canonicalHandle } = require('../protocol/handle');
 const { inertField } = require('../incoming');
 
 const DRAFTS_FILE = path.join(config.VIBE_DIR, 'drafts.json');
@@ -123,18 +124,42 @@ function withBindings(fn) {
     return out;
   });
 }
-/** The private binding for a thread, if any and not expired. */
+/**
+ * The private binding for a thread, if any, not expired, and made by the
+ * account signed in NOW — another account in the same VIBE_HOME never sees
+ * a previous account's project or excerpt (codex P2).
+ */
 function getReturnBinding(handle) {
   const raw = readJson(BINDINGS_FILE, {});
   const b = raw && typeof raw === 'object' ? raw[normalizeHandle(handle)] : null;
   if (!b || typeof b !== 'object' || !b.sentAt) return null;
   if (Date.now() - b.sentAt > BINDING_TTL_MS) return null;
+  if (b.from && b.from !== config.getHandle()) return null;
   return b;
 }
 /** An ordinary DM to them supersedes the binding — the thread has moved on. */
 function clearReturnBinding(handle) {
   const h = normalizeHandle(handle);
-  withBindings(b => { delete b[h]; });
+  const me = config.getHandle();
+  withBindings(b => { if (b[h] && (!b[h].from || b[h].from === me)) delete b[h]; });
+}
+/** Retrying an unconfirmed send is safe only where the transport deduplicates by key. */
+function transportDedupes() {
+  return store.storage !== 'local' && process.env.VIBE_MESSAGES_V1 !== 'true';
+}
+/**
+ * A 'sending' claim whose process died is reconciled to 'unknown' under the
+ * lock, so preview and cancel see the truth instead of "being sent right now"
+ * forever (codex P2). Returns true if it changed.
+ */
+function reconcileAbandoned(d) {
+  if (!d || d.status !== 'sending') return false;
+  const age = Date.now() - (d.claimedAt || 0);
+  const abandoned = age > CLAIM_HARD_STALE_MS || (age > CLAIM_STALE_MS && !pidAlive(d.claimedBy));
+  if (!abandoned) return false;
+  d.status = 'unknown'; d.unconfirmed = true;
+  delete d.claimedAt; delete d.claimedBy;
+  return true;
 }
 
 const newId = (prefix) => `${prefix}${crypto.randomBytes(4).toString('hex')}`;
@@ -371,7 +396,8 @@ async function draftHandler(args) {
     if (wantId && !d) return { display: `No draft ${wantId} — it may have expired (drafts live 24h, locally). Run vibe_moves again or write the message.` };
     if (!d) {
       if (!args || !args.handle || !message) return { display: 'To open a draft: pass a move id, or a handle and a message. Nothing is sent by this step.' };
-      const to = normalizeHandle(args.handle);
+      const to = canonicalHandle(args.handle);
+      if (!to) return { display: 'To open a draft: pass a move id, or a handle and a message. Nothing is sent by this step.' };
       if (to === me) return { display: "You can't draft to yourself." };
       // @echo is the feedback line with its own path and no receipt shape;
       // it is not a person to draft to (codex P2).
@@ -382,6 +408,7 @@ async function draftHandler(args) {
       // A finished draft stays finished; an unconfirmed one may only be
       // retried as-is or cancelled (its idempotency key names THIS text).
       if (d.from && d.from !== me) return { display: `Draft ${d.id} was prepared as @${d.from}; you are signed in as @${me}. Nothing sent — open a new draft as yourself.` };
+      reconcileAbandoned(d);
       if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — nothing changed. Open a new draft to say more.` };
       if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — open a new draft (vibe_draft with handle + message, or vibe_moves again). Nothing sent.` };
       if (d.status === 'sending') return { display: `Draft ${d.id} is being sent right now — nothing to edit.` };
@@ -412,6 +439,7 @@ async function discardHandler(args) {
   return transact(drafts => {
     const d = drafts.find(x => x.id === id);
     if (!d) return { display: `No draft ${id} to cancel — nothing was sent either way.` };
+    reconcileAbandoned(d);
     if (d.status === 'sending') return { display: `Draft ${d.id} is being sent to @${d.to} right now — it can't be cancelled at this point.`, data: { draft: { id: d.id, status: d.status } } };
     if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — a sent message can't be unsent.`, data: { draft: { id: d.id, status: d.status } } };
     const wasUnknown = d.status === 'unknown';
@@ -455,14 +483,15 @@ async function sendHandler(args) {
     if (!rev) return { display: `Send needs the rev shown in the preview of draft ${d.id} — open it with vibe_draft and send with that rev. Nothing sent.` };
     if (rev !== revOf(d)) return { display: `Draft ${d.id} changed since that preview (rev ${rev} → ${revOf(d)}) — open it again with vibe_draft and approve what it shows now. Nothing sent.` };
     if (d.status === 'sending') {
-      const age = Date.now() - (d.claimedAt || 0);
-      const abandoned = age > CLAIM_HARD_STALE_MS || (age > CLAIM_STALE_MS && !pidAlive(d.claimedBy));
-      if (!abandoned) return { display: `Draft ${d.id} is already being sent — not sending it twice.` };
-      // The claiming process died mid-send: retry the SAME text under the
-      // SAME key — the server deduplicates, so this delivers once (codex P2).
-      // That earlier attempt may have committed: uncertainty is recorded
-      // BEFORE the retry so a later definite refusal cannot erase it.
-      d.unconfirmed = true;
+      // The claiming process died mid-send: the SAME text under the SAME key
+      // is what a retry would send. Uncertainty is recorded BEFORE the retry
+      // so a later definite refusal cannot erase it.
+      if (!reconcileAbandoned(d)) return { display: `Draft ${d.id} is already being sent — not sending it twice.` };
+    }
+    if (d.status === 'unknown' && !transportDedupes()) {
+      // Without server-side deduplication a retry could deliver twice; the
+      // honest options are to cancel (with the warning) or write anew.
+      return { display: `Draft ${d.id}: the earlier Send to @${d.to} did not confirm, and this transport cannot deduplicate a retry. Cancel it (the earlier attempt may have reached them) and open a new draft if you still want to say it. Nothing sent.` };
     }
     d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
     d.idempotencyKey = sendKey(d);
@@ -498,7 +527,7 @@ async function sendHandler(args) {
     if (sent) { cur.sentAt = sentAt; cur.messageId = outcome.message_id || null; }
   });
   if (sent) {
-    withBindings(b => { b[s.to] = { project: s.context && s.context.project ? s.context.project : null, draftId: s.id, kind: s.kind, sentAt, messageId: outcome.message_id || null, firstLine: (s.body || '').split('\n')[0].slice(0, 80) }; });
+    withBindings(b => { b[s.to] = { from: me, project: s.context && s.context.project ? s.context.project : null, draftId: s.id, kind: s.kind, sentAt, messageId: outcome.message_id || null, firstLine: (s.body || '').split('\n')[0].slice(0, 80) }; });
   } else if (!definite && result && typeof result.display === 'string') {
     result = { ...result, display: `${result.display}\n\n_Draft ${s.id} is kept as unconfirmed: Send again retries exactly this text (delivers once), or Cancel._` };
   }

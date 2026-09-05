@@ -433,3 +433,45 @@ test('an unconfirmed draft previews with its real state: retry or cancel, no Edi
   assert.doesNotMatch(p.display, /nothing has been sent/);
   assert.deepEqual(p.data.actions.map(x => x.label), ['Send to @linus again', 'Cancel']);
 });
+
+test('a binding made as one account is invisible to another', async () => {
+  stub(QUIET);
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'private to ada' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  assert.ok(moves.getReturnBinding('linus'));
+  const cfg = require('../config'); const orig = cfg.getHandle; cfg.getHandle = () => 'bob';
+  try { assert.equal(moves.getReturnBinding('linus'), null); } finally { cfg.getHandle = orig; }
+});
+test('a padded or decorated @echo is still refused', async () => {
+  stub(QUIET);
+  const r = await moves.vibe_draft.handler({ handle: ' @Echo ', message: 'feedback' });
+  assert.match(r.display, /@echo is the feedback line/);
+});
+test('an abandoned claim can be previewed (as unknown) and cancelled without retrying', async () => {
+  stub(QUIET);
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'crashed mid-send' });
+  const id = a.data.draft.id;
+  moves.transact(drafts => { const d = drafts.find(x => x.id === id); d.status = 'sending'; d.claimedAt = Date.now() - 120000; d.claimedBy = 999999; });
+  const p = await moves.vibe_draft.handler({ id });
+  assert.match(p.display, /did not confirm/);
+  const c = await moves.vibe_discard_draft.handler({ id });
+  assert.match(c.display, /may or may not have reached them/);
+  assert.equal(sends.length, 0);
+});
+test('a retry of an unconfirmed draft is refused where the transport cannot deduplicate', async () => {
+  stub({ ...QUIET, sendMessage: async () => ({ error: 'transport_failed', message: 'socket hang up' }) });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'v1 only' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  process.env.VIBE_MESSAGES_V1 = 'true';
+  try {
+    const r = await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+    assert.match(r.display, /cannot deduplicate a retry/);
+  } finally { delete process.env.VIBE_MESSAGES_V1; }
+});
+test('an auth refusal after a send attempt is not treated as definite', async () => {
+  stub({ ...QUIET, sendMessage: async () => ({ error: 'auth_expired', message: 'expired' }) });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'auth path' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  const e = await moves.vibe_draft.handler({ id: a.data.draft.id, message: 'edit' });
+  assert.match(e.display, /text is frozen/);
+});

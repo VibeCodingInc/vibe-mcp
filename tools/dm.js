@@ -149,7 +149,11 @@ async function handler(args) {
     // A refusal the server made before writing anything is DEFINITE; a
     // transport or storage failure is not — the write may have committed
     // without a receipt. Drafting tools use this to decide retry vs edit.
-    const DEFINITE = new Set(['auth_expired', 'not_signed_in', 'auth_failed', 'handle_not_found', 'self_dm', 'message_too_long', 'rate_limited']);
+    // Only refusals that provably precede any write: no token at all, a
+    // recipient that does not exist, self, too long, throttled at the door.
+    // An auth error is NOT here: the store retries a 401 with a fresh token,
+    // and the outcome of a retried exchange must stay uncertain (codex P2).
+    const DEFINITE = new Set(['not_signed_in', 'handle_not_found', 'self_dm', 'message_too_long', 'rate_limited']);
     return {
       display: (result && REMEDY_CARRYING.has(result.error))
         ? detail
