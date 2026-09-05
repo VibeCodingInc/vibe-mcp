@@ -175,12 +175,15 @@ function formatThreadDisplay(myHandle, them, thread, { guestSection = '', typing
       const when = store.formatTimeAgo(b.sentAt);
       const from = b.project ? ` from **${b.project}**` : '';
       const yours = `"${inertField(b.firstLine || '', 80)}"`;
-      // A reply is claimed only when something from them arrived AFTER the
-      // send; otherwise this is prior outgoing context, not a reply (codex P2).
-      const replied = latestFromThem && (latestFromThem.timestamp || 0) > b.sentAt;
-      display += replied
+      // "Their reply" is claimed only on VERIFIED linkage: their newest
+      // message carries reply_to pointing at the id we sent. Anything else is
+      // prior outgoing context, labeled neutrally (codex P2 ×2).
+      const rt = latestFromThem && latestFromThem.reply_to;
+      const rtId = rt && typeof rt === 'object' ? (rt.id || rt.message_id) : rt;
+      const verified = Boolean(b.messageId && rtId && rtId === b.messageId);
+      display += verified
         ? `↩ their reply to what you sent${from} ${when}: ${yours}\n\n`
-        : `↩ you wrote them${from} ${when}: ${yours} — no reply yet\n\n`;
+        : `↩ context: you wrote them${from} ${when}: ${yours}\n\n`;
     }
   } catch {}
 

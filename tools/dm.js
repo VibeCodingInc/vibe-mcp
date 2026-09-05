@@ -106,6 +106,7 @@ async function handler(args) {
   if (trimmed.length > MAX_LENGTH) {
     return {
       display: `Not sent — the message is ${trimmed.length} chars and the limit is ${MAX_LENGTH}. Nothing was delivered; shorten it and send again.`,
+      data: { sent: false, definite: true },
     };
   }
   const finalMessage = trimmed;
@@ -145,10 +146,15 @@ async function handler(args) {
       'handle_not_found', 'self_dm', 'storage_error', 'transport_failed',
     ]);
     const detail = (result && result.message) || "That didn't send — nothing was delivered.";
+    // A refusal the server made before writing anything is DEFINITE; a
+    // transport or storage failure is not — the write may have committed
+    // without a receipt. Drafting tools use this to decide retry vs edit.
+    const DEFINITE = new Set(['auth_expired', 'not_signed_in', 'auth_failed', 'handle_not_found', 'self_dm', 'message_too_long', 'rate_limited']);
     return {
       display: (result && REMEDY_CARRYING.has(result.error))
         ? detail
         : `${detail}\n\n_worth one retry — if it keeps failing, say_ \`vibe help troubleshooting\`_._`,
+      data: { sent: false, definite: Boolean(result && DEFINITE.has(result.error)) },
     };
   }
 
@@ -268,7 +274,13 @@ async function handler(args) {
   }
 
   // Build response with optional hints for structured flows
-  const response = { display };
+  // Structured outcome for tools that send on a person's behalf: the display
+  // text is for the human, `data.sent` is the fact (never regex the prose).
+  const response = { display, data: { sent: true, message_id: result.id || null } };
+
+  // An ordinary DM to them supersedes any context-move binding on the
+  // thread: what they say next is a reply to THIS, not to the older draft.
+  if (origin !== 'context_move') { try { require('./moves').clearReturnBinding(them); } catch (e) {} }
 
   // Check if we have any memories for this person
   const memoryCount = memory.count(them);

@@ -25,17 +25,26 @@
  *  - Evidence before rendering: a recipient is named only with a reason the
  *    person can check (their one-liner, an open thread, a question they
  *    asked).  No relevant person → ONE useful question, never an invented
- *    suggestion.
+ *    suggestion.  What the other person wrote is DATA: flattened, bounded,
+ *    labeled "their words".
  *  - Private stays private: the server sees only the context the host agent
  *    chose to pass (a project name, a one-line result, a question).  Paths,
  *    branches, secrets and transcript text are never requested and never
  *    stored anywhere but the local drafts file.  Rejected drafts stay local.
+ *  - Exactly once: Send claims the draft under a whole-file lock, sends with
+ *    an idempotency key derived from the exact text, and finalizes against
+ *    the latest stored state.  A draft whose delivery could not be confirmed
+ *    can be retried (same text, same key) or cancelled, never edited.
  *  - No automatic welcomes, forwarding or background sends.  Free writing and
  *    fully specified `vibe_dm` calls are untouched — there is no wizard.
+ *
+ * Draft states: suggested → previewed → sending → sent
+ *                                    ↘ cancelled          ↘ unknown (retry/cancel only)
  */
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const config = require('../config');
 const store = require('../store');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
@@ -45,30 +54,81 @@ const DRAFTS_FILE = path.join(config.VIBE_DIR, 'drafts.json');
 const BINDINGS_FILE = path.join(config.VIBE_DIR, 'return-bindings.json');
 const MAX_MOVES = 3;
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
+const BINDING_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const LOCK_STALE_MS = 10 * 1000;         // a transaction never takes this long
+const CLAIM_STALE_MS = 60 * 1000;        // a send claim older than this from a dead process is abandoned
+const CLAIM_HARD_STALE_MS = 10 * 60 * 1000;
 
-// ── local, private state ─────────────────────────────────────────────────────
+// ── local, private state (one file, one lock, atomic replace) ────────────────
 
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
 }
-function writeJson(file, value) {
+function writeJsonAtomic(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(value, null, 2), { mode: 0o600 });
+  const tmp = `${file}.${process.pid}.${crypto.randomBytes(3).toString('hex')}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, file);
 }
-function loadDrafts() {
-  const now = Date.now();
-  const all = readJson(DRAFTS_FILE, []);
-  return Array.isArray(all) ? all.filter(d => d && now - (d.createdAt || 0) < DRAFT_TTL_MS) : [];
+function sleepSync(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { const end = Date.now() + ms; while (Date.now() < end) { /* spin */ } }
 }
-function saveDrafts(drafts) { writeJson(DRAFTS_FILE, drafts); }
-function loadBindings() { const b = readJson(BINDINGS_FILE, {}); return b && typeof b === 'object' ? b : {}; }
-function saveBindings(b) { writeJson(BINDINGS_FILE, b); }
+function pidAlive(pid) {
+  if (!pid) return false;
+  if (pid === process.pid) return true;
+  try { process.kill(pid, 0); return true; } catch (e) { return Boolean(e && e.code === 'EPERM'); }
+}
+/**
+ * Run fn(drafts) under an exclusive lock on the drafts file and write the
+ * result back atomically. Two hosts sharing one VIBE_HOME cannot lose each
+ * other's drafts (codex P2). Synchronous on purpose: no await between load
+ * and save, so nothing interleaves inside one process either.
+ */
+function transact(fn) {
+  const lock = `${DRAFTS_FILE}.lock`;
+  fs.mkdirSync(path.dirname(DRAFTS_FILE), { recursive: true });
+  const deadline = Date.now() + 3000;
+  for (;;) {
+    try { fs.writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 }); break; }
+    catch (e) {
+      if (!e || e.code !== 'EEXIST') throw e;
+      let stale = false;
+      try { const st = fs.statSync(lock); stale = Date.now() - st.mtimeMs > LOCK_STALE_MS; } catch { stale = true; }
+      if (stale) { try { fs.unlinkSync(lock); } catch {} continue; }
+      if (Date.now() > deadline) throw new Error('drafts file is busy — try again in a moment');
+      sleepSync(20);
+    }
+  }
+  try {
+    const now = Date.now();
+    const all = readJson(DRAFTS_FILE, []);
+    const drafts = Array.isArray(all) ? all.filter(d => d && now - (d.createdAt || 0) < DRAFT_TTL_MS) : [];
+    const out = fn(drafts);
+    writeJsonAtomic(DRAFTS_FILE, drafts);
+    return out;
+  } finally {
+    try { fs.unlinkSync(lock); } catch {}
+  }
+}
+function loadDrafts() { return transact(d => d.map(x => ({ ...x }))); }
 
-/** Exposed for vibe_inbox: the private binding for a thread, if any. */
+function loadBindings() { const b = readJson(BINDINGS_FILE, {}); return b && typeof b === 'object' ? b : {}; }
+function saveBindings(b) { writeJsonAtomic(BINDINGS_FILE, b); }
+/** The private binding for a thread, if any and not expired. */
 function getReturnBinding(handle) {
   const b = loadBindings()[normalizeHandle(handle)];
-  return b && typeof b === 'object' ? b : null;
+  if (!b || typeof b !== 'object' || !b.sentAt) return null;
+  if (Date.now() - b.sentAt > BINDING_TTL_MS) return null;
+  return b;
 }
+/** An ordinary DM to them supersedes the binding — the thread has moved on. */
+function clearReturnBinding(handle) {
+  const b = loadBindings(); const h = normalizeHandle(handle);
+  if (b[h]) { delete b[h]; saveBindings(b); }
+}
+
+const newId = (prefix) => `${prefix}${crypto.randomBytes(4).toString('hex')}`;
+const sendKey = (d) => `draft-${d.id}-${crypto.createHash('sha1').update(compose(d)).digest('hex').slice(0, 10)}`;
 
 // ── relevance: evidence, not inference ───────────────────────────────────────
 
@@ -78,10 +138,7 @@ function tokens(text) {
   return new Set(String(text || '').toLowerCase().replace(/[^a-z0-9\s./-]/g, ' ').split(/[\s/]+/).map(w => w.replace(/^[.-]+|[.-]+$/g, '')).filter(w => w.length >= 4 && !STOP.has(w)));
 }
 function overlap(a, b) { const out = []; for (const w of a) if (b.has(w)) out.push(w); return out; }
-
-function contextText(ctx) {
-  return [ctx.project, ctx.doing, ctx.result, ctx.question, ctx.blocker].filter(Boolean).join(' ');
-}
+function contextText(ctx) { return [ctx.project, ctx.doing, ctx.result, ctx.question, ctx.blocker].filter(Boolean).join(' '); }
 
 function cleanContext(raw) {
   const ctx = raw && typeof raw === 'object' ? raw : {};
@@ -89,14 +146,7 @@ function cleanContext(raw) {
   const refs = Array.isArray(ctx.refs)
     ? ctx.refs.filter(r => r && typeof r.url === 'string' && /^https?:\/\//.test(r.url)).slice(0, 3).map(r => ({ title: str(r.title, 80) || r.url, url: r.url.slice(0, 300) }))
     : [];
-  return {
-    project: str(ctx.project, 60),
-    doing: str(ctx.doing, 160),
-    result: str(ctx.result, 280),
-    question: str(ctx.question, 280),
-    blocker: str(ctx.blocker, 280),
-    refs,
-  };
+  return { project: str(ctx.project, 60), doing: str(ctx.doing, 160), result: str(ctx.result, 280), question: str(ctx.question, 280), blocker: str(ctx.blocker, 280), refs };
 }
 
 function refLines(refs) { return refs && refs.length ? '\n' + refs.map(r => `${r.title}: ${r.url}`).join('\n') : ''; }
@@ -107,7 +157,8 @@ function theirWords(text, max = 80) { return `"${inertField(text, max)}"`; }
 function personLine(u) { return String(u.one_liner || u.workingOn || u.project || ''); }
 
 // The drafts are plain and short. The person will read them before anything
-// happens; the point is that they do not have to TYPE them.
+// happens; the point is that they do not have to TYPE them. The kind follows
+// what the context actually holds — never a template with a hole in it.
 function draftFor(kind, ctx) {
   const re = ctx.project ? `re: ${ctx.project} — ` : '';
   if (kind === 'share') return `${re}${ctx.result}`;
@@ -118,10 +169,7 @@ function draftFor(kind, ctx) {
   return `${re}${ctx.result || ctx.question || ctx.blocker || ctx.doing}`;
 }
 
-/**
- * Build up to three moves from evidence. Returns { moves } or { ask }.
- * Pure: takes the roster and inbox it was given; never sends.
- */
+/** Build up to three moves from evidence. Returns { moves } or { ask }. Pure; never sends. */
 function computeMoves(ctx, me, roster, threads, now = Date.now()) {
   const hasContext = Boolean(ctx.result || ctx.question || ctx.blocker || ctx.doing);
   if (!hasContext) {
@@ -132,28 +180,24 @@ function computeMoves(ctx, me, roster, threads, now = Date.now()) {
   const byHandle = new Map(people.map(u => [u.handle, u]));
   const candidates = [];
 
-  // Evidence A: an open thread where THEY wrote last — a question or a nudge
-  // waiting on me. Answering it with the result is the most useful move.
+  // Evidence A: an open thread where THEY wrote last — someone waiting on you
+  // outranks any keyword overlap; their question is the strongest evidence a
+  // message would be welcome.
   for (const t of threads || []) {
     if (!t || !t.handle || t.handle === me) continue;
     if (t.lastFrom && t.lastFrom !== me && t.lastMessage) {
       const ageH = t.lastTimestamp ? Math.max(0, (now - t.lastTimestamp) / 3600000) : null;
-      // The draft kind follows what the context actually holds — never a
-      // template with a hole in it (codex P2: "quick one: undefined").
       const kind = ctx.result ? 'answer' : (ctx.question || ctx.blocker) ? 'ask' : 'update';
       candidates.push({
-        kind,
-        to: t.handle,
+        kind, to: t.handle,
         why: `they wrote you${ageH != null ? ` ${ageH < 1 ? 'under an hour' : Math.round(ageH) + 'h'} ago` : ''} (their words): ${theirWords(t.lastMessage)}`,
-        // Someone waiting on you outranks any keyword overlap: their question
-        // is the strongest evidence a message would be welcome.
         score: 6 + (ageH != null && ageH < 24 ? 1 : 0),
       });
     }
   }
-  // Evidence B: someone here whose one-liner overlaps the work.
+  // Evidence B: someone here whose one-liner overlaps the work. The store
+  // serves the presence text as `one_liner` (older rows: workingOn).
   for (const u of people) {
-    // The store serves the presence text as `one_liner` (older rows: workingOn).
     const ov = overlap(ctxTok, tokens(personLine(u)));
     if (!ov.length) continue;
     const here = isHereNow(u);
@@ -169,8 +213,6 @@ function computeMoves(ctx, me, roster, threads, now = Date.now()) {
     return { ask: `Who is this for? ${around ? `${around} ${around === 1 ? 'person is' : 'people are'} around` : 'Nobody is around right now'} and none of their one-liners touch ${topic} — name a handle, or tell me who would care.` };
   }
 
-  // One move per (recipient, kind); best first; at most one move per person
-  // unless nobody else qualifies; never more than three.
   candidates.sort((a, b) => b.score - a.score);
   const moves = []; const used = new Set();
   for (const c of candidates) {
@@ -178,7 +220,8 @@ function computeMoves(ctx, me, roster, threads, now = Date.now()) {
     if (used.has(c.to) && candidates.some(o => !used.has(o.to) && o !== c)) continue;
     used.add(c.to);
     const person = byHandle.get(c.to) || { handle: c.to };
-    moves.push({ kind: c.kind, to: c.to, why: c.why, body: draftFor(c.kind, ctx), refs: ctx.refs, message: draftFor(c.kind, ctx) + refLines(ctx.refs), here: isHereNow(person) });
+    const body = draftFor(c.kind, ctx);
+    moves.push({ kind: c.kind, to: c.to, why: c.why, body, refs: ctx.refs, message: body + refLines(ctx.refs), here: isHereNow(person) });
   }
   return { moves };
 }
@@ -226,20 +269,19 @@ async function movesHandler(args) {
     : '';
 
   const out = computeMoves(ctx, me, roster, threads);
-  if (out.ask) {
-    return { display: out.ask + evidenceNote, data: { ask: out.ask, moves: [] } };
-  }
+  if (out.ask) return { display: out.ask + evidenceNote, data: { ask: out.ask, moves: [] } };
 
   // Write the drafts locally so that a later "select" is a state change on
-  // disk and never a send. Ids are short and per-batch.
-  const drafts = loadDrafts().filter(d => d.status !== 'suggested');
-  const batch = Date.now().toString(36).slice(-4);
+  // disk and never a send. Earlier unselected suggestions are replaced.
   const moves = out.moves.map((m, i) => ({
-    id: `m${i + 1}-${batch}`, status: 'suggested', createdAt: Date.now(),
+    id: newId(`m${i + 1}-`), status: 'suggested', createdAt: Date.now(),
     kind: m.kind, to: m.to, why: m.why, body: m.body, refs: m.refs,
     context: { project: ctx.project || null },
   }));
-  saveDrafts(drafts.concat(moves));
+  transact(drafts => {
+    for (let i = drafts.length - 1; i >= 0; i--) if (drafts[i].status === 'suggested') drafts.splice(i, 1);
+    drafts.push(...moves);
+  });
 
   const lines = moves.map((m, i) => { const text = compose(m); return `${i + 1}. **${KIND_LABEL[m.kind] || m.kind}** → @${m.to}${out.moves[i].here ? ' (here now)' : ''}\n   why: ${m.why}\n   draft: "${text.split('\n')[0].slice(0, 120)}${text.length > 120 || text.includes('\n') ? '…' : ''}"  _(id ${m.id})_`; });
   const display = `${moves.length === 1 ? 'One move' : `${moves.length} moves`} from what you're doing${ctx.project ? ` on ${ctx.project}` : ''} — nothing sent:\n\n${lines.join('\n\n')}\n\nPick one to see the exact message before anything goes out, write your own, or not now.${evidenceNote}`;
@@ -289,101 +331,131 @@ async function draftHandler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
   const me = config.getHandle();
-  const drafts = loadDrafts();
-  let d = args && args.id ? drafts.find(x => x.id === args.id) : null;
-  if (args && args.id && !d) return { display: `No draft ${args.id} — it may have expired (drafts live 24h, locally). Run vibe_moves again or write the message.` };
-
   const message = typeof (args && args.message) === 'string' ? args.message.trim() : '';
-  if (!d) {
-    if (!args || !args.handle || !message) return { display: 'To open a draft: pass a move id, or a handle and a message. Nothing is sent by this step.' };
-    const to = normalizeHandle(args.handle);
-    if (to === me) return { display: "You can't draft to yourself." };
-    const ctx = cleanContext({ refs: args.refs });
-    d = { id: `w${Date.now().toString(36).slice(-5)}`, status: 'previewed', createdAt: Date.now(), kind: 'free', to, why: 'you named them', body: message, refs: ctx.refs, context: { project: null } };
-    drafts.push(d);
-  } else {
-    // A finished draft stays finished: reopening a sent one must not make it
-    // sendable again, and a cancelled one needs a fresh draft (codex P2).
-    if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — nothing changed. Open a new draft to say more.` };
-    if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — open a new draft (vibe_draft with handle + message, or vibe_moves again). Nothing sent.` };
-    if (d.status === 'sending') return { display: `Draft ${d.id} is being sent right now — nothing to edit.` };
-    if (message) { d.body = message; d.edited = true; }
-    if (args.refs) { d.refs = cleanContext({ refs: args.refs }).refs; }
-    d.status = 'previewed';
-  }
-  if (compose(d).length > 2000) return { display: `Not ready — the message is ${compose(d).length} chars and the limit is 2000. Edit it shorter; nothing was sent.` };
-  saveDrafts(drafts);
-  return preview(d, await findPerson(d.to));
+  const wantId = args && args.id;
+
+  const out = transact(drafts => {
+    let d = wantId ? drafts.find(x => x.id === wantId) : null;
+    if (wantId && !d) return { display: `No draft ${wantId} — it may have expired (drafts live 24h, locally). Run vibe_moves again or write the message.` };
+    if (!d) {
+      if (!args || !args.handle || !message) return { display: 'To open a draft: pass a move id, or a handle and a message. Nothing is sent by this step.' };
+      const to = normalizeHandle(args.handle);
+      if (to === me) return { display: "You can't draft to yourself." };
+      // @echo is the feedback line with its own path and no receipt shape;
+      // it is not a person to draft to (codex P2).
+      if (to === 'echo') return { display: '@echo is the feedback line — send to it with vibe_dm directly. Nothing drafted.' };
+      d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), kind: 'free', to, why: 'you named them', body: message, refs: cleanContext({ refs: args.refs }).refs, context: { project: null } };
+      drafts.push(d);
+    } else {
+      // A finished draft stays finished; an unconfirmed one may only be
+      // retried as-is or cancelled (its idempotency key names THIS text).
+      if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — nothing changed. Open a new draft to say more.` };
+      if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — open a new draft (vibe_draft with handle + message, or vibe_moves again). Nothing sent.` };
+      if (d.status === 'sending') return { display: `Draft ${d.id} is being sent right now — nothing to edit.` };
+      if (d.status === 'unknown' && (message || args.refs)) return { display: `Draft ${d.id}: the last Send to @${d.to} did not confirm, so the text is frozen — Send again to retry exactly that text (it delivers once), or Cancel. To say something different, cancel and open a new draft.` };
+      if (d.status !== 'unknown') {
+        if (message) { d.body = message; d.edited = true; }
+        if (args.refs) { d.refs = cleanContext({ refs: args.refs }).refs; }
+        d.status = 'previewed';
+      }
+    }
+    if (compose(d).length > 2000) return { display: `Not ready — the message is ${compose(d).length} chars and the limit is 2000. Edit it shorter; nothing was sent.` };
+    return { draft: { ...d } };
+  });
+  if (out.display) return out;
+  return preview(out.draft, await findPerson(out.draft.to));
 }
 
 // ── vibe_discard_draft ───────────────────────────────────────────────────────
 
 const discardDefinition = {
   name: 'vibe_discard_draft',
-  description: 'Cancel a draft. Sends nothing; the draft stays on this machine only until it expires.',
+  description: 'Cancel a draft that has not been sent. Sends nothing; the draft stays on this machine only until it expires. A draft already being sent, or sent, cannot be cancelled — this says so instead of pretending.',
   inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
 };
 
 async function discardHandler(args) {
-  const drafts = loadDrafts();
-  const d = drafts.find(x => x.id === (args && args.id));
-  if (!d) return { display: `No draft ${args && args.id} to cancel — nothing was sent either way.` };
-  d.status = 'cancelled';
-  saveDrafts(drafts);
-  return { display: `Cancelled — nothing sent to @${d.to}. The draft stays on your machine.`, data: { draft: { id: d.id, status: 'cancelled' } } };
+  const id = args && args.id;
+  return transact(drafts => {
+    const d = drafts.find(x => x.id === id);
+    if (!d) return { display: `No draft ${id} to cancel — nothing was sent either way.` };
+    if (d.status === 'sending') return { display: `Draft ${d.id} is being sent to @${d.to} right now — it can't be cancelled at this point.`, data: { draft: { id: d.id, status: d.status } } };
+    if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — a sent message can't be unsent.`, data: { draft: { id: d.id, status: d.status } } };
+    const wasUnknown = d.status === 'unknown';
+    d.status = 'cancelled';
+    return {
+      display: wasUnknown
+        ? `Cancelled — no further send to @${d.to}. Note: the earlier attempt did not confirm, so it may or may not have reached them.`
+        : `Cancelled — nothing sent to @${d.to}. The draft stays on your machine.`,
+      data: { draft: { id: d.id, status: 'cancelled' } },
+    };
+  });
 }
 
 // ── vibe_send_draft ──────────────────────────────────────────────────────────
 
 const sendDefinition = {
   name: 'vibe_send_draft',
-  description: "Send a reviewed draft exactly as previewed. This IS the person's approval — call it only when they chose \"Send to @handle\"; do not ask again afterward. Sends once through the ordinary message path and records a private, local note of the work it was sent from so the reply can be labeled.",
+  description: "Send a reviewed draft exactly as previewed. This IS the person's approval — call it only when they chose \"Send to @handle\"; do not ask again afterward. Sends once through the ordinary message path (a retry of an unconfirmed send delivers once) and records a private, local note of the work it was sent from so the reply can be labeled.",
   inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
 };
 
 async function sendHandler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
-  const drafts = loadDrafts();
-  const d = drafts.find(x => x.id === (args && args.id));
-  if (!d) return { display: `No draft ${args && args.id} — nothing sent. Open it with vibe_draft first.` };
-  if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — not sending it twice.` };
-  if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.` };
-  if (d.status === 'sending') return { display: `Draft ${d.id} is already being sent — not sending it twice.` };
-  if (d.status !== 'previewed') return { display: `Draft ${d.id} has not been reviewed yet — open it with vibe_draft so you see the exact message first. Nothing sent.` };
+  const id = args && args.id;
 
-  // Claim the draft ATOMICALLY before anything leaves the machine: an
-  // exclusive lock file (O_EXCL) plus a persisted 'sending' state and a
-  // stable idempotency key per draft. Two overlapping Sends, or a retry
-  // after a timeout, deliver once (codex P1).
-  const lock = `${DRAFTS_FILE}.${d.id}.lock`;
-  try { fs.writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 }); }
-  catch (e) { if (e && e.code === 'EEXIST') return { display: `Draft ${d.id} is already being sent — not sending it twice.` }; throw e; }
-  const message = compose(d);
-  const idempotencyKey = d.idempotencyKey || `draft-${d.id}`;
-  d.status = 'sending'; d.idempotencyKey = idempotencyKey;
-  saveDrafts(drafts);
+  // 1. Claim under the lock: nothing leaves the machine until this draft is
+  //    marked 'sending' with a key derived from the exact text.
+  const claim = transact(drafts => {
+    const d = drafts.find(x => x.id === id);
+    if (!d) return { display: `No draft ${id} — nothing sent. Open it with vibe_draft first.` };
+    if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — not sending it twice.` };
+    if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.` };
+    if (d.status === 'suggested') return { display: `Draft ${d.id} has not been reviewed yet — open it with vibe_draft so you see the exact message first. Nothing sent.` };
+    if (d.status === 'sending') {
+      const age = Date.now() - (d.claimedAt || 0);
+      const abandoned = age > CLAIM_HARD_STALE_MS || (age > CLAIM_STALE_MS && !pidAlive(d.claimedBy));
+      if (!abandoned) return { display: `Draft ${d.id} is already being sent — not sending it twice.` };
+      // The claiming process died mid-send: retry the SAME text under the
+      // SAME key — the server deduplicates, so this delivers once (codex P2).
+    }
+    d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
+    d.idempotencyKey = sendKey(d);
+    return { snapshot: { id: d.id, to: d.to, kind: d.kind, body: d.body, refs: d.refs, context: d.context, message: compose(d), key: d.idempotencyKey } };
+  });
+  if (claim.display) return claim;
+  const s = claim.snapshot;
 
+  // 2. Deliver, outside the lock.
   let result;
   try {
     const dm = require('./dm');
-    result = await dm.handler({ handle: d.to, message, origin: 'context_move', idempotency_key: idempotencyKey });
+    result = await dm.handler({ handle: s.to, message: s.message, origin: 'context_move', idempotency_key: s.key });
   } catch (e) {
-    result = { display: `That didn't send — ${e && e.message ? e.message : 'unknown error'}. Nothing was delivered; the draft is still here.` };
-  } finally {
-    try { fs.unlinkSync(lock); } catch {}
+    result = { display: `That didn't send — ${e && e.message ? e.message : 'unknown error'}. Nothing confirmed; the draft is still here.`, data: { sent: false, definite: false } };
   }
-  const sent = result && typeof result.display === 'string' && /^Sent to \*\*@/.test(result.display);
-  // Merge the outcome into the LATEST stored state — other drafts may have
-  // been created or edited while delivery was in flight (codex P2).
-  const latest = loadDrafts();
-  const cur = latest.find(x => x.id === d.id);
-  if (cur) { cur.status = sent ? 'sent' : 'previewed'; cur.idempotencyKey = idempotencyKey; if (sent) cur.sentAt = Date.now(); }
-  saveDrafts(latest);
+  const outcome = result && result.data && typeof result.data === 'object' ? result.data : {};
+  const sent = outcome.sent === true;
+  const definite = outcome.definite === true;
+
+  // 3. Finalize against the LATEST stored state (other drafts may have
+  //    changed meanwhile). A confirmed failure returns to 'previewed'; an
+  //    unconfirmed one becomes 'unknown' — retry same text, or cancel.
+  const sentAt = Date.now();
+  transact(drafts => {
+    const cur = drafts.find(x => x.id === s.id);
+    if (!cur) return;
+    cur.status = sent ? 'sent' : (definite ? 'previewed' : 'unknown');
+    delete cur.claimedAt; delete cur.claimedBy;
+    if (sent) { cur.sentAt = sentAt; cur.messageId = outcome.message_id || null; }
+  });
   if (sent) {
     const b = loadBindings();
-    b[d.to] = { project: d.context && d.context.project ? d.context.project : null, draftId: d.id, kind: d.kind, sentAt: cur ? cur.sentAt : Date.now(), firstLine: (d.body || '').split('\n')[0].slice(0, 80) };
+    b[s.to] = { project: s.context && s.context.project ? s.context.project : null, draftId: s.id, kind: s.kind, sentAt, messageId: outcome.message_id || null, firstLine: (s.body || '').split('\n')[0].slice(0, 80) };
     saveBindings(b);
+  } else if (!definite && result && typeof result.display === 'string') {
+    result = { ...result, display: `${result.display}\n\n_Draft ${s.id} is kept as unconfirmed: Send again retries exactly this text (delivers once), or Cancel._` };
   }
   return result;
 }
@@ -394,6 +466,6 @@ module.exports = {
   vibe_draft: { definition: draftDefinition, handler: draftHandler },
   vibe_discard_draft: { definition: discardDefinition, handler: discardHandler },
   vibe_send_draft: { definition: sendDefinition, handler: sendHandler },
-  // exported for tests and for vibe_inbox
-  computeMoves, cleanContext, getReturnBinding, DRAFTS_FILE, BINDINGS_FILE,
+  // exported for tests and for vibe_inbox / vibe_dm
+  computeMoves, cleanContext, getReturnBinding, clearReturnBinding, loadDrafts, transact, DRAFTS_FILE, BINDINGS_FILE,
 };

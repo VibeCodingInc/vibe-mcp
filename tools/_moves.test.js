@@ -169,7 +169,7 @@ test('free writing still works: handle + message previews without a wizard, and 
   assert.equal(sends.length, 1); assert.equal(sends[0].message, 'coffee thursday?');
 });
 test('vibe_inbox labels the reply thread with the work it came from', async () => {
-  stub({ ...QUIET, getThread: async () => [{ id: 'msg_r1', from: 'linus', to: 'ada', body: 'yes — nice, ship it', timestamp: Date.now() + 1000 }] });
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_sent_1', success: true }; }, getThread: async () => [{ id: 'msg_r1', from: 'linus', to: 'ada', body: 'yes — nice, ship it', timestamp: Date.now() + 1000, reply_to: { id: 'msg_sent_1' } }] });
   const m = await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential now' } });
   const id = m.data.moves[0].id;
   await moves.vibe_draft.handler({ id });
@@ -179,6 +179,97 @@ test('vibe_inbox labels the reply thread with the work it came from', async () =
   const res = await inbox.handler({ handle: 'linus' });
   assert.match(res.display, /↩ their reply to what you sent from \*\*payments\*\*/);
 });
+test('an inbound message that is not linked to what you sent gets the neutral context label', async () => {
+  stub({ ...QUIET, getThread: async () => [{ id: 'msg_other', from: 'linus', to: 'ada', body: 'unrelated: lunch?', timestamp: Date.now() + 1000, reply_to: { id: 'msg_something_else' } }] });
+  const m = await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential now' } });
+  const id = m.data.moves[0].id;
+  await moves.vibe_draft.handler({ id });
+  await moves.vibe_send_draft.handler({ id });
+  const inboxPath = require.resolve('./inbox.js'); delete require.cache[inboxPath];
+  const res = await require(inboxPath).handler({ handle: 'linus' });
+  assert.match(res.display, /↩ context: you wrote them from \*\*payments\*\*/);
+  assert.doesNotMatch(res.display, /their reply/);
+});
+test('an ordinary vibe_dm to them clears the binding', async () => {
+  stub(QUIET);
+  const m = await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential now' } });
+  const id = m.data.moves[0].id;
+  await moves.vibe_draft.handler({ id });
+  await moves.vibe_send_draft.handler({ id });
+  assert.ok(moves.getReturnBinding('linus'));
+  const dmPath = require.resolve('./dm.js'); delete require.cache[dmPath];
+  await require(dmPath).handler({ handle: 'linus', message: 'also — lunch?' });
+  assert.equal(moves.getReturnBinding('linus'), null);
+});
+test('draft ids never collide, even in the same millisecond', async () => {
+  stub(QUIET);
+  const [a, b] = await Promise.all([moves.vibe_draft.handler({ handle: '@linus', message: 'one' }), moves.vibe_draft.handler({ handle: '@grace', message: 'two' })]);
+  assert.notEqual(a.data.draft.id, b.data.draft.id);
+  const drafts = JSON.parse(fs.readFileSync(moves.DRAFTS_FILE, 'utf8'));
+  assert.equal(drafts.filter(d => d.status === 'previewed').length, 2, 'both concurrent drafts survive on disk');
+  await moves.vibe_send_draft.handler({ id: b.data.draft.id });
+  assert.equal(sends.length, 1); assert.equal(sends[0].to, 'grace'); assert.equal(sends[0].message, 'two');
+});
+test('the idempotency key names the exact text: an edit before Send changes it', async () => {
+  stub(QUIET);
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'first text' });
+  const id = a.data.draft.id;
+  await moves.vibe_draft.handler({ id, message: 'second text' });
+  await moves.vibe_send_draft.handler({ id });
+  const crypto = require('node:crypto');
+  const expect = `draft-${id}-${crypto.createHash('sha1').update('second text').digest('hex').slice(0, 10)}`;
+  assert.equal(sends[0].opts.idempotencyKey, expect);
+});
+test('an unconfirmed send freezes the text: retry sends the same text with the same key; edit is refused; cancel warns', async () => {
+  let calls = 0;
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { calls++; if (calls === 1) return { error: 'transport_failed', message: 'socket hang up' }; sends.push({ from, to, message, opts }); return { id: 'msg_retry', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'frozen text' });
+  const id = a.data.draft.id;
+  const first = await moves.vibe_send_draft.handler({ id });
+  assert.match(first.display, /kept as unconfirmed/);
+  const edit = await moves.vibe_draft.handler({ id, message: 'different text' });
+  assert.match(edit.display, /text is frozen/);
+  const retry = await moves.vibe_send_draft.handler({ id });
+  assert.match(retry.display, /Sent to \*\*@linus\*\*/);
+  assert.equal(sends.length, 1); assert.equal(sends[0].message, 'frozen text');
+  const crypto = require('node:crypto');
+  assert.equal(sends[0].opts.idempotencyKey, `draft-${id}-${crypto.createHash('sha1').update('frozen text').digest('hex').slice(0, 10)}`);
+});
+test('a definite refusal (handle not found) returns the draft to editable', async () => {
+  stub({ ...QUIET, sendMessage: async () => ({ error: 'handle_not_found', message: 'No such handle' }) });
+  const a = await moves.vibe_draft.handler({ handle: '@nobody', message: 'hello' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id });
+  const e = await moves.vibe_draft.handler({ id: a.data.draft.id, message: 'hello again' });
+  assert.match(e.display, /hello again/);
+});
+test('cancel is refused while sending and after sent', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { await new Promise(r => setTimeout(r, 40)); sends.push({ from, to, message, opts }); return { id: 'msg_1', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'go' });
+  const id = a.data.draft.id;
+  const sending = moves.vibe_send_draft.handler({ id });
+  await new Promise(r => setTimeout(r, 5));
+  const mid = await moves.vibe_discard_draft.handler({ id });
+  assert.match(mid.display, /can't be cancelled at this point/);
+  await sending;
+  const after = await moves.vibe_discard_draft.handler({ id });
+  assert.match(after.display, /can't be unsent/);
+  assert.equal(sends.length, 1);
+});
+test('an abandoned send claim from a dead process is recovered: one delivery under the same key', async () => {
+  stub(QUIET);
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'orphaned' });
+  const id = a.data.draft.id;
+  moves.transact(drafts => { const d = drafts.find(x => x.id === id); d.status = 'sending'; d.claimedAt = Date.now() - 120000; d.claimedBy = 999999; });
+  const r = await moves.vibe_send_draft.handler({ id });
+  assert.match(r.display, /Sent to \*\*@linus\*\*/);
+  assert.equal(sends.length, 1);
+});
+test('@echo is not a draft recipient', async () => {
+  stub(QUIET);
+  const r = await moves.vibe_draft.handler({ handle: '@echo', message: 'feedback' });
+  assert.match(r.display, /@echo is the feedback line/);
+  assert.equal(sends.length, 0);
+});
 test('before any reply, the binding reads as prior outgoing context — never as a reply', async () => {
   stub({ ...QUIET, getThread: async () => [{ id: 'msg_old', from: 'linus', to: 'ada', body: 'did the payments retry fix land?', timestamp: NOW - 2 * 3600000 }] });
   const m = await moves.vibe_moves.handler({ context: { project: 'payments', result: 'retry backoff is exponential now' } });
@@ -187,7 +278,7 @@ test('before any reply, the binding reads as prior outgoing context — never as
   await moves.vibe_send_draft.handler({ id });
   const inboxPath = require.resolve('./inbox.js'); delete require.cache[inboxPath];
   const res = await require(inboxPath).handler({ handle: 'linus' });
-  assert.match(res.display, /↩ you wrote them from \*\*payments\*\* .* — no reply yet/);
+  assert.match(res.display, /↩ context: you wrote them from \*\*payments\*\*/);
   assert.doesNotMatch(res.display, /their reply/);
 });
 test('foreign text in the evidence is flattened and labeled as their words', () => {
@@ -210,7 +301,7 @@ test('two overlapping Sends deliver once, with one stable idempotency key', asyn
   await moves.vibe_draft.handler({ id });
   const [a, b] = await Promise.all([moves.vibe_send_draft.handler({ id }), moves.vibe_send_draft.handler({ id })]);
   assert.equal(sends.length, 1);
-  assert.equal(sends[0].opts.idempotencyKey, `draft-${id}`);
+  assert.match(sends[0].opts.idempotencyKey, new RegExp(`^draft-${id}-[0-9a-f]{10}$`));
   assert.ok([a.display, b.display].some(t => /already being sent|already sent/.test(t)));
 });
 test('a draft created while another is being sent survives the send', async () => {
