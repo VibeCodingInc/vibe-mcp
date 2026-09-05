@@ -533,6 +533,10 @@ async function sendMessage(from, to, body, type = 'dm', payload = null, options 
         idempotency_key: idempotencyKey,
         reply_to: options.replyTo || undefined,  // Threaded reply support
         origin: options.origin || undefined,     // work-object lifecycle state
+        // #392 approval digest: SHA-256 over "<stored recipient>\n<body>" as
+        // previewed. The server refuses a send whose stored text or recipient
+        // would differ. Absent → unchanged behaviour.
+        approved_sha256: options.approvedSha256 || undefined,
       };
       console.error('[vibe] Sending message via v2 API (Postgres-backed) to:', to, 'body length:', (body || '').length);
     }
@@ -682,6 +686,9 @@ async function getInboxInner(handle) {
         lastMessage: t.last_message?.body,
         lastMessageId: t.last_message?.id || null,
         lastFrom: t.last_message?.from || null,
+        // Actor metadata of the newest message, as served (#272: server-owned).
+        // Drafting tools use it so an agent is never suggested as a person.
+        lastActorKind: t.last_message?.actor?.kind || null,
         muted: t.preferences?.muted || false,
         lastTimestamp: t.last_message?.created_at ? new Date(t.last_message.created_at).getTime() : null
       }));
@@ -726,6 +733,9 @@ async function getInboxV1(handle) {
         // name explicitly (first-five-minutes repair: no guessed targets).
         lastMessageId: t.last_message?.id || null,
         lastFrom: t.last_message?.from || null,
+        // Actor metadata of the newest message, as served (#272: server-owned).
+        // Drafting tools use it so an agent is never suggested as a person.
+        lastActorKind: t.last_message?.actor?.kind || null,
         lastTimestamp: t.last_message?.created_at ? new Date(t.last_message.created_at).getTime() : null
       }));
     }
@@ -1469,7 +1479,29 @@ async function getPeople() {
   }
 }
 
+/**
+ * Who a handle IS, from the served identity (#384: seven public fields, no
+ * credentials). Drafting tools use `kind` so an agent that wrote you is
+ * never suggested as a person — the thread list does not carry actor
+ * metadata yet. Returns 'human' | 'agent' | 'automated' | null (unknown).
+ */
+const identityKindCache = new Map();
+async function getIdentityKind(handle) {
+  const h = String(handle || '').replace(/^@+/, '').toLowerCase();
+  if (!h) return null;
+  if (identityKindCache.has(h)) return identityKindCache.get(h);
+  let kind = null;
+  try {
+    const r = await request('GET', `/api/identity/${encodeURIComponent(h)}`);
+    const k = r && (r.kind || (r.identity && r.identity.kind) || (r.data && r.data.kind));
+    if (k === 'human' || k === 'agent' || k === 'automated') kind = k;
+  } catch (e) { kind = null; }
+  identityKindCache.set(h, kind);
+  return kind;
+}
+
 module.exports = {
+  getIdentityKind,
   setNotificationPace,
   // People (opt-in discovery)
   setListed,

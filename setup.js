@@ -262,6 +262,46 @@ function configureAllHosts() {
 }
 
 /**
+ * Install the /vibe host command — the one-line entry to context-guided
+ * messaging ("from what I'm doing, who should I talk to?"). Written only where
+ * no /vibe command or skill already exists; never overwritten, so a person's
+ * own /vibe stays theirs. Claude Code reads ~/.claude/commands/vibe.md;
+ * Codex reads $CODEX_HOME/prompts/vibe.md.
+ */
+function installHostCommands() {
+  const src = path.join(__dirname, 'hosts', 'vibe-command.md');
+  let body;
+  try { body = fs.readFileSync(src, 'utf8'); } catch { return []; }
+  const installed = [];
+  // Optional on both hosts: a failure here (unwritable dir, an entry that is
+  // not a file) is reported per host and never aborts setup (codex P2).
+  const tryInstall = (host, file, content) => {
+    try {
+      if (fs.existsSync(file)) return;
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, content, 'utf8');
+      installed.push({ host, path: file });
+    } catch (e) {
+      installed.push({ host, path: file, error: e && e.message ? e.message : String(e) });
+    }
+  };
+  // A person's own /vibe (command or skill) is never overwritten: when it
+  // exists, the candidate installs beside it as /vibe-moves and says so.
+  const claudeDir = path.join(os.homedir(), '.claude');
+  if (fs.existsSync(claudeDir)) {
+    const taken = fs.existsSync(path.join(claudeDir, 'skills', 'vibe', 'SKILL.md')) || fs.existsSync(path.join(claudeDir, 'commands', 'vibe.md'));
+    tryInstall('Claude Code', path.join(claudeDir, 'commands', taken ? 'vibe-moves.md' : 'vibe.md'), body);
+  }
+  const cx = codexHome();
+  // Codex prompts take no frontmatter; strip it.
+  if (fs.existsSync(cx)) {
+    const taken = fs.existsSync(path.join(cx, 'prompts', 'vibe.md'));
+    tryInstall('Codex', path.join(cx, 'prompts', taken ? 'vibe-moves.md' : 'vibe.md'), body.replace(/^---[\s\S]*?---\n/, ''));
+  }
+  return installed;
+}
+
+/**
  * Test API connection
  */
 async function testConnection() {
@@ -449,6 +489,8 @@ async function setup() {
   // Step 2: Add /vibe MCP server to every detected host
   printStep(2, 'Adding /vibe MCP server...', 'running');
   const hostResults = configureAllHosts();
+  const hostCommands = installHostCommands();
+  for (const c of hostCommands) console.log(c.error ? `  (could not install the /vibe command for ${c.host}: ${c.error} — everything else still works)` : `  /vibe command installed for ${c.host}: ${c.path}`);
   for (const r of hostResults) {
     const note = r.status === 'added' ? 'configured'
       : r.status === 'exists' ? 'already configured'

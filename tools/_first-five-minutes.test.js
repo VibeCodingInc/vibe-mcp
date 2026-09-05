@@ -92,7 +92,12 @@ test('P2: a staggered caller reports a browser state it actually knows', async (
 test('P2: a slow launcher yields "unknown", never a wait and never a false claim', async () => {
   const restore = quietStore();
   const saved = process.env.SSH_CONNECTION;
-  delete process.env.SSH_CONNECTION; // let it try to launch
+  // "Let it try to launch": the launcher declines outright over SSH AND under
+  // CI (GitHub sets CI=true), and a declined launch is an honest `false`, not
+  // 'unknown'. This test is about a launcher that HANGS, so every headless
+  // gate is lifted for its duration (CI runs 301/302 went red on this).
+  const savedGates = { SSH_TTY: process.env.SSH_TTY, CI: process.env.CI };
+  delete process.env.SSH_CONNECTION; delete process.env.SSH_TTY; delete process.env.CI;
   const cp = require('node:child_process');
   const origExec = cp.exec;
   cp.exec = (_cmd, cb) => { setTimeout(() => cb(null, '', ''), 30_000); return { unref() {} }; }; // hangs
@@ -109,6 +114,7 @@ test('P2: a slow launcher yields "unknown", never a wait and never a false claim
   } finally {
     cp.exec = origExec;
     if (saved !== undefined) process.env.SSH_CONNECTION = saved;
+    for (const [k, v] of Object.entries(savedGates)) if (v !== undefined) process.env[k] = v;
     delete require.cache[require.resolve('./init')];
   }
 });

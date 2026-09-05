@@ -41,6 +41,14 @@ const definition = {
         type: 'number',
         description: 'Optional: Attach an instant USDC tip (100 = $1, 500 = $5, 1000 = $10)'
       },
+      idempotency_key: {
+        type: 'string',
+        description: 'Optional: a stable key for this exact send, so a retry delivers once. Drafting tools set it; omit when composing by hand.'
+      },
+      approved_sha256: {
+        type: 'string',
+        description: 'Optional (#392): hex SHA-256 over UTF-8 of "<recipient>\n<message>" — recipient lowercased without a leading @, message trimmed — binding this send to exactly what the person approved. The server refuses a send that would store anything different. Drafting tools set it.'
+      },
       origin: {
         type: 'string',
         description: "How this message came to be. Omit for a normal message you're composing. Pass the value the drafting tool told you to use when sending a draft it produced: 'intro' (vibe_intro), 'stuck_solver' (vibe_weave solve), 'held_half' (a Fable-held reply), 'fable'."
@@ -54,7 +62,7 @@ async function handler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
 
-  const { handle, message, artifact_slug, payload, reply_to, tip_amount_cents, origin } = args;
+  const { handle, message, artifact_slug, payload, reply_to, tip_amount_cents, origin, idempotency_key, approved_sha256 } = args;
   const myHandle = config.getHandle();
   const them = normalizeHandle(handle);
 
@@ -102,6 +110,7 @@ async function handler(args) {
   if (trimmed.length > MAX_LENGTH) {
     return {
       display: `Not sent — the message is ${trimmed.length} chars and the limit is ${MAX_LENGTH}. Nothing was delivered; shorten it and send again.`,
+      data: { sent: false, definite: true },
     };
   }
   const finalMessage = trimmed;
@@ -112,8 +121,13 @@ async function handler(args) {
 
   const result = await store.sendMessage(myHandle, them, finalMessage || null, 'dm', finalPayload, {
     replyTo: reply_to || null,
+    idempotencyKey: typeof idempotency_key === 'string' && idempotency_key ? idempotency_key : undefined,
+    approvedSha256: typeof approved_sha256 === 'string' && approved_sha256 ? approved_sha256 : undefined,
     // Default to 'composed' (a human wrote it); drafting tools pass their own
     // origin so the network's derived messages are distinguishable in the funnel.
+    // 'context_move' is allowlisted on the platform (main 5db38c4b, #392):
+    // the host agent prepared it from the active session; the person chose
+    // and explicitly sent.
     origin: origin || 'composed',
   });
 
@@ -140,10 +154,26 @@ async function handler(args) {
       'handle_not_found', 'self_dm', 'storage_error', 'transport_failed',
     ]);
     const detail = (result && result.message) || "That didn't send — nothing was delivered.";
+    // A refusal the server made before writing anything is DEFINITE; a
+    // transport or storage failure is not — the write may have committed
+    // without a receipt. Drafting tools use this to decide retry vs edit.
+    // Only refusals that provably precede any write: no token at all, a
+    // recipient that does not exist, self, too long, throttled at the door.
+    // An auth error is NOT here: the store retries a 401 with a fresh token,
+    // and the outcome of a retried exchange must stay uncertain (codex P2).
+    // Narrowed again (codex round 6): the transport may retry a dropped
+    // connection internally, so even a server refusal on the final attempt
+    // does not prove an earlier attempt wrote nothing. Definite = never
+    // reached the network at all.
+    // The composition-boundary refusals (#392/#394) are checked before any
+    // write and are idempotent on retry (same content → same verdict), so a
+    // retried exchange cannot have committed first: definite.
+    const DEFINITE = new Set(['not_signed_in', 'self_dm', 'message_too_long', 'approved_content_mismatch', 'approved_sha256_malformed', 'approved_send_unsupported_route', 'private_composition_data', 'idempotency_conflict']);
     return {
       display: (result && REMEDY_CARRYING.has(result.error))
         ? detail
         : `${detail}\n\n_worth one retry — if it keeps failing, say_ \`vibe help troubleshooting\`_._`,
+      data: { sent: false, definite: Boolean(result && DEFINITE.has(result.error)) },
     };
   }
 
@@ -263,7 +293,13 @@ async function handler(args) {
   }
 
   // Build response with optional hints for structured flows
-  const response = { display };
+  // Structured outcome for tools that send on a person's behalf: the display
+  // text is for the human, `data.sent` is the fact (never regex the prose).
+  const response = { display, data: { sent: true, message_id: result.id || null } };
+
+  // An ordinary DM to them supersedes any context-move binding on the
+  // thread: what they say next is a reply to THIS, not to the older draft.
+  if (origin !== 'context_move') { try { require('./moves').clearReturnBinding(them); } catch (e) {} }
 
   // Check if we have any memories for this person
   const memoryCount = memory.count(them);
