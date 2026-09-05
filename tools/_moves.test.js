@@ -730,3 +730,44 @@ test('a reply that predates a retried sentAt is still recognized when its reply_
   const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
   assert.equal(r.data.replies.length, 1); assert.equal(r.data.replies[0].verified, true);
 });
+
+test('a retried unconfirmed draft keeps the idempotency key it was first sent under', async () => {
+  let calls = 0;
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { calls++; if (calls === 1) return { error: 'transport_failed', message: 'socket hang up' }; sends.push({ from, to, message, opts }); return { id: 'msg_k', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'keep my key' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  // simulate an upgrade that changed the key formula: the persisted key is what must be reused
+  moves.transact(drafts => { const d = drafts.find(x => x.id === a.data.draft.id); d.idempotencyKey = 'draft-legacy-key-0001'; });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  assert.equal(sends.length, 1); assert.equal(sends[0].opts.idempotencyKey, 'draft-legacy-key-0001');
+});
+test('a directory listing that marks an agent keeps it out even when a presence row exists without the flag', async () => {
+  stub({ ...QUIET, getActiveUsersResult: async () => ({ ok: true, users: [{ handle: 'botty', one_liner: '', status: 'active', lastSeen: NOW }] }), getInboxResult: async () => ({ ok: true, threads: [] }), getPeople: async () => ({ ok: true, listings: [{ handle: 'botty', building: 'local/cloud handoff for agent runtimes', kind: 'agent' }] }) });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', question: 'where should the local/cloud handoff decide?' } });
+  assert.equal(r.data.moves.length, 0);
+});
+test("Platform's after_id read is the first source of a verified reply; the newest matching message wins", async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_q', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'which side decides?' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  let afterCalls = [];
+  stub({ ...QUIET,
+    getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 2, lastFrom: 'linus', lastMessage: 'correction: the cloud side', lastTimestamp: Date.now() + 2000, lastMessageId: 'msg_a2' }] }),
+    getThreadAfter: async (tid, after, limit) => { afterCalls.push([tid, after, limit]); return { ok: true, messages: [{ id: 'msg_a1', from: 'linus', body: 'the local side', reply_to: { id: 'msg_q' } }, { id: 'msg_a2', from: 'linus', body: 'correction: the cloud side', reply_to: { id: 'msg_q' } }], hasMore: false }; },
+    getThread: async () => { throw new Error('fallback must not be needed'); } });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
+  assert.deepEqual(afterCalls[0], ['thread_L', 'msg_q', 50]);
+  assert.equal(r.data.replies[0].verified, true); assert.equal(r.data.replies[0].message_id, 'msg_a2');
+  assert.match(r.data.replies[0].their_words, /correction: the cloud side/);
+});
+test('an unknown anchor from after_id is not treated as "no reply": the fallback still runs', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_q2', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'q2' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  stub({ ...QUIET,
+    getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 1, lastFrom: 'linus', lastMessage: 'ans', lastTimestamp: Date.now() + 2000, lastMessageId: 'msg_b1' }] }),
+    getThreadAfter: async () => ({ ok: false, error: 'after_not_in_thread' }),
+    getThread: async () => [{ id: 'msg_b1', from: 'linus', to: 'ada', body: 'ans', timestamp: Date.now() + 2000, reply_to: { id: 'msg_q2' } }] });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
+  assert.equal(r.data.replies[0].verified, true);
+});

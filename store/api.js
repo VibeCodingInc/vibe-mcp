@@ -1502,8 +1502,26 @@ async function getIdentityKind(handle) {
   return kind;
 }
 
+/**
+ * Everything in a thread AFTER a message you sent (Platform's after_id read,
+ * vibe-platform feat/thread-after-id): one bounded call keyed by the stored
+ * message id, so 'their reply to what you sent' never needs a page-and-scan.
+ * Returns { ok: true, messages, hasMore } · { ok: false, error } where error
+ * is 'after_not_in_thread' (anchor unknown — never an empty page) or a
+ * transport/route failure (older platform: 404/400 → 'unsupported').
+ */
+async function getThreadAfter(threadId, afterId, limit = 50) {
+  try {
+    const r = await request('GET', `/api/v2/threads/${encodeURIComponent(threadId)}?after_id=${encodeURIComponent(afterId)}&limit=${limit}`);
+    if (r && r.success && Array.isArray(r.messages)) return { ok: true, messages: r.messages, hasMore: Boolean(r.has_more), after: r.after || null };
+    if (r && r.error === 'after_not_in_thread') return { ok: false, error: 'after_not_in_thread' };
+    return { ok: false, error: r && r.error ? String(r.error) : 'unsupported' };
+  } catch (e) { return { ok: false, error: e && e.code ? e.code : 'transport_failed' }; }
+}
+
 module.exports = {
   getIdentityKind,
+  getThreadAfter,
   setNotificationPace,
   // People (opt-in discovery)
   setListed,

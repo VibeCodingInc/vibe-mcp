@@ -8,7 +8,7 @@ The person is already working. They typed `/vibe` and nothing else. Your job: no
 
 2. **Call `vibe_moves`.** It returns one strongest move (with alternatives if any) — each a named person, a **why now**, and the exact thing that person said or chose to share (`hook`) — or none, with one question. It connects the work only to something the recipient actually said or listed; recency and a green dot alone are never the reason. **Zero moves is a legitimate result:** say "no useful move from this work right now" and stop; never manufacture one.
 
-   If it returned replies (`replies`): someone answered what the person sent from this work. Show that reply beside the work first, and suggest **one** next step in a sentence. Suggesting it authorizes nothing — do not act on the reply unless asked.
+   If it returned `replies`: show them beside the work first, and say exactly what is known. A `verified: true` entry is their answer to what the person sent from this work (its `reply_to` names the sent message) — suggest **one** next step in a sentence. A `verified: false` entry only arrived after what was sent and is not linked to it — say "wrote after", never "answered". Suggesting a step authorizes nothing; do not act on a reply unless asked.
 
 3. **Judge the strongest move before showing it.** Drop it if the recipient is wrong for this work, if a message would not actually respond to what they said, or if you know the handle is a test/QA account. A mismatch you recognize is suppressed — not shown with a warning. If it falls, take the next alternative through the same judgment; if none survive, say there is no useful move.
 

@@ -466,7 +466,11 @@ async function movesHandler(args) {
     const seen = new Set(roster.map(u => u && u.handle));
     for (const l of listings) {
       if (!l || !l.handle || !l.building) continue;
-      if (seen.has(l.handle)) { const u = roster.find(x => x && x.handle === l.handle); if (u && !personLine(u)) u.one_liner = String(l.building); continue; }
+      if (seen.has(l.handle)) {
+        const u = roster.find(x => x && x.handle === l.handle);
+        if (u) { if (!personLine(u)) u.one_liner = String(l.building); if (l.kind === 'agent' || l.isAgent === true) u.isAgent = true; }
+        continue;
+      }
       roster.push({ handle: l.handle, one_liner: String(l.building), isAgent: l.kind === 'agent' || l.isAgent === true, status: 'offline', lastSeen: null, _source: 'listing' });
     }
   } catch {}
@@ -487,25 +491,37 @@ async function movesHandler(args) {
   // message carries reply_to = the id we sent; otherwise labeled as newer
   // than what you sent. Returning a reply authorizes nothing.
   const replies = [];
+  const replyIdOf = (m) => { const r = m && m.reply_to; return r && typeof r === 'object' ? (r.id || r.message_id || null) : (r || null); };
   const bound = threads.filter(t => t && t.handle && t.lastFrom === t.handle && getReturnBinding(t.handle)).slice(0, 3);
   for (const t of bound) {
-    const b = getReturnBinding(t.handle);
     // Explicit linkage first: a message of theirs whose reply_to is the id
     // we sent is the reply, whatever its timestamp (a retried send records a
-    // later sentAt — codex P2). The thread list does not carry reply_to, so
-    // read the thread tail for bound threads only (bounded by `bound`).
+    // later sentAt). Newest match wins (a corrected answer supersedes).
+    let b = getReturnBinding(t.handle);
+    if (!b) continue;
     let linked = null;
     if (b.messageId) {
-      const rt = (t.lastReplyTo && t.lastReplyTo === b.messageId) ? { id: t.lastMessageId, body: t.lastMessage } : null;
-      if (rt) linked = rt;
-      else if (typeof store.getThread === 'function') {
+      if (t.lastReplyTo && t.lastReplyTo === b.messageId) linked = { id: t.lastMessageId, body: t.lastMessage };
+      // Platform's after_id read: everything after what we sent, one bounded call.
+      if (!linked && t.thread_id && typeof store.getThreadAfter === 'function') {
+        try {
+          const after = await store.getThreadAfter(t.thread_id, b.messageId, 50);
+          if (after && after.ok) { const hits = after.messages.filter(m => m && m.from === t.handle && replyIdOf(m) === b.messageId); if (hits.length) { const h = hits[hits.length - 1]; linked = { id: h.id, body: h.body }; } linked = linked || (after.messages.length ? null : null); if (!linked && after.messages.length === 0) { /* no reply yet: nothing newer than what we sent */ b = getReturnBinding(t.handle); if (!b) continue; continue; } }
+        } catch {}
+      }
+      // Fallback (older platform): the thread read serves the OLDEST page, so
+      // this can miss a reply beyond it — bounded, and only until after_id.
+      if (!linked && typeof store.getThread === 'function') {
         try {
           const msgs = await store.getThread(me, t.handle);
-          const hit = (Array.isArray(msgs) ? msgs : []).filter(m => m && m.from === t.handle).find(m => { const r = m.reply_to; const id = r && typeof r === 'object' ? (r.id || r.message_id) : r; return id === b.messageId; });
-          if (hit) linked = { id: hit.id, body: hit.body };
+          const hits = (Array.isArray(msgs) ? msgs : []).filter(m => m && m.from === t.handle && replyIdOf(m) === b.messageId);
+          if (hits.length) { const h = hits[hits.length - 1]; linked = { id: h.id, body: h.body }; }
         } catch {}
       }
     }
+    // The binding may have been cleared by another session while we awaited.
+    b = getReturnBinding(t.handle);
+    if (!b) continue;
     if (linked) { replies.push({ from: t.handle, project: b.project || null, you_wrote: b.firstLine || '', their_words: inertField(String(linked.body || ''), 200), verified: true, message_id: linked.id || null }); continue; }
     if (!t.lastTimestamp || t.lastTimestamp <= b.sentAt) continue;
     replies.push({ from: t.handle, project: b.project || null, you_wrote: b.firstLine || '', their_words: inertField(String(t.lastMessage || ''), 200), verified: false, message_id: t.lastMessageId || null });
@@ -710,8 +726,13 @@ async function sendHandler(args) {
       // honest options are to cancel (with the warning) or write anew.
       return { display: `Draft ${d.id}: the earlier Send to @${d.to} did not confirm, and this transport cannot deduplicate a retry. Cancel it (the earlier attempt may have reached them) and open a new draft if you still want to say it. Nothing sent.` };
     }
+    // A retry of an unconfirmed send keeps the key it was sent under — the
+    // text cannot have changed while 'unknown', and a key recomputed under a
+    // newer formula would let a committed-but-unreceipted send deliver twice
+    // across an upgrade (codex P1). A fresh revision gets a fresh key.
+    const retrying = d.status === 'unknown' || d.status === 'sending';
     d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
-    d.idempotencyKey = sendKey(d);
+    d.idempotencyKey = (retrying && d.idempotencyKey) ? d.idempotencyKey : sendKey(d);
     const message = compose(d).trim();
     d.approvedSha256 = approvedDigest(d.to, message);
     return { snapshot: { id: d.id, to: d.to, kind: d.kind, body: d.body, refs: d.refs, context: d.context, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, replyTo: d.replyTo || null } };
