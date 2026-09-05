@@ -43,6 +43,7 @@ function restore() { for (const [k, v] of Object.entries(originals)) store[k] = 
 const QUIET = {
   getActiveUsersResult: async () => ({ ok: true, users: ROSTER }),
   getActiveUsers: async () => ROSTER,
+  getPeople: async () => ({ ok: true, listings: [] }),
   getInboxResult: async () => ({ ok: true, threads: THREADS }),
   getInbox: async () => THREADS,
   getUnreadCount: async () => 0,
@@ -770,4 +771,31 @@ test('an unknown anchor from after_id is not treated as "no reply": the fallback
     getThread: async () => [{ id: 'msg_b1', from: 'linus', to: 'ada', body: 'ans', timestamp: Date.now() + 2000, reply_to: { id: 'msg_q2' } }] });
   const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring the handoff' } });
   assert.equal(r.data.replies[0].verified, true);
+});
+
+test('after_id paging: a corrected answer on a later page wins; a read cut short is marked partial', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_q3', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'q3' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  const page = (ids, hasMore) => ({ ok: true, hasMore, messages: ids.map(([id, body, rt]) => ({ id, from: 'linus', body, reply_to: rt ? { id: rt } : null })) });
+  const calls = [];
+  stub({ ...QUIET,
+    getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 3, lastFrom: 'linus', lastMessage: 'unrelated tail', lastTimestamp: Date.now() + 5000, lastMessageId: 'msg_tail' }] }),
+    getThreadAfter: async (tid, after) => { calls.push(after); if (after === 'msg_q3') return page([['msg_a1', 'first answer', 'msg_q3'], ['msg_x', 'noise', null]], true); if (after === 'msg_x') return page([['msg_a2', 'corrected answer', 'msg_q3'], ['msg_tail', 'unrelated tail', null]], false); return page([], false); },
+    getThread: async () => { throw new Error('fallback must not run'); } });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring' } });
+  assert.deepEqual(calls, ['msg_q3', 'msg_x']);
+  assert.equal(r.data.replies[0].message_id, 'msg_a2'); assert.equal(r.data.replies[0].partial, false);
+});
+test('a binding replaced by another session during the read is not labeled with the old answer', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_old', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'old question' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  stub({ ...QUIET,
+    getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 1, lastFrom: 'linus', lastMessage: 'old answer', lastTimestamp: Date.now() + 1000, lastMessageId: 'msg_oa' }] }),
+    getThreadAfter: async () => { // another session replaces the binding while we read
+      const fs2 = require('node:fs'); const b = JSON.parse(fs2.readFileSync(moves.BINDINGS_FILE, 'utf8')); b.linus = { ...b.linus, draftId: 'w_newer', messageId: 'msg_new', project: 'other work', sentAt: Date.now() }; fs2.writeFileSync(moves.BINDINGS_FILE, JSON.stringify(b));
+      return { ok: true, hasMore: false, messages: [{ id: 'msg_oa', from: 'linus', body: 'old answer', reply_to: { id: 'msg_old' } }] }; } });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring' } });
+  assert.equal(r.data.replies.length, 0);
 });

@@ -497,36 +497,52 @@ async function movesHandler(args) {
     // Explicit linkage first: a message of theirs whose reply_to is the id
     // we sent is the reply, whatever its timestamp (a retried send records a
     // later sentAt). Newest match wins (a corrected answer supersedes).
-    let b = getReturnBinding(t.handle);
-    if (!b) continue;
-    let linked = null;
-    if (b.messageId) {
-      if (t.lastReplyTo && t.lastReplyTo === b.messageId) linked = { id: t.lastMessageId, body: t.lastMessage };
-      // Platform's after_id read: everything after what we sent, one bounded call.
+    const b0 = getReturnBinding(t.handle);
+    if (!b0) continue;
+    let linked = null; let partial = false; let noReplyYet = false;
+    if (b0.messageId) {
+      if (t.lastReplyTo && t.lastReplyTo === b0.messageId) linked = { id: t.lastMessageId, body: t.lastMessage };
+      // Platform's after_id read: everything after what we sent, paged by
+      // the last id seen; the NEWEST matching answer wins (a correction
+      // supersedes). A read cut short by the page cap is reported as partial.
       if (!linked && t.thread_id && typeof store.getThreadAfter === 'function') {
         try {
-          const after = await store.getThreadAfter(t.thread_id, b.messageId, 50);
-          if (after && after.ok) { const hits = after.messages.filter(m => m && m.from === t.handle && replyIdOf(m) === b.messageId); if (hits.length) { const h = hits[hits.length - 1]; linked = { id: h.id, body: h.body }; } linked = linked || (after.messages.length ? null : null); if (!linked && after.messages.length === 0) { /* no reply yet: nothing newer than what we sent */ b = getReturnBinding(t.handle); if (!b) continue; continue; } }
+          let anchor = b0.messageId; let pages = 0; let sawAny = false;
+          while (pages < 4) {
+            const after = await store.getThreadAfter(t.thread_id, anchor, 50);
+            if (!after || !after.ok) break;
+            pages++;
+            if (after.messages.length) sawAny = true;
+            const hits = after.messages.filter(m => m && m.from === t.handle && replyIdOf(m) === b0.messageId);
+            if (hits.length) { const h = hits[hits.length - 1]; linked = { id: h.id, body: h.body }; }
+            if (!after.hasMore || !after.messages.length) break;
+            anchor = after.messages[after.messages.length - 1].id;
+            if (pages === 4 && after.hasMore) partial = true;
+          }
+          if (pages > 0 && !sawAny) noReplyYet = true;
         } catch {}
       }
       // Fallback (older platform): the thread read serves the OLDEST page, so
       // this can miss a reply beyond it — bounded, and only until after_id.
-      if (!linked && typeof store.getThread === 'function') {
+      if (!linked && !noReplyYet && typeof store.getThread === 'function') {
         try {
           const msgs = await store.getThread(me, t.handle);
-          const hits = (Array.isArray(msgs) ? msgs : []).filter(m => m && m.from === t.handle && replyIdOf(m) === b.messageId);
+          const hits = (Array.isArray(msgs) ? msgs : []).filter(m => m && m.from === t.handle && replyIdOf(m) === b0.messageId);
           if (hits.length) { const h = hits[hits.length - 1]; linked = { id: h.id, body: h.body }; }
         } catch {}
       }
     }
-    // The binding may have been cleared by another session while we awaited.
-    b = getReturnBinding(t.handle);
-    if (!b) continue;
-    if (linked) { replies.push({ from: t.handle, project: b.project || null, you_wrote: b.firstLine || '', their_words: inertField(String(linked.body || ''), 200), verified: true, message_id: linked.id || null }); continue; }
+    // The binding may have been cleared or REPLACED by another session while
+    // we awaited: a reply matched against the old one must not be labeled as
+    // an answer to a newer draft (codex P2).
+    const b = getReturnBinding(t.handle);
+    if (!b || b.draftId !== b0.draftId || b.messageId !== b0.messageId) continue;
+    if (noReplyYet) continue;
+    if (linked) { replies.push({ from: t.handle, project: b.project || null, you_wrote: b.firstLine || '', their_words: inertField(String(linked.body || ''), 200), verified: true, partial, message_id: linked.id || null }); continue; }
     if (!t.lastTimestamp || t.lastTimestamp <= b.sentAt) continue;
     replies.push({ from: t.handle, project: b.project || null, you_wrote: b.firstLine || '', their_words: inertField(String(t.lastMessage || ''), 200), verified: false, message_id: t.lastMessageId || null });
   }
-  const replyLines = replies.slice(0, 3).map(r => `↩ @${r.from} ${r.verified ? 'replied to' : 'wrote after'} what you sent${r.project ? ` from **${r.project}**` : ''} ("${inertField(r.you_wrote, 60)}"): "${r.their_words}"`);
+  const replyLines = replies.slice(0, 3).map(r => `↩ @${r.from} ${r.verified ? 'replied to' : 'wrote after'} what you sent${r.project ? ` from **${r.project}**` : ''} ("${inertField(r.you_wrote, 60)}"): "${r.their_words}"${r.partial ? ' _(more followed — read the thread for the latest)_' : ''}`);
   const replyBlock = replyLines.length ? `${replyLines.join('\n')}\n_(a reply is news beside the work — suggest one next step; do nothing until asked)_\n\n` : '';
 
   const out = computeMoves(ctx, me, roster, threads, Date.now(), { rosterKnown, actorKinds });
