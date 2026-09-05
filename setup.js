@@ -273,26 +273,26 @@ function installHostCommands() {
   let body;
   try { body = fs.readFileSync(src, 'utf8'); } catch { return []; }
   const installed = [];
+  // Optional on both hosts: a failure here (unwritable dir, an entry that is
+  // not a file) is reported per host and never aborts setup (codex P2).
+  const tryInstall = (host, file, content) => {
+    try {
+      if (fs.existsSync(file)) return;
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, content, 'utf8');
+      installed.push({ host, path: file });
+    } catch (e) {
+      installed.push({ host, path: file, error: e && e.message ? e.message : String(e) });
+    }
+  };
   const claudeDir = path.join(os.homedir(), '.claude');
   if (fs.existsSync(claudeDir)) {
-    const cmd = path.join(claudeDir, 'commands', 'vibe.md');
     const skill = path.join(claudeDir, 'skills', 'vibe', 'SKILL.md');
-    if (!fs.existsSync(cmd) && !fs.existsSync(skill)) {
-      fs.mkdirSync(path.dirname(cmd), { recursive: true });
-      fs.writeFileSync(cmd, body, 'utf8');
-      installed.push({ host: 'Claude Code', path: cmd });
-    }
+    if (!fs.existsSync(skill)) tryInstall('Claude Code', path.join(claudeDir, 'commands', 'vibe.md'), body);
   }
   const cx = codexHome();
-  if (fs.existsSync(cx)) {
-    const prompt = path.join(cx, 'prompts', 'vibe.md');
-    if (!fs.existsSync(prompt)) {
-      fs.mkdirSync(path.dirname(prompt), { recursive: true });
-      // Codex prompts take no frontmatter; strip it.
-      fs.writeFileSync(prompt, body.replace(/^---[\s\S]*?---\n/, ''), 'utf8');
-      installed.push({ host: 'Codex', path: prompt });
-    }
-  }
+  // Codex prompts take no frontmatter; strip it.
+  if (fs.existsSync(cx)) tryInstall('Codex', path.join(cx, 'prompts', 'vibe.md'), body.replace(/^---[\s\S]*?---\n/, ''));
   return installed;
 }
 
@@ -485,7 +485,7 @@ async function setup() {
   printStep(2, 'Adding /vibe MCP server...', 'running');
   const hostResults = configureAllHosts();
   const hostCommands = installHostCommands();
-  for (const c of hostCommands) console.log(`  /vibe command installed for ${c.host}: ${c.path}`);
+  for (const c of hostCommands) console.log(c.error ? `  (could not install the /vibe command for ${c.host}: ${c.error} — everything else still works)` : `  /vibe command installed for ${c.host}: ${c.path}`);
   for (const r of hostResults) {
     const note = r.status === 'added' ? 'configured'
       : r.status === 'exists' ? 'already configured'

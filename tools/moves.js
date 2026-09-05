@@ -84,9 +84,9 @@ function pidAlive(pid) {
  * other's drafts (codex P2). Synchronous on purpose: no await between load
  * and save, so nothing interleaves inside one process either.
  */
-function transact(fn) {
-  const lock = `${DRAFTS_FILE}.lock`;
-  fs.mkdirSync(path.dirname(DRAFTS_FILE), { recursive: true });
+function locked(file, fn) {
+  const lock = `${file}.lock`;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
   const deadline = Date.now() + 3000;
   for (;;) {
     try { fs.writeFileSync(lock, String(process.pid), { flag: 'wx', mode: 0o600 }); break; }
@@ -95,40 +95,53 @@ function transact(fn) {
       let stale = false;
       try { const st = fs.statSync(lock); stale = Date.now() - st.mtimeMs > LOCK_STALE_MS; } catch { stale = true; }
       if (stale) { try { fs.unlinkSync(lock); } catch {} continue; }
-      if (Date.now() > deadline) throw new Error('drafts file is busy — try again in a moment');
+      if (Date.now() > deadline) throw new Error(`${path.basename(file)} is busy — try again in a moment`);
       sleepSync(20);
     }
   }
-  try {
+  try { return fn(); } finally { try { fs.unlinkSync(lock); } catch {} }
+}
+/** Drafts: read-modify-write under the lock, atomic replace. */
+function transact(fn) {
+  return locked(DRAFTS_FILE, () => {
     const now = Date.now();
     const all = readJson(DRAFTS_FILE, []);
     const drafts = Array.isArray(all) ? all.filter(d => d && now - (d.createdAt || 0) < DRAFT_TTL_MS) : [];
     const out = fn(drafts);
     writeJsonAtomic(DRAFTS_FILE, drafts);
     return out;
-  } finally {
-    try { fs.unlinkSync(lock); } catch {}
-  }
+  });
 }
 function loadDrafts() { return transact(d => d.map(x => ({ ...x }))); }
-
-function loadBindings() { const b = readJson(BINDINGS_FILE, {}); return b && typeof b === 'object' ? b : {}; }
-function saveBindings(b) { writeJsonAtomic(BINDINGS_FILE, b); }
+/** Bindings: the same discipline — two hosts finishing sends at once keep both (codex P2). */
+function withBindings(fn) {
+  return locked(BINDINGS_FILE, () => {
+    const raw = readJson(BINDINGS_FILE, {});
+    const b = raw && typeof raw === 'object' ? raw : {};
+    const out = fn(b);
+    writeJsonAtomic(BINDINGS_FILE, b);
+    return out;
+  });
+}
 /** The private binding for a thread, if any and not expired. */
 function getReturnBinding(handle) {
-  const b = loadBindings()[normalizeHandle(handle)];
+  const raw = readJson(BINDINGS_FILE, {});
+  const b = raw && typeof raw === 'object' ? raw[normalizeHandle(handle)] : null;
   if (!b || typeof b !== 'object' || !b.sentAt) return null;
   if (Date.now() - b.sentAt > BINDING_TTL_MS) return null;
   return b;
 }
 /** An ordinary DM to them supersedes the binding — the thread has moved on. */
 function clearReturnBinding(handle) {
-  const b = loadBindings(); const h = normalizeHandle(handle);
-  if (b[h]) { delete b[h]; saveBindings(b); }
+  const h = normalizeHandle(handle);
+  withBindings(b => { delete b[h]; });
 }
 
 const newId = (prefix) => `${prefix}${crypto.randomBytes(4).toString('hex')}`;
-const sendKey = (d) => `draft-${d.id}-${crypto.createHash('sha1').update(compose(d)).digest('hex').slice(0, 10)}`;
+const textHash = (d) => crypto.createHash('sha1').update(compose(d)).digest('hex');
+const sendKey = (d) => `draft-${d.id}-${textHash(d).slice(0, 10)}`;
+/** The preview revision: what the person SAW. Send must name it (codex P1). */
+const revOf = (d) => textHash(d).slice(0, 8);
 
 // ── relevance: evidence, not inference ───────────────────────────────────────
 
@@ -178,6 +191,7 @@ function computeMoves(ctx, me, roster, threads, now = Date.now()) {
   const ctxTok = tokens(contextText(ctx));
   const people = (roster || []).filter(u => u && u.handle && u.handle !== me && !u.isAgent);
   const byHandle = new Map(people.map(u => [u.handle, u]));
+  const knownAgents = new Set((roster || []).filter(u => u && u.handle && u.isAgent).map(u => u.handle));
   const candidates = [];
 
   // Evidence A: an open thread where THEY wrote last — someone waiting on you
@@ -185,6 +199,8 @@ function computeMoves(ctx, me, roster, threads, now = Date.now()) {
   // message would be welcome.
   for (const t of threads || []) {
     if (!t || !t.handle || t.handle === me) continue;
+    // Agents are not people to draft to, whichever side the evidence came from.
+    if (t.isAgent || t.lastIsAgent || knownAgents.has(t.handle)) continue;
     if (t.lastFrom && t.lastFrom !== me && t.lastMessage) {
       const ageH = t.lastTimestamp ? Math.max(0, (now - t.lastTimestamp) / 3600000) : null;
       const kind = ctx.result ? 'answer' : (ctx.question || ctx.blocker) ? 'ask' : 'update';
@@ -205,6 +221,8 @@ function computeMoves(ctx, me, roster, threads, now = Date.now()) {
     if (ctx.question || ctx.blocker) candidates.push({ kind: 'ask', to: u.handle, why, score: 2 + ov.length + (here ? 1 : 0) });
     if (ctx.result) candidates.push({ kind: 'feedback', to: u.handle, why, score: 1 + ov.length + (here ? 1 : 0) });
     if (ctx.result) candidates.push({ kind: 'share', to: u.handle, why, score: 1 + ov.length + (here ? 1 : 0) - 0.5 });
+    // Only "doing" and an overlap: worth saying where you are (codex P2).
+    if (!ctx.result && !ctx.question && !ctx.blocker && ctx.doing) candidates.push({ kind: 'update', to: u.handle, why, score: 1 + ov.length + (here ? 1 : 0) });
   }
 
   if (!candidates.length) {
@@ -226,7 +244,7 @@ function computeMoves(ctx, me, roster, threads, now = Date.now()) {
   return { moves };
 }
 
-const KIND_LABEL = { ask: 'ask a question', share: 'share the result', feedback: 'request feedback', answer: 'answer with the result', update: 'reply with where you are' };
+const KIND_LABEL = { ask: 'ask a question', share: 'share the result', feedback: 'request feedback', answer: 'answer with the result', update: 'say where you are' };
 
 // ── vibe_moves ───────────────────────────────────────────────────────────────
 
@@ -314,9 +332,10 @@ function preview(d, person) {
   const where = person ? (isHereNow(person) ? 'here now' : (person.status === 'away' ? 'away' : 'not around — it waits for their next turn')) : 'presence unknown — it waits for their next turn';
   const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
   const message = compose(d);
+  const rev = revOf(d);
   return {
-    display: `**To:** @${d.to} (${where})\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n\nSend to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id})_`,
-    data: { draft: { id: d.id, to: d.to, message, refs: d.refs || [], status: d.status }, actions: [{ label: `Send to @${d.to}`, tool: 'vibe_send_draft', args: { id: d.id } }, { label: 'Edit', tool: 'vibe_draft', args: { id: d.id, message: '<new text>' } }, { label: 'Cancel', tool: 'vibe_discard_draft', args: { id: d.id } }] },
+    display: `**To:** @${d.to} (${where})\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n\nSend to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_`,
+    data: { draft: { id: d.id, to: d.to, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to}`, tool: 'vibe_send_draft', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_draft', args: { id: d.id, message: '<new text>' } }, { label: 'Cancel', tool: 'vibe_discard_draft', args: { id: d.id } }] },
   };
 }
 
@@ -396,23 +415,27 @@ async function discardHandler(args) {
 
 const sendDefinition = {
   name: 'vibe_send_draft',
-  description: "Send a reviewed draft exactly as previewed. This IS the person's approval — call it only when they chose \"Send to @handle\"; do not ask again afterward. Sends once through the ordinary message path (a retry of an unconfirmed send delivers once) and records a private, local note of the work it was sent from so the reply can be labeled.",
-  inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  description: "Send a reviewed draft exactly as previewed. This IS the person's approval — call it only when they chose \"Send to @handle\"; do not ask again afterward. Pass the draft id AND the rev shown in the preview: the approval is bound to that exact text, and a draft edited since is refused. Sends once through the ordinary message path (a retry of an unconfirmed send delivers once) and records a private, local note of the work it was sent from so the reply can be labeled.",
+  inputSchema: { type: 'object', properties: { id: { type: 'string' }, rev: { type: 'string', description: 'The rev from the preview the person approved' } }, required: ['id', 'rev'] },
 };
 
 async function sendHandler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
   const id = args && args.id;
+  const rev = typeof (args && args.rev) === 'string' ? args.rev.trim() : '';
 
   // 1. Claim under the lock: nothing leaves the machine until this draft is
-  //    marked 'sending' with a key derived from the exact text.
+  //    marked 'sending' with a key derived from the exact text — and the
+  //    text is the one the person SAW (rev), not one edited since (codex P1).
   const claim = transact(drafts => {
     const d = drafts.find(x => x.id === id);
     if (!d) return { display: `No draft ${id} — nothing sent. Open it with vibe_draft first.` };
     if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — not sending it twice.` };
     if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.` };
     if (d.status === 'suggested') return { display: `Draft ${d.id} has not been reviewed yet — open it with vibe_draft so you see the exact message first. Nothing sent.` };
+    if (!rev) return { display: `Send needs the rev shown in the preview of draft ${d.id} — open it with vibe_draft and send with that rev. Nothing sent.` };
+    if (rev !== revOf(d)) return { display: `Draft ${d.id} changed since that preview (rev ${rev} → ${revOf(d)}) — open it again with vibe_draft and approve what it shows now. Nothing sent.` };
     if (d.status === 'sending') {
       const age = Date.now() - (d.claimedAt || 0);
       const abandoned = age > CLAIM_HARD_STALE_MS || (age > CLAIM_STALE_MS && !pidAlive(d.claimedBy));
@@ -446,14 +469,15 @@ async function sendHandler(args) {
   transact(drafts => {
     const cur = drafts.find(x => x.id === s.id);
     if (!cur) return;
-    cur.status = sent ? 'sent' : (definite ? 'previewed' : 'unknown');
+    // Uncertainty is sticky: once an attempt may have committed, a later
+    // DEFINITE refusal says nothing about that earlier attempt (codex P2).
+    if (!sent && !definite) cur.unconfirmed = true;
+    cur.status = sent ? 'sent' : ((definite && !cur.unconfirmed) ? 'previewed' : 'unknown');
     delete cur.claimedAt; delete cur.claimedBy;
     if (sent) { cur.sentAt = sentAt; cur.messageId = outcome.message_id || null; }
   });
   if (sent) {
-    const b = loadBindings();
-    b[s.to] = { project: s.context && s.context.project ? s.context.project : null, draftId: s.id, kind: s.kind, sentAt, messageId: outcome.message_id || null, firstLine: (s.body || '').split('\n')[0].slice(0, 80) };
-    saveBindings(b);
+    withBindings(b => { b[s.to] = { project: s.context && s.context.project ? s.context.project : null, draftId: s.id, kind: s.kind, sentAt, messageId: outcome.message_id || null, firstLine: (s.body || '').split('\n')[0].slice(0, 80) }; });
   } else if (!definite && result && typeof result.display === 'string') {
     result = { ...result, display: `${result.display}\n\n_Draft ${s.id} is kept as unconfirmed: Send again retries exactly this text (delivers once), or Cancel._` };
   }

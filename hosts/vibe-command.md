@@ -13,7 +13,7 @@ The person wants to connect with someone on /vibe using what you already know ab
 4. **On a choice, call `vibe_draft`** with the move's id (or, for "write my own", with `handle` and `message` after asking what to say). Show the person exactly what it returns: the recipient, the exact message, the attachments.
 
 5. **Offer the three actions**: `Send to @handle` / `Edit` / `Cancel` — native control if available, text otherwise.
-   - **Send to @handle** → call `vibe_send_draft` with the id. That choice is the approval; do not ask "are you sure". Report what the tool says.
+   - **Send to @handle** → call `vibe_send_draft` with the id AND the `rev` from the preview you showed (the approval is bound to that exact text). That choice is the approval; do not ask "are you sure". Report what the tool says.
    - **Edit** → ask what to change, call `vibe_draft` again with the id and the new `message`, show the new preview, offer the three actions again.
    - **Cancel** → call `vibe_discard_draft` with the id. Nothing is sent.
 
