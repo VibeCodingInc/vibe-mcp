@@ -310,8 +310,11 @@ async function handler(args) {
         const { getReturnBinding } = require('./moves');
         const b = getReturnBinding(t.handle);
         // Explicit linkage first (when the list serves reply_to), then time.
-        if (b && b.messageId && t.lastReplyTo && t.lastReplyTo === b.messageId) back = ` · ↩ reply to what you sent${b.project ? ` from ${b.project}` : ''}`;
-        else if (b && t.lastTimestamp && t.lastTimestamp > b.sentAt) back = ` · ↩ after what you sent${b.project ? ` from ${b.project}` : ''}`;
+        // Only THEIR newest message is news; an outgoing tail (a follow-up
+        // sent from another client) is not (codex P2).
+        const theirs = t.lastFrom === t.handle;
+        if (theirs && b && b.messageId && t.lastReplyTo && t.lastReplyTo === b.messageId) back = ` · ↩ answered what you asked${b.project ? ` from ${b.project}` : ''}`;
+        else if (theirs && b && t.lastTimestamp && t.lastTimestamp > b.sentAt) back = ` · ↩ after what you sent${b.project ? ` from ${b.project}` : ''}`;
       } catch {}
       display += `\n@${cell(t.handle, 39)} (${t.unread})${id}${back}`;
     });

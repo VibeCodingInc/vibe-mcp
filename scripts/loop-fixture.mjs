@@ -84,6 +84,23 @@ export function childCloser(child, onClosed) {
   };
 }
 
+// ── output parsers: the ONE place the runner reads tool text ────────────────
+// Draft ids/revs live in the tool-only trailer the person never sees:
+//   "[tool-only — never show to the person] id <id> rev <rev>"
+export function parseDraft(text) {
+  const m = /\[tool-only[^\]]*\]\s+id\s+([A-Za-z0-9-]+)\s+rev\s+([0-9a-f]{8})/i.exec(String(text || ''));
+  return m ? { id: m[1], rev: m[2] } : null;
+}
+/** The preview names a linked reply target without exposing its id. */
+export function answersLinked(text) { return /\*\*Answers:\*\* their message this replies to \(linked\)/.test(String(text || '')); }
+/** The receipt line of a confirmed send. */
+// The receipt line is italic markdown ("_receipt: msg_x · …_"): an id never ends in the closing underscore.
+export function parseReceipt(text) { const m = /receipt: (msg_[A-Za-z0-9_-]*[A-Za-z0-9])/.exec(String(text || '')) || /\b(msg_[A-Za-z0-9_-]*[A-Za-z0-9])/.exec(String(text || '')); return m ? m[1] : null; }
+/** A verified reply beside the work, phrased as what it answers. */
+export function verifiedReplyFrom(text, handle, answerText) {
+  return String(text || '').split('\n').some(line => line.includes(`↩ @${handle} answered what you asked`) && (!answerText || line.includes(answerText)));
+}
+
 export function cleanHomes(homes) {
   for (const dir of homes) {
     // Only exact directories created by signedInHome, never a glob or workspace root.

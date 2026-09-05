@@ -146,3 +146,27 @@ test('shutdown during a leg close forbids the next leg before cleanup proceeds',
   assert.match(text, /function session\(side, home\) \{\s*assertRunning\(shuttingDown\)/);
   assert.match(text, /const rpc = .*assertRunning\(shuttingDown\)/);
 });
+
+// The runner's parsers against the REAL handlers' output (codex P2 on the trim:
+// the runner must never drift from what the tools actually print).
+test('runner parsers read the current tool output: draft id/rev from the tool-only trailer, linked answer, receipt, verified reply line', async () => {
+  const os = require('node:os');
+  const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-parse-')); process.env.VIBE_HOME = HOME;
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  fs.writeFileSync(path.join(HOME, 'config.json'), JSON.stringify({ username: 'ada', authMethod: 'github', authToken: `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig` }));
+  globalThis.fetch = async () => ({ ok: false, json: async () => ({}) });
+  const store = require('../store/api.js');
+  Object.assign(store, { getActiveUsersResult: async () => ({ ok: true, users: [] }), getActiveUsers: async () => [], getPeople: async () => ({ ok: true, listings: [] }), getInboxResult: async () => ({ ok: true, threads: [] }), getInbox: async () => [], getUnreadCount: async () => 0, getRawInbox: async () => [], getThread: async () => [], markThreadRead: async () => {}, sendTypingIndicator: async () => {}, heartbeat: async () => ({ ok: true }), sendMessage: async () => ({ id: 'msg_parse_1', success: true }) });
+  const moves = require('../tools/moves.js');
+  const { parseDraft, answersLinked, parseReceipt, verifiedReplyFrom } = await import(require('node:url').pathToFileURL(path.join(__dirname, '..', 'scripts', 'loop-fixture.mjs')).href);
+  const d = await moves.vibe_draft.handler({ handle: '@linus', message: 'the cloud side decides.', reply_to: 'msg_q1' });
+  const p = parseDraft(d.display);
+  assert.ok(p && p.id && /^[0-9a-f]{8}$/.test(p.rev), `parsed ${JSON.stringify(p)}`);
+  assert.equal(p.rev, d.data.draft.rev);
+  assert.ok(answersLinked(d.display));
+  const s = await moves.vibe_send_draft.handler({ id: p.id, rev: p.rev });
+  assert.equal(parseReceipt(s.display), 'msg_parse_1');
+  assert.ok(verifiedReplyFrom('↩ @linus answered what you asked from **runtime** ("q"): "the cloud side decides."', 'linus', 'the cloud side decides.'));
+  assert.ok(!verifiedReplyFrom('↩ @linus wrote after what you sent ("q"): "x"', 'linus'));
+  fs.rmSync(HOME, { recursive: true, force: true });
+});

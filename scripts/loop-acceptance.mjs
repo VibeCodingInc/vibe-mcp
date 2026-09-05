@@ -19,7 +19,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertRunning, validatePair, redactor, mintSession, signedInHome, childEnvironment, childCloser, cleanHomes } from './loop-fixture.mjs';
+import { assertRunning, validatePair, redactor, mintSession, signedInHome, childEnvironment, childCloser, cleanHomes, parseDraft, answersLinked, parseReceipt, verifiedReplyFrom } from './loop-fixture.mjs';
 
 const VERSION = process.argv[2] || 'local';
 const API = process.env.VIBE_API_URL || 'https://www.slashvibe.dev';
@@ -75,10 +75,10 @@ async function main() {
   // ── leg 1: A asks B (approval-bound) ──
   let a = session(A, homeA); await a.init();
   const ask = await a.call('vibe_draft', { handle: `@${B.handle}`, message: `re: loop ${runTag} — quick one: which side should decide the local/cloud handoff?` });
-  const askId = grab(/_\(draft ([a-z0-9-]+)/i, ask.text) || grab(/draft ([a-z0-9-]+) ·/i, ask.text); const askRev = grab(/rev ([0-9a-f]{8})/i, ask.text);
+  const askDraft = parseDraft(ask.text); const askId = askDraft && askDraft.id; const askRev = askDraft && askDraft.rev;
   if (!askId || !askRev) throw new Error('A: no draft id/rev in preview');
   const sent1 = await a.call('vibe_send_draft', { id: askId, rev: askRev });
-  const msg1 = grab(/receipt: (msg_[A-Za-z0-9_-]+)/, sent1.text) || grab(/\b(msg_[A-Za-z0-9_-]+)/, sent1.text);
+  const msg1 = parseReceipt(sent1.text);
   if (!/^Sent to \*\*@/.test(sent1.text) || !msg1) throw new Error('A: send not confirmed');
   step('A sent approval-bound ask', { draft: askId, rev: askRev, msg_1: msg1 });
   await a.close();
@@ -87,12 +87,12 @@ async function main() {
   const b = session(B, homeB); await b.init();
   const moves = await b.call('vibe_moves', { context: { project: 'loop acceptance', result: 'the cloud side decides the local/cloud handoff; the local side only reports capacity' } });
   const primaryTo = grab(/→ @([a-z0-9_-]+)/i, moves.text);
-  step('B moves', { primary_to: primaryTo, answers: grab(/answers: #(msg_[A-Za-z0-9_-]+)/, moves.text) });
+  step('B moves', { primary_to: primaryTo, answers: grab(/reply_to (msg_[A-Za-z0-9_-]+)/, moves.text) });
   const ans = await b.call('vibe_draft', { handle: `@${A.handle}`, message: answerText, reply_to: msg1 });
-  const ansId = grab(/_\(draft ([a-z0-9-]+)/i, ans.text) || grab(/draft ([a-z0-9-]+) ·/i, ans.text); const ansRev = grab(/rev ([0-9a-f]{8})/i, ans.text);
-  if (!/\*\*Answers:\*\* #/.test(ans.text)) throw new Error('B: preview did not show the reply target');
+  const ansDraft = parseDraft(ans.text); const ansId = ansDraft && ansDraft.id; const ansRev = ansDraft && ansDraft.rev;
+  if (!answersLinked(ans.text)) throw new Error('B: preview did not show the reply link');
   const sent2 = await b.call('vibe_send_draft', { id: ansId, rev: ansRev });
-  const msg2 = grab(/receipt: (msg_[A-Za-z0-9_-]+)/, sent2.text) || grab(/\b(msg_[A-Za-z0-9_-]+)/, sent2.text);
+  const msg2 = parseReceipt(sent2.text);
   if (!/^Sent to \*\*@/.test(sent2.text) || !msg2) throw new Error('B: send not confirmed');
   step('B sent verifiable answer', { draft: ansId, rev: ansRev, msg_2: msg2, reply_to: msg1 });
   await b.close();
@@ -102,7 +102,7 @@ async function main() {
   const back = await a.call('vibe_moves', { context: { project: 'loop acceptance', doing: 'wiring the handoff' } });
   // Bind to THIS answer, not an arbitrary historic "replied" line. Platform then
   // independently checks the exact served msg_2 / reply_to / direction / freshness.
-  const verified = back.text.split('\n').some(line => line.includes(`↩ @${B.handle} replied to what you sent`) && line.includes(answerText));
+  const verified = verifiedReplyFrom(back.text, B.handle, answerText);
   step('A restarted and read replies', { verified_line: verified, answer_bound_to_this_run: verified });
   await a.close();
 

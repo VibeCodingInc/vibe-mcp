@@ -520,8 +520,12 @@ async function movesHandler(args) {
         try {
           let anchor = b0.messageId; let pages = 0; let sawAny = false;
           while (pages < 4) {
-            const after = await store.getThreadAfter(t.thread_id, anchor, 50);
-            if (!after || !after.ok) break;
+            let after = null;
+            try { after = await store.getThreadAfter(t.thread_id, anchor, 50); } catch { after = null; }
+            // A continuation that fails after an answer was seen leaves the
+            // read incomplete: say so rather than present a possibly superseded
+            // answer as current (codex P2).
+            if (!after || !after.ok) { if (pages > 0) partial = true; break; }
             pages++;
             if (after.messages.length) sawAny = true;
             const hits = after.messages.filter(m => m && m.from === t.handle && replyIdOf(m) === b0.messageId);

@@ -822,3 +822,16 @@ test('the person-facing preview and moves carry no draft ids, revs, or message i
   assert.doesNotMatch(humanMoves, /\(id m[0-9]-|msg_[A-Za-z0-9_]+/);
   assert.match(m.display, /\[tool-only — never show to the person\] linus: id m1-[0-9a-f]+/);
 });
+
+test('a failed continuation read after an answer was seen marks the reply partial', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_q9', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'q9' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  let n = 0;
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 2, lastFrom: 'linus', lastMessage: 'tail', lastTimestamp: Date.now() + 5000, lastMessageId: 'msg_t' }] }),
+    getThreadAfter: async () => { n++; if (n === 1) return { ok: true, hasMore: true, messages: [{ id: 'msg_a1', from: 'linus', body: 'first answer', reply_to: { id: 'msg_q9' } }] }; throw new Error('network'); },
+    getThread: async () => { throw new Error('no fallback'); } });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring' } });
+  assert.equal(r.data.replies[0].partial, true);
+  assert.match(r.display, /more followed — read the thread for the latest/);
+});
