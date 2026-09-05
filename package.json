@@ -48,7 +48,7 @@
   },
   "files": [
     "README.md",
-    "hosts/",
+    "hosts/vibe-command.md",
     "actor-session.js",
     "ambient-escapes.js",
     "api-auth.js",
