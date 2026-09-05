@@ -1,6 +1,6 @@
 {
   "name": "slashvibe-mcp",
-  "version": "0.8.26",
+  "version": "0.8.27",
   "mcpName": "io.github.vibecodinginc/vibe",
   "description": "Presence + messaging for terminal coding agents (Claude Code, Codex, Cursor) — the /vibe kernel",
   "main": "index.js",

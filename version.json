@@ -1,9 +1,14 @@
 {
-  "version": "0.8.26",
-  "updated": "2026-09-04",
-  "changelog": "A failed read is not an empty inbox. When the inbox could not be reached, vibe_inbox said \"no messages yet\" and every host repeated it as \"you're caught up\" — six out of six runs in the Sep 4 routing corpus. Now it says what is actually known: could not check your inbox, unread is unknown, not zero. A real empty inbox still reads as empty.",
+  "version": "0.8.27",
+  "updated": "2026-09-05",
+  "changelog": "Human-approved does not mean human-typed. Say /vibe in a working session and the agent already helping you suggests who to talk to from what you're doing — a named person, the reason, and a prepared draft — or says plainly that there is no useful move. Choosing opens a draft, never sends: you see the exact recipient, the exact text and the attachments, then Send / Edit / Cancel. Send is the approval; nothing asks twice. Drafts and rejected options stay on your machine. A sent draft is bound to the exact text you saw (the platform refuses anything that differs) and delivers once.",
   "features": [
-    "vibe_inbox reports a failed read as unknown, never as caught up (routing corpus R02)"
+    "/vibe in a working session: up to three moves from the work itself, each with a named person, the evidence, and a prepared draft — or an honest 'no useful move'",
+    "Open a draft, then Send / Edit / Cancel — nothing sends until you choose Send; Cancel and mere selection send nothing",
+    "Approval bound to the exact previewed text (rev + approved_sha256); delivers once even across retries",
+    "Recipients are real people with a reason: someone who wrote you about this, or whose one-liner meets your work — agents and QA accounts are never suggested",
+    "vibe_inbox labels a thread with the work you wrote them from (private, local)",
+    "vibe_dm accepts idempotency_key and approved_sha256 for tools that send on your behalf"
   ],
   "deprecated": [],
   "breaking": false,
