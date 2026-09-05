@@ -1513,7 +1513,11 @@ async function getIdentityKind(handle) {
 async function getThreadAfter(threadId, afterId, limit = 50) {
   try {
     const r = await request('GET', `/api/v2/threads/${encodeURIComponent(threadId)}?after_id=${encodeURIComponent(afterId)}&limit=${limit}`);
-    if (r && r.success && Array.isArray(r.messages)) return { ok: true, messages: r.messages, hasMore: Boolean(r.has_more), after: r.after || null };
+    // An older deployment answers this route but ignores after_id (oldest
+    // page, no anchor echo, no has_more). Only an ECHOED anchor plus explicit
+    // pagination metadata is an anchored read; anything else is unsupported.
+    const anchored = r && r.success && Array.isArray(r.messages) && r.after && typeof r.after === 'object' && r.after.id === afterId && typeof r.has_more === 'boolean';
+    if (anchored) return { ok: true, messages: r.messages, hasMore: r.has_more, after: r.after };
     if (r && r.error === 'after_not_in_thread') return { ok: false, error: 'after_not_in_thread' };
     return { ok: false, error: r && r.error ? String(r.error) : 'unsupported' };
   } catch (e) { return { ok: false, error: e && e.code ? e.code : 'transport_failed' }; }

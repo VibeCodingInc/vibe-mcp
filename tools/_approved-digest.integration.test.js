@@ -118,3 +118,16 @@ test("Platform's boundary agrees: our digest passes checkApprovedDigest; an alte
   assert.equal(checkApprovedDigest('nope', to, body).error, 'approved_sha256_malformed');
   assert.deepEqual(findPrivateCompositionKeys({ to, body, idempotency_key: 'k', origin: 'composed', approved_sha256: ours }), []);
 });
+
+test("getThreadAfter: a legacy server that ignores after_id (no echoed anchor, no has_more) is 'unsupported', never an anchored read", async () => {
+  const wire = stubWire((p) => { if (p.includes('after_id=')) return { json: { success: true, thread_id: 'thread_x', messages: [{ id: 'msg_old', from: 'linus', body: 'x' }] } }; return quietReads(p); });
+  try {
+    const r = await store.getThreadAfter('thread_x', 'msg_anchor', 50);
+    assert.equal(r.ok, false); assert.equal(r.error, 'unsupported');
+  } finally { wire.restore(); }
+  const wire2 = stubWire((p) => { if (p.includes('after_id=')) return { json: { success: true, thread_id: 'thread_x', after: { id: 'msg_anchor', seq: 7 }, has_more: false, messages: [] } }; return quietReads(p); });
+  try {
+    const r = await store.getThreadAfter('thread_x', 'msg_anchor', 50);
+    assert.equal(r.ok, true); assert.equal(r.hasMore, false); assert.equal(r.messages.length, 0);
+  } finally { wire2.restore(); }
+});

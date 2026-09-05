@@ -835,3 +835,16 @@ test('a failed continuation read after an answer was seen marks the reply partia
   assert.equal(r.data.replies[0].partial, true);
   assert.match(r.display, /more followed — read the thread for the latest/);
 });
+
+test('a full fallback page (no anchored read) marks the reply partial; a short page does not', async () => {
+  stub({ ...QUIET, sendMessage: async (from, to, message, type, payload, opts) => { sends.push({ from, to, message, opts }); return { id: 'msg_qf', success: true }; } });
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'qf' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  const full = Array.from({ length: 200 }, (_, i) => ({ id: `msg_f${i}`, from: i === 5 ? 'linus' : 'ada', to: i === 5 ? 'ada' : 'linus', body: i === 5 ? 'old answer' : 'x', timestamp: Date.now() + i, reply_to: i === 5 ? { id: 'msg_qf' } : null }));
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 1, lastFrom: 'linus', lastMessage: 'tail', lastTimestamp: Date.now() + 9000, lastMessageId: 'msg_tail' }] }), getThreadAfter: async () => ({ ok: false, error: 'unsupported' }), getThread: async () => full });
+  const r = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring' } });
+  assert.equal(r.data.replies[0].verified, true); assert.equal(r.data.replies[0].partial, true);
+  stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 1, lastFrom: 'linus', lastMessage: 'old answer', lastTimestamp: Date.now() + 9000, lastMessageId: 'msg_f5' }] }), getThreadAfter: async () => ({ ok: false, error: 'unsupported' }), getThread: async () => full.slice(0, 10) });
+  const r2 = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring' } });
+  assert.equal(r2.data.replies[0].partial, false);
+});

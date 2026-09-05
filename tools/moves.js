@@ -542,8 +542,14 @@ async function movesHandler(args) {
       if (!linked && !noReplyYet && typeof store.getThread === 'function') {
         try {
           const msgs = await store.getThread(me, t.handle);
-          const hits = (Array.isArray(msgs) ? msgs : []).filter(m => m && m.from === t.handle && replyIdOf(m) === b0.messageId);
-          if (hits.length) { const h = hits[hits.length - 1]; linked = { id: h.id, body: h.body }; }
+          const list = Array.isArray(msgs) ? msgs : [];
+          const hits = list.filter(m => m && m.from === t.handle && replyIdOf(m) === b0.messageId);
+          if (hits.length) {
+            const h = hits[hits.length - 1]; linked = { id: h.id, body: h.body };
+            // The oldest page reaches the tail only when it is not full; a
+            // full page may hide a later correction (codex P2).
+            if (list.length >= 200) partial = true;
+          }
         } catch {}
       }
     }
