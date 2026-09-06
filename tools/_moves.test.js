@@ -160,7 +160,8 @@ test('Send sends exactly the previewed text, once, and records a private return 
   assert.match(again.display, /already sent/); assert.equal(sends.length, 1);
   const b = JSON.parse(fs.readFileSync(moves.BINDINGS_FILE, 'utf8'));
   assert.equal(b.linus.project, 'payments');
-  assert.ok(!JSON.stringify(b).includes('/Users/'), 'no paths in the binding');
+  // The binding may hold the local cwd (0600 file, never sent); the WIRE must not.
+  assert.ok(!JSON.stringify(sends[0]).includes(process.cwd()), 'no paths on the wire');
   assert.equal(moves.getReturnBinding('@linus').project, 'payments');
 });
 test('free writing still works: handle + message previews without a wizard, and sends only on Send', async () => {
@@ -847,4 +848,13 @@ test('a full fallback page (no anchored read) marks the reply partial; a short p
   stub({ ...QUIET, getInboxResult: async () => ({ ok: true, threads: [{ handle: 'linus', thread_id: 'thread_L', unread: 1, lastFrom: 'linus', lastMessage: 'old answer', lastTimestamp: Date.now() + 9000, lastMessageId: 'msg_f5' }] }), getThreadAfter: async () => ({ ok: false, error: 'unsupported' }), getThread: async () => full.slice(0, 10) });
   const r2 = await moves.vibe_moves.handler({ context: { project: 'runtime', doing: 'wiring' } });
   assert.equal(r2.data.replies[0].partial, false);
+});
+
+test('a sent draft records the local cwd in its binding, never on the wire', async () => {
+  stub(QUIET);
+  const a = await moves.vibe_draft.handler({ handle: '@linus', message: 'cwd test' });
+  await moves.vibe_send_draft.handler({ id: a.data.draft.id, rev: a.data.draft.rev });
+  const b = moves.getReturnBinding('linus');
+  assert.equal(b.cwd, process.cwd());
+  assert.ok(!JSON.stringify(sends[0]).includes(process.cwd()), 'cwd never leaves the machine');
 });

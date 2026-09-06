@@ -71,3 +71,21 @@ test('vibe_inbox: a real empty inbox still reads as empty', async () => {
     assert.doesNotMatch(res.display, /could not check/);
   } finally { h.restore(); }
 });
+
+test('vibe_inbox: an inbox LISTING with one unread shows the thread but never advances the read cursor', async () => {
+  let marked = 0;
+  const h = toolWith('inbox', {
+    ...QUIET,
+    getInboxResult: async () => ({ ok: true, threads: [{ handle: 'ada2', unread: 1, lastMessage: 'hi', lastMessageId: 'msg_1', thread_id: 'thread_1', lastFrom: 'ada2', lastTimestamp: Date.now() }] }),
+    getInbox: async () => [{ handle: 'ada2', unread: 1, lastMessage: 'hi', lastMessageId: 'msg_1', thread_id: 'thread_1', lastFrom: 'ada2', lastTimestamp: Date.now() }],
+    getThread: async () => { const t = [{ id: 'msg_1', from: 'ada2', to: 'ada', body: 'hi', timestamp: Date.now() }]; t._lastMessageId = 'msg_1'; t._threadId = 'thread_1'; return t; },
+    markThreadRead: async () => { marked++; return { success: true }; },
+  });
+  try {
+    const res = await h.run({});
+    assert.match(res.display, /hi/);
+    assert.equal(marked, 0, 'listing must not mark read');
+    await h.run({ handle: 'ada2' });
+    assert.equal(marked, 1, 'opening by name does');
+  } finally { h.restore(); }
+});

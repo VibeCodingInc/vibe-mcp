@@ -812,7 +812,10 @@ async function sendHandler(args) {
     // The receipt is the fact; the binding is a convenience. A failure to
     // save it must never turn a confirmed delivery into an error (codex P2).
     try {
-      withBindings(b => { b[s.to] = { from: me, project: s.context && s.context.project ? s.context.project : null, draftId: s.id, kind: s.kind, sentAt, messageId: outcome.message_id || null, firstLine: (s.body || '').split('\n')[0].slice(0, 80) }; });
+      // `cwd` is the MCP server's own working directory (the session's project
+      // root). LOCAL ONLY — mode 0600 file, never sent — so Buddy can front the
+      // exact terminal tab the question was asked from, or reveal the folder.
+      withBindings(b => { b[s.to] = { from: me, project: s.context && s.context.project ? s.context.project : null, draftId: s.id, kind: s.kind, sentAt, messageId: outcome.message_id || null, firstLine: (s.body || '').split('\n')[0].slice(0, 80), cwd: (() => { try { return process.cwd(); } catch { return null; } })() }; });
     } catch (e) {
       result = { ...result, display: `${result.display}\n\n_(sent; could not save the local return note: ${e && e.message ? e.message : 'unknown'} — the reply will not be labeled with this work)_` };
     }

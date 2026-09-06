@@ -439,10 +439,13 @@ async function handler(args) {
   if (totalUnread === 1 && unreadSenders.length === 1) {
     const them = unreadSenders[0].handle;
 
-    // Fetch full thread and mark as read
+    // Fetch the full thread to SHOW it — but do not advance the read cursor
+    // here. A listing is a fetch the agent made; "read" is a claim about the
+    // person's eyes, and the other side renders it as such. The cursor moves
+    // only when a conversation is opened by name (above). (Seth, 2026-09-05:
+    // background fetching is not human reading.)
     const thread = await store.getThread(myHandle, them);
-    const marked = await store.markThreadRead(myHandle, them, thread._lastMessageId, thread._threadId);
-    if (marked && marked.success === false) {
+    if (!Array.isArray(thread)) {
       return { display: `Couldn't read your thread with @${them} — nothing is shown rather than an empty conversation.` };
     }
 
