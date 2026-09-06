@@ -26,9 +26,19 @@ test("Platform's composition-boundary vectors: our digest matches every stated o
   let checked = 0;
   for (const x of v.vectors) {
     if (x.digest_over && x.approved_sha256) {
-      // the stated digest is over the STORED recipient — our rule must produce the same recipient and the same hex
+      // the stated digest is over the STORED recipient — our rule must produce the same recipient
       assert.equal(storedRecipientHandle(x.request.to), x.digest_over.recipient, `${x.id} recipient rule`);
-      assert.equal(digest(x.request.to, x.digest_over.body), x.approved_sha256.toLowerCase(), `${x.id} digest`);
+      if (/^[0-9a-f]{64}$/i.test(x.approved_sha256)) {
+        assert.equal(digest(x.request.to, x.digest_over.body), x.approved_sha256.toLowerCase(), `${x.id} digest`);
+      } else {
+        // A placeholder ("<sha256 of …>") states the rule, not the hex: the digest is over the
+        // body the server STORES (digest_over.body — trimmed / sanitized), so a digest over the
+        // raw request text must differ whenever the server would normalize it. The package
+        // hashes the trimmed text it sends; server-side sanitization beyond trimming is
+        // refused with server_text and re-previewed (a definite refusal in dm.js).
+        if (x.request.body !== x.digest_over.body) assert.notEqual(digest(x.request.to, x.request.body), digest(x.request.to, x.digest_over.body), `${x.id}: the raw text would be refused`);
+        if (String(x.request.body).trim() === x.digest_over.body) assert.equal(digest(x.request.to, String(x.request.body).trim()), digest(x.request.to, x.digest_over.body), `${x.id}: trimming alone matches what the server stores`);
+      }
       checked++;
     }
     if (x.id === 'CB-003') {

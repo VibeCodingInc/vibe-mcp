@@ -689,6 +689,7 @@ async function getInboxInner(handle) {
         // Actor metadata of the newest message, as served (#272: server-owned).
         // Drafting tools use it so an agent is never suggested as a person.
         lastActorKind: t.last_message?.actor?.kind || null,
+        lastReplyTo: (t.last_message?.reply_to && typeof t.last_message.reply_to === 'object') ? (t.last_message.reply_to.id || t.last_message.reply_to.message_id || null) : (t.last_message?.reply_to || null),
         muted: t.preferences?.muted || false,
         lastTimestamp: t.last_message?.created_at ? new Date(t.last_message.created_at).getTime() : null
       }));
@@ -736,6 +737,7 @@ async function getInboxV1(handle) {
         // Actor metadata of the newest message, as served (#272: server-owned).
         // Drafting tools use it so an agent is never suggested as a person.
         lastActorKind: t.last_message?.actor?.kind || null,
+        lastReplyTo: (t.last_message?.reply_to && typeof t.last_message.reply_to === 'object') ? (t.last_message.reply_to.id || t.last_message.reply_to.message_id || null) : (t.last_message?.reply_to || null),
         lastTimestamp: t.last_message?.created_at ? new Date(t.last_message.created_at).getTime() : null
       }));
     }
@@ -1500,8 +1502,30 @@ async function getIdentityKind(handle) {
   return kind;
 }
 
+/**
+ * Everything in a thread AFTER a message you sent (Platform's after_id read,
+ * vibe-platform feat/thread-after-id): one bounded call keyed by the stored
+ * message id, so 'their reply to what you sent' never needs a page-and-scan.
+ * Returns { ok: true, messages, hasMore } · { ok: false, error } where error
+ * is 'after_not_in_thread' (anchor unknown — never an empty page) or a
+ * transport/route failure (older platform: 404/400 → 'unsupported').
+ */
+async function getThreadAfter(threadId, afterId, limit = 50) {
+  try {
+    const r = await request('GET', `/api/v2/threads/${encodeURIComponent(threadId)}?after_id=${encodeURIComponent(afterId)}&limit=${limit}`);
+    // An older deployment answers this route but ignores after_id (oldest
+    // page, no anchor echo, no has_more). Only an ECHOED anchor plus explicit
+    // pagination metadata is an anchored read; anything else is unsupported.
+    const anchored = r && r.success && Array.isArray(r.messages) && r.after && typeof r.after === 'object' && r.after.id === afterId && typeof r.has_more === 'boolean';
+    if (anchored) return { ok: true, messages: r.messages, hasMore: r.has_more, after: r.after };
+    if (r && r.error === 'after_not_in_thread') return { ok: false, error: 'after_not_in_thread' };
+    return { ok: false, error: r && r.error ? String(r.error) : 'unsupported' };
+  } catch (e) { return { ok: false, error: e && e.code ? e.code : 'transport_failed' }; }
+}
+
 module.exports = {
   getIdentityKind,
+  getThreadAfter,
   setNotificationPace,
   // People (opt-in discovery)
   setListed,
