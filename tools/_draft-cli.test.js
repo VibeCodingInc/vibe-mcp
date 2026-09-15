@@ -120,6 +120,18 @@ test('a draft whose sending process died is listed as unknown, not hidden (codex
   assert.equal(r.json.drafts[0].unconfirmed, true);
 });
 
+test('discard says, as a field, whether an earlier attempt may have been delivered', () => {
+  const home = scratch();
+  seed(home, [
+    { id: 'clean', status: 'previewed', from: 'ada', to: 'reached', body: 'x', refs: [], createdAt: 1 },
+    { id: 'shaky', status: 'unknown', unconfirmed: true, from: 'ada', to: 'linus', body: 'y', refs: [], createdAt: 2 },
+  ]);
+  const a = run(home, 'discard', 'clean');
+  assert.equal(a.json.cancelled, true); assert.equal(a.json.may_have_sent, false, 'a handle named @reached must not read as uncertainty');
+  const b = run(home, 'discard', 'shaky');
+  assert.equal(b.json.cancelled, true); assert.equal(b.json.may_have_sent, true);
+});
+
 test('usage errors exit 2 and never touch the store', () => {
   const home = scratch();
   seed(home, [{ id: 'a1', status: 'previewed', from: 'ada', to: 'linus', body: 'x', refs: [], createdAt: 1 }]);

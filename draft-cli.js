@@ -27,6 +27,8 @@ function out(obj, code = 0) {
 
 /** The stored row's status now — what a companion surface must show, not the transport's word. */
 function storedStatus(id) {
+  // Read the stored row BEFORE the verb runs too, so a discard can say
+  // whether the thing it cancelled had an unconfirmed attempt behind it.
   const d = moves.loadDrafts().find((x) => x.id === id);
   return d ? { status: d.status, unconfirmed: Boolean(d.unconfirmed) } : { status: null, unconfirmed: false };
 }
@@ -67,9 +69,13 @@ async function main() {
 
   if (verb === 'discard') {
     if (!id) return out({ error: 'usage', message: 'vibe-draft discard <id>' }, 2);
+    const before = storedStatus(id);
     const r = await moves.vibe_discard_draft.handler({ id });
     const stored = storedStatus(id);
-    return out({ id, status: stored.status, cancelled: stored.status === 'cancelled', display: r && r.display ? String(r.display) : null });
+    // A structured fact, not prose to be regex'd by a companion: was there an
+    // earlier attempt whose delivery is unconfirmed? Cancelling only stops
+    // future retries; the message may already have reached them.
+    return out({ id, status: stored.status, cancelled: stored.status === 'cancelled', may_have_sent: Boolean(before.unconfirmed || stored.unconfirmed), display: r && r.display ? String(r.display) : null });
   }
 
   return out({ error: 'usage', message: 'vibe-draft list | send <id> <rev> | discard <id>' }, 2);
