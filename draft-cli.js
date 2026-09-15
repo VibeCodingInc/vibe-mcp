@@ -40,6 +40,10 @@ async function main() {
     // previewed = decidable; unknown = a send whose fate is unconfirmed — it
     // must stay reachable (Send again retries the same text; Discard is allowed)
     // rather than vanish from the companion while the terminal still holds it.
+    // A claim whose process died stays 'sending' until someone reconciles it;
+    // do that under the lock first, so an abandoned draft is listed as
+    // 'unknown' (retry or discard) instead of hidden forever (codex r2).
+    moves.transact((drafts) => { for (const d of drafts) moves.reconcileAbandoned(d); return drafts; });
     const mine = moves.loadDrafts().filter((d) => String(d.from || '').toLowerCase() === me && (d.status === 'previewed' || d.status === 'unknown'));
     // Exactly what the person would see in the terminal preview — and the rev
     // that binds a Send to those bytes. Nothing private: context stays out.

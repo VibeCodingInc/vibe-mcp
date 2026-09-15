@@ -111,6 +111,15 @@ test('send and discard report the STORED status, and an unconfirmed draft stays 
   assert.equal(d.json.cancelled, d.json.status === 'cancelled');
 });
 
+test('a draft whose sending process died is listed as unknown, not hidden (codex r2)', () => {
+  const home = scratch();
+  seed(home, [{ id: 'a1', status: 'sending', claimedAt: Date.now() - 10 * 60 * 1000, claimedBy: 999999, from: 'ada', to: 'linus', body: 'which curve?', refs: [], createdAt: 1 }]);
+  const r = run(home, 'list');
+  assert.equal(r.json.drafts.length, 1);
+  assert.equal(r.json.drafts[0].status, 'unknown');
+  assert.equal(r.json.drafts[0].unconfirmed, true);
+});
+
 test('usage errors exit 2 and never touch the store', () => {
   const home = scratch();
   seed(home, [{ id: 'a1', status: 'previewed', from: 'ada', to: 'linus', body: 'x', refs: [], createdAt: 1 }]);
