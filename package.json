@@ -6,6 +6,7 @@
   "main": "index.js",
   "bin": {
     "slashvibe-mcp": "cli.js",
+    "vibe-draft": "draft-cli.js",
     "vibe-setup": "setup.js"
   },
   "scripts": {
@@ -57,6 +58,7 @@
     "capabilities.js",
     "cli.js",
     "config.js",
+    "draft-cli.js",
     "crypto.js",
     "discord.js",
     "footer.js",
