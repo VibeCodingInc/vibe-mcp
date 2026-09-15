@@ -18,7 +18,18 @@
 const moves = require('./tools/moves');
 const config = require('./config');
 
-function out(obj, code = 0) { process.stdout.write(JSON.stringify(obj) + '\n'); process.exit(code); }
+// stdout through a pipe can be asynchronous: exit only once the write has
+// drained, or a large list is truncated mid-JSON (codex P2).
+function out(obj, code = 0) {
+  process.exitCode = code;
+  process.stdout.write(JSON.stringify(obj) + '\n', () => process.exit(code));
+}
+
+/** The stored row's status now — what a companion surface must show, not the transport's word. */
+function storedStatus(id) {
+  const d = moves.loadDrafts().find((x) => x.id === id);
+  return d ? { status: d.status, unconfirmed: Boolean(d.unconfirmed) } : { status: null, unconfirmed: false };
+}
 
 async function main() {
   const [verb, id, rev] = process.argv.slice(2);
@@ -26,7 +37,10 @@ async function main() {
   if (!me) return out({ error: 'not_signed_in', message: 'no /vibe account on this machine' }, 1);
 
   if (verb === 'list') {
-    const mine = moves.loadDrafts().filter((d) => String(d.from || '').toLowerCase() === me && d.status === 'previewed');
+    // previewed = decidable; unknown = a send whose fate is unconfirmed — it
+    // must stay reachable (Send again retries the same text; Discard is allowed)
+    // rather than vanish from the companion while the terminal still holds it.
+    const mine = moves.loadDrafts().filter((d) => String(d.from || '').toLowerCase() === me && (d.status === 'previewed' || d.status === 'unknown'));
     // Exactly what the person would see in the terminal preview — and the rev
     // that binds a Send to those bytes. Nothing private: context stays out.
     const drafts = mine.map((d) => ({
@@ -34,6 +48,7 @@ async function main() {
       message: moves.compose(d),
       refs: (d.refs || []).map((r) => ({ title: r.title || null, url: r.url })),
       reply_to: d.replyTo || null, rev: moves.revOf(d), created_at: d.createdAt,
+      status: d.status, unconfirmed: Boolean(d.unconfirmed),
     }));
     return out({ handle: me, drafts });
   }
@@ -42,14 +57,15 @@ async function main() {
     if (!id || !rev) return out({ error: 'usage', message: 'vibe-draft send <id> <rev>' }, 2);
     const r = await moves.vibe_send_draft.handler({ id, rev });
     const data = (r && r.data) || {};
-    return out({ id, sent: Boolean(data.sent), message_id: data.message_id || null, status: (data.draft && data.draft.status) || null, display: r && r.display ? String(r.display) : null, definite: data.definite || null });
+    const stored = storedStatus(id);
+    return out({ id, sent: Boolean(data.sent), message_id: data.message_id || null, status: stored.status, unconfirmed: stored.unconfirmed, display: r && r.display ? String(r.display) : null, definite: Boolean(data.definite) });
   }
 
   if (verb === 'discard') {
     if (!id) return out({ error: 'usage', message: 'vibe-draft discard <id>' }, 2);
     const r = await moves.vibe_discard_draft.handler({ id });
-    const data = (r && r.data) || {};
-    return out({ id, status: (data.draft && data.draft.status) || null, display: r && r.display ? String(r.display) : null });
+    const stored = storedStatus(id);
+    return out({ id, status: stored.status, cancelled: stored.status === 'cancelled', display: r && r.display ? String(r.display) : null });
   }
 
   return out({ error: 'usage', message: 'vibe-draft list | send <id> <rev> | discard <id>' }, 2);

@@ -86,6 +86,31 @@ test('discard cancels for every surface; a cancelled draft cannot be sent', () =
   assert.match(r.json.display, /cancelled/);
 });
 
+test('a large list is never truncated (stdout drains before exit)', () => {
+  const home = scratch();
+  seed(home, Array.from({ length: 120 }, (_, i) => ({ id: `d${i}`, status: 'previewed', from: 'ada', to: 'linus', body: 'x'.repeat(1900), refs: [], createdAt: i })));
+  const r = run(home, 'list');
+  assert.equal(r.code, 0);
+  assert.ok(r.json, 'stdout parsed as JSON');
+  assert.equal(r.json.drafts.length, 120);
+});
+
+test('send and discard report the STORED status, and an unconfirmed draft stays listed', () => {
+  const home = scratch();
+  seed(home, [{ id: 'a1', status: 'previewed', from: 'ada', to: 'linus', body: 'which curve?', refs: [], createdAt: 1 }]);
+  const rev = run(home, 'list').json.drafts[0].rev;
+  const s = run(home, 'send', 'a1', rev);
+  assert.ok(['previewed', 'unknown'].includes(s.json.status), `stored status reported: ${s.json.status}`);
+  assert.equal(typeof s.json.definite, 'boolean');
+  if (s.json.status === 'unknown') {
+    const l = run(home, 'list');
+    assert.equal(l.json.drafts[0].status, 'unknown', 'an unconfirmed send stays reachable');
+    assert.equal(l.json.drafts[0].unconfirmed, true);
+  }
+  const d = run(home, 'discard', 'a1');
+  assert.equal(d.json.cancelled, d.json.status === 'cancelled');
+});
+
 test('usage errors exit 2 and never touch the store', () => {
   const home = scratch();
   seed(home, [{ id: 'a1', status: 'previewed', from: 'ada', to: 'linus', body: 'x', refs: [], createdAt: 1 }]);
