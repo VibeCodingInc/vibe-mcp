@@ -1,14 +1,12 @@
 {
-  "version": "0.8.27",
-  "updated": "2026-09-05",
-  "changelog": "Human-approved does not mean human-typed. Say /vibe in a working session and the agent already helping you suggests who to talk to from what you're doing — a named person, the reason, and a prepared draft — or says plainly that there is no useful move. Choosing opens a draft, never sends: you see the exact recipient, the exact text and the attachments, then Send / Edit / Cancel. Send is the approval; nothing asks twice. Drafts and rejected options stay on your machine. A sent draft is bound to the exact text you saw (the platform refuses anything that differs) and delivers once.",
+  "version": "0.8.28",
+  "updated": "2026-09-16",
+  "changelog": "The draft your coding agent prepared in the terminal can now be decided from Vibe Buddy on the Mac. Open a conversation in Buddy and, if /vibe prepared a message for that person in a session, the composer shows it exactly as the terminal preview did — recipient, why now, the words — with Send, Edit and Discard. Send goes back through this package with the revision you saw, so there is one draft, one sender and one approval digest, never two sends. Edit moves the words into your own box and discards the draft; what you send after that is plainly your own. Discard here is discard everywhere.",
   "features": [
-    "/vibe in a working session: up to three moves from the work itself, each with a named person, the evidence, and a prepared draft — or an honest 'no useful move'",
-    "Open a draft, then Send / Edit / Cancel — nothing sends until you choose Send; Cancel and mere selection send nothing",
-    "Approval bound to the exact previewed text (rev + approved_sha256); delivers once even across retries",
-    "Recipients are real people with a reason: someone who wrote you about this, or whose one-liner meets your work — agents and QA accounts are never suggested",
-    "vibe_inbox labels a thread with the work you wrote them from (private, local)",
-    "vibe_dm accepts idempotency_key and approved_sha256 for tools that send on your behalf"
+    "vibe-draft CLI: list | send <id> <rev> | discard <id> — the terminal's drafts for another surface on the same machine, through the same store, lock, rev-bound claim and approval digest",
+    "Buddy 0.5.72+ shows a previewed draft in its composer and decides through this package; Buddy never posts a draft's text itself",
+    "An unconfirmed send stays reachable (Send again retries exactly the same text, once); discard reports whether an earlier attempt may already have reached them",
+    "A draft whose sending process died is reconciled and listed as unknown, never hidden"
   ],
   "deprecated": [],
   "breaking": false,
