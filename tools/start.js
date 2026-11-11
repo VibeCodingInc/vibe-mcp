@@ -313,6 +313,21 @@ async function handler(args) {
     display += '\n\n_no messages yet — whoever invited you is the place to start_';
   }
 
+  // Threads where they wrote last and nothing went back. Read-once-never-
+  // answered used to vanish from every screen (arrival.js, wroteLast). A fact
+  // from the wire, stated as one — handle, age, id; no body, no "you owe".
+  const { wroteLastPeople } = require('../arrival');
+  const lastWord = inboxRead
+    ? await wroteLastPeople(inboxThreads, myHandle, { isQa: require('./moves').isQaHandle, kindOf: store.getIdentityKind })
+    : [];
+  if (lastWord.length > 0) {
+    display += '\n\nthey wrote last:';
+    lastWord.forEach((t) => {
+      const id = t.lastMessageId ? ` · #${cell(t.lastMessageId, 40)}` : '';
+      display += `\n@${cell(t.handle, 39)} · ${t.days}d ago${id}`;
+    });
+  }
+
   if (updateNotice) display += updateNotice;
 
   display += `\n\nvibe inbox · vibe people · vibe dm @handle "…"`;
@@ -333,6 +348,8 @@ async function handler(args) {
     unread: t.unread,
     lastMessageId: t.lastMessageId || null,
   }));
+
+  response.wroteLast = lastWord;
 
   // Work context is deliberately NOT returned here (review P1): the response
   // is exactly what the screen states. The local context still does its real

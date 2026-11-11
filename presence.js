@@ -170,18 +170,58 @@ async function pollGuestMessages() {
  */
 async function pollUnread() {
   try {
-    const handle = config.getHandle();
+    // The CREDENTIAL says who this is; a handle in a file is not a principal.
+    const handle = authStore.getHandle() || config.getHandle();
     if (!handle) return;
-    const unread = await store.getUnreadCount(handle).catch(() => null);
-    if (typeof unread === 'number') {
-      if (lastSeenUnread !== null && unread > lastSeenUnread && global.vibeNotifier) {
-        global.vibeNotifier.emitImmediate();
-      }
-      lastSeenUnread = unread;
+    // One request serves both jobs: the unread count (as before) and the
+    // arrivals — the same /threads read getUnreadCount made, with the rows kept.
+    const read = await store.getInboxResult(handle).catch(() => null);
+    if (!read || read.ok !== true) return;
+    const threads = read.threads || [];
+    const unread = threads.reduce((sum, t) => sum + (t.unread || 0), 0);
+    if (lastSeenUnread !== null && unread > lastSeenUnread && global.vibeNotifier) {
+      global.vibeNotifier.emitImmediate();
     }
+    lastSeenUnread = unread;
+    await noteArrivals(handle, threads);
   } catch {
     // Silent fail — best-effort
   }
+}
+
+/**
+ * Someone wrote while the person was working: spool it for the arrival hook
+ * and, where the host listens, push it through the channel (arrival.js).
+ * Only for a VERIFIED session — an arrival names a sender to a person, and
+ * that is not something to do on the strength of an unverified credential.
+ */
+const startedAt = Date.now();
+let lastPruneAt = 0;
+let waitingAtStart = null;
+async function noteArrivals(handle, threads) {
+  if (!authStore.isVerified?.()) return;
+  if (['0', 'off', 'false'].includes(String(process.env.VIBE_ARRIVALS || '').toLowerCase())) return;
+  const arrival = require('./arrival');
+  if (Date.now() - lastPruneAt > 60 * 60 * 1000) { lastPruneAt = Date.now(); arrival.prune(handle); }
+  // What was already unread on the FIRST look is "waiting" (the SessionStart
+  // hook's to show), not an arrival. It is remembered by message id, so after
+  // that first look a new id is an arrival whatever the two clocks say; only
+  // the first look itself leans on timestamps, to catch a message that landed
+  // between launch and the first poll.
+  if (waitingAtStart === null) {
+    const early = new Set(arrival.pickArrivals(threads, handle, { since: startedAt }).map((t) => t.lastMessageId));
+    waitingAtStart = new Set(threads.filter((t) => t.unread > 0 && t.lastMessageId && !early.has(t.lastMessageId))
+      .map((t) => t.lastMessageId));
+  }
+  const live = threads.filter((t) => !waitingAtStart.has(t.lastMessageId));
+  const candidates = arrival.pickArrivals(live, handle)
+    .filter((t) => !arrival.isClaimed(t.lastMessageId) && !arrival.isSpooled(t.lastMessageId));
+  if (candidates.length === 0) return;
+  const roster = await store.getActiveUsers().catch(() => []);
+  let bindingFor = null;
+  try { bindingFor = require('./tools/moves').getReturnBinding; } catch {}
+  const rows = arrival.record(live, handle, { roster, bindingFor });
+  if (rows.length && typeof global.vibeArrivalPush === 'function') global.vibeArrivalPush(rows);
 }
 
 // Force an immediate heartbeat (for doctor auto-fix)
@@ -225,7 +265,7 @@ async function goOffline() {
   }
 }
 
-module.exports = { start, stop, forceHeartbeat, goOffline, noteActivity, cadenceFor, CADENCE, ACTIVE_WINDOW_MS,
+module.exports = { start, stop, forceHeartbeat, goOffline, noteActivity, noteArrivals, cadenceFor, CADENCE, ACTIVE_WINDOW_MS,
   // test seams — read the armed delays, and age the session without waiting
   _pollDelaysForTest: () => ({ unread: unreadPollTimer?._idleTimeout ?? null, guest: guestPollTimer?._idleTimeout ?? null }),
   _setLastActivityForTest: (ts) => { lastActivityAt = ts; },

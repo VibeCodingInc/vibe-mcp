@@ -699,6 +699,6 @@ module.exports = {
   vibe_discard_draft: { definition: discardDefinition, handler: discardHandler },
   vibe_send_draft: { definition: sendDefinition, handler: sendHandler },
   // exported for tests and for vibe_inbox / vibe_dm
-  computeMoves, cleanContext, normalizeThreads, getReturnBinding, clearReturnBinding, loadDrafts, transact, DRAFTS_FILE, BINDINGS_FILE,
+  isQaHandle, computeMoves, cleanContext, normalizeThreads, getReturnBinding, clearReturnBinding, loadDrafts, transact, DRAFTS_FILE, BINDINGS_FILE,
   compose, revOf, reconcileAbandoned,
 };

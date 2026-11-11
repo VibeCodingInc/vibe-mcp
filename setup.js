@@ -581,7 +581,26 @@ async function setup() {
     console.log(`${colors.bold}  Quick start:${colors.reset}`);
     console.log(`${colors.dim}  1. Restart your coding agent${detected.length > 1 ? `s (${detected.join(', ')})` : ''}${colors.reset}`);
     console.log(`${colors.dim}  2. Say: "message @their-handle — ..." to someone you already know${colors.reset}`);
-    console.log(`${colors.dim}  3. Claude Code: run "npx slashvibe-mcp hook install" — waiting messages appear at the top of your next session${colors.reset}`);
+    // Receiving is the product: a reply has to reach you while you work, not
+    // when you remember to ask. So the hooks are installed here, by default,
+    // for Claude Code — stated plainly, with the one command that removes them.
+    let hooksInstalled = false;
+    // An ISOLATED identity (VIBE_HOME set) must not write hooks into the
+    // machine's real ~/.claude/settings.json — that would point the everyday
+    // Claude at a lab identity's spool. It installs only when the Claude
+    // config is isolated too (CLAUDE_CONFIG_DIR).
+    const isolatedIdentity = require('./vibe-home').isIsolated() && !process.env.CLAUDE_CONFIG_DIR;
+    if (detected.includes('Claude Code') && process.env.VIBE_SETUP_NO_HOOKS !== '1' && !isolatedIdentity) {
+      try {
+        require('./session-start-hook-settings').createHookSettingsManager().install();
+        hooksInstalled = require('./arrival-hook-settings').createArrivalHookManager().install().installed;
+      } catch (e) {
+        hooksInstalled = false;
+      }
+    }
+    console.log(hooksInstalled
+      ? `${colors.dim}  3. When someone writes back, it reaches you inside Claude Code while you work (hooks added to ~/.claude/settings.json; remove with "npx slashvibe-mcp hook uninstall")${colors.reset}`
+      : `${colors.dim}  3. Claude Code: run "npx slashvibe-mcp hook install" — replies then reach you while you work${colors.reset}`);
     console.log('');
     console.log(`${colors.cyan}  Welcome to /vibe, @${authResult.handle}.${colors.reset}`);
     console.log('');
