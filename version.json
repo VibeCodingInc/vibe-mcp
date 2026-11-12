@@ -1,14 +1,16 @@
 {
-  "version": "0.8.28",
-  "updated": "2026-09-16",
-  "changelog": "The draft your coding agent prepared in the terminal can now be decided from Vibe Buddy on the Mac. Open a conversation in Buddy and, if /vibe prepared a message for that person in a session, the composer shows it exactly as the terminal preview did — recipient, why now, the words — with Send, Edit and Discard. Send goes back through this package with the revision you saw, so there is one draft, one sender and one approval digest, never two sends. Edit moves the words into your own box and discards the draft; what you send after that is plainly your own. Discard here is discard everywhere.",
+  "version": "0.9.0",
+  "updated": "2026-11-13",
+  "changelog": "/vibe is now telepathic messaging inside your coding agent. A message reaches you while you work, at your next prompt or after the next tool call, with a reply already prepared from what you are doing; nothing your agent wrote is sent until you choose Send. With someone you trust you can open a line from your terminal (npx slashvibe-mcp trust @handle): your agent may then ask their agent a question from your work and answer theirs from yours without stopping either of you, and each of you is told what was said. The package was rebuilt around this: eight tools, one way for a message to leave, no inbox to check.",
   "features": [
-    "vibe-draft CLI: list | send <id> <rev> | discard <id> — the terminal's drafts for another surface on the same machine, through the same store, lock, rev-bound claim and approval digest",
-    "Buddy 0.5.72+ shows a previewed draft in its composer and decides through this package; Buddy never posts a draft's text itself",
-    "An unconfirmed send stays reachable (Send again retries exactly the same text, once); discard reports whether an earlier attempt may already have reached them",
-    "A draft whose sending process died is reconciled and listed as unknown, never hidden"
+    "Arrival: a Claude Code hook brings a message into your session while you work. It reads one local file, makes no network call, writes no read state. Installed by setup; existing installs run: npx slashvibe-mcp hook install",
+    "vibe_prepare / vibe_send / vibe_discard: your agent writes, you approve the exact text; an answer names the message it answers",
+    "Open line (alpha): npx slashvibe-mcp trust @handle, untrust, lines. vibe_ask and vibe_answer send unattended only toward an open line: 6 an hour per person, 700 characters, nothing shaped like a credential, each marked as the agent's, a receipt each",
+    "vibe_people: who is in a session and who you talk with, in one list. vibe_thread: one conversation in full",
+    "vibe_start lists conversations that ended on the other person's words, even after they were read"
   ],
   "deprecated": [],
-  "breaking": false,
+  "breaking": true,
+  "breakingNotes": "Removed: vibe_who, vibe_inbox, vibe_dm, vibe_reply, vibe_moves, vibe_draft, vibe_send_draft, vibe_discard_draft, vibe_status, vibe_help, vibe_bye, vibe_list_me, vibe_unlist_me, vibe_capabilities, vibe_remember, vibe_reflect, vibe_call, every VIBE_EXTRAS tool, the tool-result footer, legacy keypair sign-in and the automatic welcome message. Arrival while you work is Claude Code only; Codex and Cursor can send and read.",
   "updateUrl": "https://www.slashvibe.dev/api/version"
 }

@@ -31,6 +31,14 @@ const definition = {
   },
 };
 
+/** True only when this is Claude Code and its arrival hook is known to be absent. */
+function arrivalMissing() {
+  try {
+    if (require('../host').getHost() !== 'claude-code') return false;
+    return !require('../arrival-hook-settings').createArrivalHookManager().status().installed;
+  } catch { return false; }  // unreadable settings: say nothing rather than guess
+}
+
 async function handler(args = {}) {
   // Signed out: straight to the (non-blocking) sign-in. Nothing slow may sit
   // between a newcomer and their first actionable line.
@@ -83,7 +91,9 @@ async function handler(args = {}) {
     });
     if (unreadSenders.length > 5) display += `\n_+${unreadSenders.length - 5} more_`;
   } else if (inboxRead && threads.length === 0) {
-    display += '\n\n_no conversations yet. Whoever invited you is the place to start._';
+    // /vibe takes two. A newcomer with nobody to talk to needs the one next
+    // step that makes it work, in words they can send as they are.
+    display += '\n\nno conversations yet. /vibe takes two: send the person you work with this, then message them.\n  npx slashvibe-mcp';
   }
 
   // Conversations that ended on their words and were read: "unread" alone
@@ -108,6 +118,12 @@ async function handler(args = {}) {
         ? `\nanswered @${cell(r.with, 39)}, who asked "${cell(r.asked, 100)}": "${cell(r.said, 200)}"`
         : `\nasked @${cell(r.with, 39)}: "${cell(r.said, 200)}"`;
     });
+  }
+
+  // Someone who installed before arrival existed has no hook, so nothing
+  // would reach them mid-work. Say so once, with the one command that fixes it.
+  if (arrivalMissing()) {
+    display += '\n\nmessages will not reach you while you work yet. turn that on once: npx slashvibe-mcp hook install';
   }
 
   display += '\n\nopen a conversation: vibe thread @handle · see who is reachable: vibe people';
