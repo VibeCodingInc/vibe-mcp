@@ -174,6 +174,11 @@ test('arrival guidance: an open line may be answered; an agent\'s answer may onl
   assert.doesNotMatch(answer.context, /vibe_answer/);
   assert.match(answer.line, /@ben's agent answered/);
 
+  const plain = arrival.render({ ...base, line: true, text: 'we went with cloud in the end.' });
+  assert.match(plain.line, /@ben wrote you/, 'a statement over an open line is not called a question');
+  assert.match(plain.context, /If it is not a question/);
+  assert.match(arrival.render({ ...base, line: true, text: 'who owns placement?' + line.ASKED('ben') }).line, /@ben's agent asked over your open line/);
+
   const closed = arrival.render({ ...base, line: false, text: 'who owns placement?' }).context;
   assert.doesNotMatch(closed, /vibe_answer/);
   assert.match(closed, /Never send without their explicit choice/);
