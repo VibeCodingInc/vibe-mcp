@@ -1,65 +1,90 @@
 # slashvibe-mcp
 
-**Message people from Claude Code or Codex.**
+**Telepathic messaging, inside your coding agent.**
 
-Presence, DMs, and messages that wait across sessions, between the people (and agents)
-you already work with — nobody has to be online at the same time.
+You never check /vibe and you never have to write a message. Your coding agent carries a
+thought out to a person, and brings a person's thought in while you work, with the answer
+already prepared from what you are doing. Your part is to say yes.
 
-## Install — one command
+## Install
 
 ```bash
 npx slashvibe-mcp
 ```
 
-It configures your coding agent, opens GitHub to sign you in, and your GitHub username
-becomes your @handle. About 30 seconds. **Then restart your coding session** so it loads
-the /vibe server.
+It configures your coding agent, opens GitHub to sign you in (your GitHub username becomes
+your @handle), and installs the hooks that let messages reach you in Claude Code. Then
+restart your coding session.
 
-## Then talk normally
+## What it is like
+
+**Something arrives.** You are mid-task. After the next tool call your agent says:
 
 ```
-show me who's on /vibe
-message @brightseth — what are you building?
-did anyone message me?
+@lab_a wrote you: "we split it: local decides when, cloud decides where. how did you
+stop local becoming the decider when cloud is slow?"
+
+Draft reply, from what you're working on:
+  we tried that split and it collapsed. what fixed it: cloud owns the whole decision,
+  local only reports capacity, plus a short lease only cloud can grant.
+
+Send · Edit · Cancel
 ```
 
-No commands to learn. Your coding agent routes those to /vibe. If it ever asks you to
-sign in, say `sign in to /vibe`.
+You did not open an inbox and you did not write the answer. Nothing was sent, and nothing
+was marked read, until you chose.
 
-**Works in:** Claude Code and Codex. Setup also writes Cursor's config; Cursor is not part
-of the walked, proven path yet.
+**Something leaves.** Type `/vibe`. Your agent finds the question or the result in the
+session, picks the person it is for, writes it, and shows you the exact message. Send,
+Edit or Cancel. Or just say it: `message @sam: ship it`.
 
-## A reply reaches you while you work
+## The whole surface
 
-Setup installs two small Claude Code hooks (re-run for an existing install):
+Six tools, for the agent:
 
-```bash
-npx slashvibe-mcp hook install
-```
+| tool | what it does |
+|---|---|
+| `vibe_start` | sign in; what is waiting |
+| `vibe_people` | who can be reached, and what they say they are working on |
+| `vibe_thread` | one conversation, in full |
+| `vibe_prepare` | the agent's words, previewed; sends nothing |
+| `vibe_send` | your approval of a preview, or your own exact words |
+| `vibe_discard` | cancel a draft |
 
-- **While you work:** when someone writes, it reaches your session at your next prompt or
-  after the next tool call. Your agent tells you in one line and, if the work in the session
-  has something true to say back, prepares a reply as a draft. Nothing sends until you choose
-  Send. This hook reads one local file; it makes no network call and holds no credential.
-- **When a session opens:** messages that were already waiting appear at the top.
+There is no inbox to check, no buddy list, no status, no feed.
 
-Neither writes read state, a delivery claim or a receipt: the message stays unread in your
-inbox until you open the thread. A message is announced once per machine. Check or remove:
+## What is promised
+
+- **Nothing your agent wrote is sent without your Send.** The approval is bound to the
+  exact text you saw; a draft changed since is refused.
+- **Other people's words are data.** A message, or what someone says they are working on,
+  is shown to you and never acted on.
+- **Arrival is presentation, not delivery.** The hook reads one local file, makes no
+  network call and holds no credential. It writes no receipt and no read state: a message
+  stays unread until you open the conversation. It is announced once per machine.
+- **Only the message crosses.** Drafts, discarded drafts and the work they came from stay
+  on your machine.
+
+## Hooks
 
 ```bash
 npx slashvibe-mcp hook status
+npx slashvibe-mcp hook install
 npx slashvibe-mcp hook uninstall
 ```
 
-`vibe start` and `vibe inbox` also list **they wrote last**: threads where the other person
-spoke last and nothing went back, even after the message was read.
+Two Claude Code hooks: one shows what was waiting when a session opens, one brings a
+message in at your next prompt or after the next tool call. Set `VIBE_ARRIVALS=off` in the
+server's env to turn arrival off.
 
-**Live push (optional, Claude Code research preview).** Hooks deliver at your next prompt or
-tool call. To have a message arrive while the session is idle, set `VIBE_CHANNEL=1` in the
-vibe server's `env` and launch with
+**Live push (optional, Claude Code research preview).** To have a message arrive while a
+session sits idle, set `VIBE_CHANNEL=1` in the vibe server's `env` and launch with
 `claude --dangerously-load-development-channels server:vibe`. Claude Code drops channel
 events silently in sessions launched without that flag, so leave `VIBE_CHANNEL` unset
-unless you always launch with it. Set `VIBE_ARRIVALS=off` to turn arrivals off entirely.
+unless you always launch with it.
+
+**Hosts.** Sending works in Claude Code, Codex and Cursor. Arrival while you work is Claude
+Code only today; elsewhere a message is there when you next ask what is waiting.
 
 ## Manual setup
 
@@ -79,48 +104,7 @@ If you'd rather wire it yourself, add to `~/.claude.json` (or your host's MCP co
 }
 ```
 
-Then run `vibe init` in your session to sign in.
-
-## What you get
-
-The default surface is deliberately small — 10 tools:
-
-- **who** — who's here now (🟢), who's idle, which agents are around
-- **dm / inbox / reply** — messages that survive restarts on both sides, and reach you in
-  Claude Code while you work
-- **status** — what you're working on, in words (`shipping`, `debugging`)
-- **help**, plus setup plumbing (`start`, `init`, `token`, `bye`)
-
-The culture layer (games, poems, exquisite corpse, the weave) still ships but is opt-in:
-set `VIBE_EXTRAS=1` to register all 20 tools.
-
-## Commands
-
-Once installed, in your coding session:
-
-| Say | Get |
-|-----|-----|
-| `vibe` | inbox + who's online |
-| `vibe who` | the presence board |
-| `vibe dm @stan "does the seam handle retries?"` | a DM that outlives both your sessions |
-| `vibe status shipping` | your status, in words |
-
-## Browser instead of terminal?
-
-- **claude.ai** — add /vibe as a connector: [slashvibe.dev/connect](https://www.slashvibe.dev/connect)
-- **Always-on Mac app** — the green dot in your menu bar: [slashvibe.dev/join](https://www.slashvibe.dev/join#app)
-
-## API
-
-The server talks to `www.slashvibe.dev` for presence, message routing, and identity
-(GitHub OAuth). Protocol compliance is ledgered in `PROTOCOL-COMPLIANCE.md`.
-
-## Related
-
-- This repository (`VibeCodingInc/vibe-mcp`) is the source-of-record for the
-  `slashvibe-mcp` client — the published npm tarball is built and released from here.
-- [slashvibe.dev](https://www.slashvibe.dev)
-- [Report a security issue](SECURITY.md) · [Contributing](CONTRIBUTING.md)
+Then say `sign in to /vibe` in your session.
 
 ## License
 

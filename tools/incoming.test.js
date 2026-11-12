@@ -54,18 +54,13 @@ test('bodies are capped', () => {
   assert.ok(!out.includes('x'.repeat(MAX_BODY + 1)), 'body exceeded the cap');
 });
 
-test('reply hints appear only when there is someone to reply to', () => {
+test('the answer hint names preparing, never sending, and only when there is someone to answer', () => {
   const withReply = renderIncoming([{ from: 'stan', text: 'hi' }], { replyTo: 'stan', threadHint: true });
-  assert.ok(withReply.includes('vibe_dm'));
-  assert.ok(withReply.includes('vibe_inbox'), 'thread hint missing');
+  assert.ok(withReply.includes('vibe_prepare'));
+  assert.ok(withReply.includes('vibe_thread'), 'conversation hint missing');
+  assert.ok(!withReply.includes('vibe_send'), 'an ambient surface never names the sending tool');
 
   const noReply = renderIncoming([{ from: 'stan', text: 'hi' }], {});
-  assert.ok(!noReply.includes('vibe_dm'), 'offered a reply target we do not have');
+  assert.ok(!noReply.includes('vibe_prepare'), 'offered an answer target we do not have');
 });
 
-test('guest-style rendering omits the thread hint', () => {
-  // Guest messages are session-scoped; there is no DM thread to open.
-  const out = renderIncoming([{ from: 'stan', text: 'hi' }], { replyTo: 'stan', threadHint: false });
-  assert.ok(out.includes('vibe_dm'));
-  assert.ok(!out.includes('vibe_inbox'));
-});

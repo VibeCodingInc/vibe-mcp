@@ -58,12 +58,12 @@ function renderIncoming(items, { replyTo, threadHint } = {}) {
     // close marker, so the sender's text cannot pre-empt or forge the notice.
     const fullLength = neutralize(it.text).length;
     if (fullLength > MAX_BODY) {
-      out += `[message truncated: showing ${MAX_BODY} of ${fullLength} chars — full text: \`vibe_inbox\` handle: "${scrub(it.from)}"]\n`;
+      out += `[message truncated: showing ${MAX_BODY} of ${fullLength} chars — full text: \`vibe_thread\` handle: "${scrub(it.from)}"]\n`;
     }
   }
   if (replyTo) {
-    out += `\nReply: \`vibe_dm\` to: "${replyTo}"`;
-    if (threadHint) out += ` \u00b7 Read the thread: \`vibe_inbox\` handle: "${replyTo}"`;
+    out += `\nTo answer: prepare it with \`vibe_prepare\` handle: "${replyTo}" (a preview; nothing sends until they choose Send)`;
+    if (threadHint) out += ` \u00b7 Read the conversation: \`vibe_thread\` handle: "${replyTo}"`;
   }
   return out;
 }

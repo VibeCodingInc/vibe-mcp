@@ -27,7 +27,7 @@ const crypto = require('node:crypto');
 global.fetch = async () => ({ ok: false, json: async () => ({}) });
 
 const store = require('../store/api.js');
-const moves = require('../tools/moves');
+const moves = require('../tools/drafts');
 const { storedRecipientHandle } = require('../protocol/handle');
 
 /** Stub the wire: capture every request's method/path/body; answer with `respond(path, body)`. */
@@ -63,8 +63,8 @@ test('the serialized POST carries approved_sha256 over "<stored recipient>\\n<bo
     return quietReads(p);
   });
   try {
-    const d = await moves.vibe_draft.handler({ handle: '@Linus', message: '  re: kernel — the scheduler patch is in  ', refs: [{ title: 'PR', url: 'https://github.com/x/y/pull/9' }] });
-    const r = await moves.vibe_send_draft.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
+    const d = await moves.vibe_prepare.handler({ handle: '@Linus', message: '  re: kernel — the scheduler patch is in  ', refs: [{ title: 'PR', url: 'https://github.com/x/y/pull/9' }] });
+    const r = await moves.vibe_send.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
     assert.match(r.display, /Sent to \*\*@linus\*\*/);
     const post = wire.captured.find(c => c.method === 'POST' && c.path.startsWith('/api/v2/messages'));
     assert.ok(post, 'a v2 send left through the real request builder');
@@ -82,9 +82,9 @@ test('the serialized POST carries approved_sha256 over "<stored recipient>\\n<bo
 test('the digest is computed once from the approved snapshot: an edit after preview is refused before any request', async () => {
   const wire = stubWire((p, body) => { if (p.startsWith('/api/v2/messages') && body) throw new Error('must not reach the wire'); return quietReads(p); });
   try {
-    const d = await moves.vibe_draft.handler({ handle: '@linus', message: 'v1' });
-    await moves.vibe_draft.handler({ id: d.data.draft.id, message: 'v2' });
-    const r = await moves.vibe_send_draft.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
+    const d = await moves.vibe_prepare.handler({ handle: '@linus', message: 'v1' });
+    await moves.vibe_prepare.handler({ id: d.data.draft.id, message: 'v2' });
+    const r = await moves.vibe_send.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
     assert.match(r.display, /changed since that preview/);
     assert.ok(!wire.captured.some(c => c.method === 'POST' && c.path.startsWith('/api/v2/messages')));
   } finally { wire.restore(); }
@@ -96,11 +96,11 @@ test("Platform's 409 approved_content_mismatch is a definite refusal: nothing st
     return quietReads(p);
   });
   try {
-    const d = await moves.vibe_draft.handler({ handle: '@linus', message: 'x' });
-    const r = await moves.vibe_send_draft.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
+    const d = await moves.vibe_prepare.handler({ handle: '@linus', message: 'x' });
+    const r = await moves.vibe_send.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
     assert.match(r.display, /differs from what was approved/);
     assert.doesNotMatch(r.display, /kept as unconfirmed/);
-    const e = await moves.vibe_draft.handler({ id: d.data.draft.id, message: 'y' });
+    const e = await moves.vibe_prepare.handler({ id: d.data.draft.id, message: 'y' });
     assert.match(e.display, /\*\*Message \(exact\):\*\*\ny/);
   } finally { wire.restore(); }
 });

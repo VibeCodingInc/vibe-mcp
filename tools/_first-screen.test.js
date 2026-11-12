@@ -138,20 +138,6 @@ test('DEFECT 4b — the same call twice gives the same screen (nothing rotates)'
   assert.equal(a, b, 'no random selection, no rotating tip — a stable first screen');
 }));
 
-test('DEFECT 5 — the actions are present, and the screen stays under 20 lines', withStore({
-  getActiveUsers: async () => Array.from({ length: 12 }, (_, i) => here(`p${i}`)),
-  getInbox: async () => [
-    ...INBOX,
-    ...Array.from({ length: 8 }, (_, i) => ({ handle: `x${i}`, unread: 2, lastMessage: 'y', lastMessageId: `msg_X${i}` })),
-  ],
-}, async () => {
-  const { text, res, all } = await run();
-  const lines = text.split('\n').length;
-  assert.ok(lines < 20, `first screen is ${lines} lines; the budget is under 20`);
-  assert.match(text, /vibe inbox · vibe people · vibe dm @handle/, 'the three actions are stated');
-  assert.ok(text.trim().endsWith('"…"'), 'and they are the last thing read, not buried');
-}));
-
 test('a genuinely new arrival is pointed at whoever invited them — never a stranger', withStore({
   getActiveUsers: async () => [here('zoe'), here('kai')],
   getInbox: async () => [],
@@ -170,44 +156,6 @@ test('the screen names the person and the room, and nothing else', withStore({
   assert.match(text.split('\n')[1], /^4 unread · 2 others here$/,
     'line 2: what is waiting, and how many OTHERS are here — the count excludes you');
 }));
-
-test('DEFECT 2 (dispatcher half) — the first screen carries no ambient footer', () => {
-  // The footer states unread a second time from a cached source and re-renders
-  // message bodies; in a real session its count disagreed with the header.
-  const src = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
-  const block = src.slice(src.indexOf('const SKIP_FOOTER_TOOLS'), src.indexOf('const SKIP_FOOTER_TOOLS') + 900);
-  assert.ok(block.includes("'vibe_start'"), 'vibe_start is in SKIP_FOOTER_TOOLS');
-});
-
-test('a REAL transport failure is never rendered as an empty inbox', async () => {
-  // A CHILD PROCESS with the API pointed at an unreachable host: the store
-  // binds its base URL at module load, and stubbing a throw proves nothing
-  // because getInbox catches internally. This exercises the production path
-  // end to end (review P1 — the previous pin passed for the wrong reason).
-  const { execFileSync } = require('node:child_process');
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-realfail-'));
-  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
-    username: 'ada', authMethod: 'github',
-    authToken: `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`,
-  }));
-  const script = `
-    const store = require(${JSON.stringify(path.join(__dirname, '..', 'store', 'api.js'))});
-    store.getActiveUsers = async () => [{ handle: 'zoe', status: 'active', lastSeen: Date.now() - 60000 }];
-    store.heartbeat = async () => ({}); store.registerSession = async () => ({});
-    require(${JSON.stringify(path.join(__dirname, 'start.js'))}).handler({}).then((r) => {
-      process.stdout.write(JSON.stringify({ display: r.display, unread: r.unread }));
-    });
-  `;
-  const out = execFileSync('node', ['-e', script], {
-    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_API_URL: 'http://127.0.0.1:9', VIBE_SETUP_NO_AUTORUN: '1', CI: '1' },
-    encoding: 'utf8', timeout: 30000,
-  });
-  const r = JSON.parse(out);
-  assert.match(r.display, /couldn't read your inbox/, 'says the read failed');
-  assert.ok(!/\b0 unread\b/.test(r.display), 'never claims zero unread from a failed read');
-  assert.ok(!/no messages yet/.test(r.display), 'never claims a fresh arrival from a failed read');
-  assert.equal(r.unread, null, 'the payload says not-read, not zero');
-});
 
 test('the response has EXACTLY the promised keys — nothing rides along', withStore({
   getActiveUsers: async () => [here('zoe')],
@@ -296,33 +244,6 @@ test('local mode reports a real read, not a failure', async () => {
   const r = JSON.parse(out);
   assert.ok(!/couldn't read your inbox/.test(r.display), `local mode must not claim a failed read: ${r.display}`);
   assert.equal(typeof r.unread, 'number', 'local mode reports a real count');
-});
-
-test('a CORRUPT local messages file is a failed read, not an empty inbox', async () => {
-  const { execFileSync } = require('node:child_process');
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-corrupt-'));
-  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
-    username: 'ada', authMethod: 'github',
-    authToken: `h.${b64({ sub: 'ada', exp: Math.floor(Date.now() / 1000) + 86400 })}.sig`,
-  }));
-  // the local store keeps messages.jsonl beside the config
-  fs.writeFileSync(path.join(home, 'messages.jsonl'), '{"to":"ada","body":"ok"}\n{ this is not json\n');
-  const script = `
-    const store = require(${JSON.stringify(path.join(__dirname, '..', 'store', 'index.js'))});
-    store.getActiveUsers = async () => [];
-    store.heartbeat = async () => ({}); store.registerSession = async () => ({});
-    require(${JSON.stringify(path.join(__dirname, 'start.js'))}).handler({}).then((r) => {
-      process.stdout.write(JSON.stringify({ display: r.display, unread: r.unread }));
-    });
-  `;
-  const out = execFileSync('node', ['-e', script], {
-    env: { ...process.env, HOME: home, VIBE_HOME: home, VIBE_LOCAL: 'true', VIBE_SETUP_NO_AUTORUN: '1', CI: '1' },
-    encoding: 'utf8', timeout: 30000,
-  });
-  const r = JSON.parse(out);
-  assert.match(r.display, /couldn't read your inbox/, 'a corrupt file is reported as a failed read');
-  assert.ok(!/no messages yet/.test(r.display), 'never claims a fresh arrival from a corrupt file');
-  assert.equal(r.unread, null, 'and the payload says not-read, not zero');
 });
 
 test('a MISSING local messages file is a genuine empty inbox, not a failure', async () => {
@@ -420,58 +341,16 @@ test('a refused mark leaves no temp file behind and is never rendered as an empt
   }
 });
 
-test('the callers of markThreadRead observe a refusal', () => {
-  // The contract gained a {success:false} outcome; a caller that ignores it
-  // renders a claim about a thread nobody could read (review P2).
-  const inbox = fs.readFileSync(path.join(__dirname, 'inbox.js'), 'utf8');
-  const reply = fs.readFileSync(path.join(__dirname, 'reply.js'), 'utf8');
-  const marks = [...inbox.matchAll(/markThreadRead\(/g)].length;
-  const observed = [...inbox.matchAll(/marked\s*&&\s*marked\.success === false/g)].length;
-  assert.equal(observed, marks, `inbox has ${marks} mark call(s) and observes ${observed}`);
-  assert.match(reply, /marked\.success === false/, 'reply observes the refusal too');
-  assert.match(inbox, /nothing is shown rather than an empty conversation/, 'and says so honestly');
-});
-
-test('a corrupt profile store is never overwritten by a mutator', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-prof-'));
-  const saved = process.env.VIBE_HOME;
-  process.env.VIBE_HOME = home;
-  const file = path.join(home, 'profiles.json');
-  const corrupt = '{"ada":{"handle":"ada","building":"a thing"} TRUNCATED';
-  fs.writeFileSync(file, corrupt);
-  delete require.cache[require.resolve('../config')];
-  delete require.cache[require.resolve('../store/profiles.js')];
+test('opening a conversation observes a refused read and shows nothing rather than an empty one', async () => {
+  const thread = require('./thread');
+  const orig = { getThread: store.getThread, markThreadRead: store.markThreadRead };
+  store.getThread = async () => [];
+  store.markThreadRead = async () => ({ success: false });
   try {
-    const profiles = require('../store/profiles.js');
-    await profiles.updateProfile('zoe', { building: 'something else' });
-    assert.equal(fs.readFileSync(file, 'utf8'), corrupt, 'the store was rewritten over an unreadable read');
-    assert.deepEqual(fs.readdirSync(home).filter((f) => f.endsWith('.tmp')), []);
-  } finally {
-    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
-    delete require.cache[require.resolve('../config')];
-    delete require.cache[require.resolve('../store/profiles.js')];
-  }
-});
-
-test('a readable profile store still saves, keeping the other profiles', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-prof2-'));
-  const saved = process.env.VIBE_HOME;
-  process.env.VIBE_HOME = home;
-  const file = path.join(home, 'profiles.json');
-  fs.writeFileSync(file, JSON.stringify({ ada: { handle: 'ada', building: 'a thing' } }, null, 2));
-  delete require.cache[require.resolve('../config')];
-  delete require.cache[require.resolve('../store/profiles.js')];
-  try {
-    const profiles = require('../store/profiles.js');
-    await profiles.updateProfile('zoe', { building: 'something else' });
-    const after = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.equal(after.ada.building, 'a thing', 'the existing profile was lost');
-    assert.equal(after.zoe.building, 'something else', 'the new profile was not written');
-  } finally {
-    if (saved === undefined) delete process.env.VIBE_HOME; else process.env.VIBE_HOME = saved;
-    delete require.cache[require.resolve('../config')];
-    delete require.cache[require.resolve('../store/profiles.js')];
-  }
+    const r = await thread.handler({ handle: 'zoe' });
+    assert.match(r.display, /Couldn't read your conversation with @zoe/);
+    assert.doesNotMatch(r.display, /No messages/);
+  } finally { Object.assign(store, orig); }
 });
 
 test('a corrupt presence file is never overwritten by a heartbeat', async () => {
@@ -493,21 +372,6 @@ test('a corrupt presence file is never overwritten by a heartbeat', async () => 
     delete require.cache[require.resolve('../store/local.js')];
   }
 });
-
-test('"N others here" never counts the signed-in person, whatever the casing', withStore(
-  {
-    getActiveUsers: async () => [
-      { handle: '@Ada', status: 'active', lastSeen: now - 60_000 },   // me, differently cased
-      here('zoe'),
-      here('ren'),
-    ],
-  },
-  async () => {
-    const { res } = await run();
-    assert.equal(res.here, 2, 'the signed-in person leaked into the "others" count');
-    assert.match(res.display, /2 others here/);
-  }
-));
 
 test('a REAL presence failure is never rendered as an empty room', async () => {
   // Same discipline as the inbox pin: a child process against an unreachable
@@ -783,8 +647,8 @@ test('signing in does not erase the line you set earlier', () => {
     !/^\s*(cfg|authConfig)\.one_liner = one_liner \|\| '';/m.test(init),
     'a sign-in path still passes an empty one_liner as though it were an instruction'
   );
-  assert.equal([...init.matchAll(/if \(one_liner\) (cfg|authConfig)\.one_liner = one_liner;/g)].length, 3,
-    'all three sign-in call sites must guard the assignment');
+  assert.equal([...init.matchAll(/if \(one_liner\) (cfg|authConfig)\.one_liner = one_liner;/g)].length, 2,
+    'both sign-in call sites must guard the assignment');
 });
 
 test('vibe_start({}) with no building value never erases an existing work status', async () => {

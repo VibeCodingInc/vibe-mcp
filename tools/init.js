@@ -9,12 +9,11 @@
  * 5. Tool WAITS for callback and returns success
  */
 
-const { exec, execSync } = require('child_process');
+const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const store = require('../store');
-const discord = require('../discord');
 const authStore = require('../auth-store');
 const { beginOAuth } = require('../oauth-callback');
 const actorSession = require('../actor-session');
@@ -23,7 +22,6 @@ const API_BASE = 'https://www.slashvibe.dev';
 
 // vibe_email is culture-layer: with extras off, nudging someone to say
 // "vibe email …" advertises a command their session does not have.
-const EXTRAS_ENABLED = ['1', 'true'].includes(String(process.env.VIBE_EXTRAS || '').toLowerCase());
 
 /**
  * Fetch presence from the API, split into humans vs agents.
@@ -70,200 +68,6 @@ function generatePreAuthBanner(presence) {
 `;
 }
 
-/**
- * Generate welcome banner for authenticated users (with handle + unread)
- */
-function generateAuthBanner(handle, unreadCount, presence) {
-  // Format: logo | handle + unread | tagline + online
-  // Keep alignment consistent with original banner
-  const handleCol = `@${handle}`.padEnd(16);
-  const unreadCol = unreadCount > 0 ? `📬 ${unreadCount} unread`.padEnd(14) : `📬 0 messages`.padEnd(14);
-  const onlineText = formatPresenceLabel(presence) || 'just you so far';
-
-  return `  █░█ █ █▄▄ █▀▀   ${handleCol}  ask here · answer there
-  ▀▄▀ █ █▄█ ██▄   ${unreadCol}  🟢 ${onlineText}
-  ──────────────────────────────────────────────────`;
-}
-
-/**
- * Detect current git repository name
- */
-function detectRepoName() {
-  try {
-    const toplevel = execSync('git rev-parse --show-toplevel 2>/dev/null', {
-      encoding: 'utf8',
-      timeout: 1000
-    }).trim();
-    // Split on forward or back slash to get repo name
-    const parts = toplevel.replace(/\\/g, '/').split('/');
-    return parts[parts.length - 1];
-  } catch (e) {
-    return null;
-  }
-}
-
-/**
- * Detect tech stack from package.json or file extensions
- */
-function detectTechStack() {
-  const techStack = new Set();
-
-  try {
-    // Find git root first, fallback to cwd
-    let cwd;
-    try {
-      cwd = execSync('git rev-parse --show-toplevel 2>/dev/null', {
-        encoding: 'utf8',
-        timeout: 1000
-      }).trim();
-    } catch (e) {
-      cwd = process.cwd();
-    }
-
-    // Try reading package.json
-    const pkgPath = path.join(cwd, 'package.json');
-    if (fs.existsSync(pkgPath)) {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-
-      // Map common packages to tech names
-      const techMap = {
-        'react': 'React',
-        'next': 'Next.js',
-        'vue': 'Vue',
-        'svelte': 'Svelte',
-        'express': 'Express',
-        'fastify': 'Fastify',
-        'typescript': 'TypeScript',
-        '@anthropic-ai/sdk': 'Claude API',
-        'openai': 'OpenAI',
-        'langchain': 'LangChain',
-        'prisma': 'Prisma',
-        '@vercel/kv': 'Vercel KV',
-        'tailwindcss': 'Tailwind',
-        'electron': 'Electron',
-        '@tauri-apps/api': 'Tauri'
-      };
-
-      for (const [pkg, tech] of Object.entries(techMap)) {
-        if (deps[pkg]) techStack.add(tech);
-      }
-    }
-
-    // Detect by file extensions in cwd
-    const files = fs.readdirSync(cwd).slice(0, 50);  // Limit scan
-    for (const f of files) {
-      if (f.endsWith('.ts') || f.endsWith('.tsx')) techStack.add('TypeScript');
-      if (f.endsWith('.py')) techStack.add('Python');
-      if (f.endsWith('.rs')) techStack.add('Rust');
-      if (f.endsWith('.go')) techStack.add('Go');
-      if (f.endsWith('.sol')) techStack.add('Solidity');
-    }
-
-  } catch (e) {
-    // Non-fatal - continue without tech detection
-  }
-
-  return Array.from(techStack).slice(0, 8);  // Limit to 8 techs
-}
-
-/**
- * Fetch GitHub friends who are on /vibe (non-blocking)
- */
-async function fetchGitHubFriends(handle) {
-  try {
-    const response = await fetch(`${API_BASE}/api/github/contacts?handle=${encodeURIComponent(handle)}`);
-    if (!response.ok) return null;
-    const data = await response.json();
-    if (!data.success) return null;
-    return {
-      friendsOnVibe: data.people_you_know?.slice(0, 5) || [],
-      inviteSuggestions: data.invite_suggestions?.slice(0, 10) || [],
-      totalContacts: data.stats?.total_contacts || 0
-    };
-  } catch (e) {
-    return null;
-  }
-}
-
-/**
- * Does this freshly-authed user have an email on file?
- *
- * GitHub email capture (callback.js) fills this for most users, but accounts
- * with a private GitHub email come back NULL — and a null-email user is exactly
- * the one we can't reach when a DM lands while they're away. We only nudge that
- * gap population, so people who already gave us an address aren't nagged.
- *
- * Returns true (has email), false (no email → nudge), or null (unknown → stay
- * quiet rather than guess).
- */
-async function fetchHasEmail(token) {
-  if (!token) return null;
-  try {
-    const r = await fetch(`${API_BASE}/api/profile/update`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (!r.ok) return null;
-    const me = await r.json();
-    return !!me.email;
-  } catch (e) {
-    return null;
-  }
-}
-
-/**
- * Send personalized welcome from @seth
- * Returns the welcome message content so we can show it inline
- */
-async function sendPersonalizedWelcome(handle, oneLiner) {
-  try {
-    const repoName = detectRepoName();
-    const techStack = detectTechStack();
-
-    const response = await fetch(`${API_BASE}/api/onboarding/personalized-welcome`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        handle,
-        oneLiner,
-        repoName,
-        techStack,
-        githubProfile: null
-      })
-    });
-
-    if (!response.ok) {
-      console.error('[vibe_init] Welcome API error:', response.status);
-      return null;
-    }
-
-    const result = await response.json();
-    return result.success ? result : null;
-  } catch (e) {
-    console.error('[vibe_init] Personalized welcome failed:', e.message);
-    return null;
-  }
-}
-
-const API_URL = process.env.VIBE_API_URL || 'https://www.slashvibe.dev';
-
-/**
- * Send welcome message from @seth (founder)
- */
-async function sendWelcomeMessage(handle, one_liner) {
-  try {
-    const response = await fetch(`${API_URL}/api/onboarding/welcome`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ handle, one_liner })
-    });
-    const result = await response.json();
-    return result.success;
-  } catch (e) {
-    console.error('[vibe_init] Welcome message failed:', e.message);
-    return false;
-  }
-}
 
 const definition = {
   name: 'vibe_init',
@@ -343,11 +147,10 @@ async function completeSignIn({ token, handle: finalHandle, actor }, one_liner) 
   config.save(authConfig);
   // The toolset just changed — tell the host now, not on the next call.
   global.vibeNotifier?.emitImmediate();
-  // Presence + welcome are best-effort and must never block or throw here.
+  // Presence is best-effort and must never block or throw here. Nothing is
+  // sent on the person's behalf at sign-in: no automatic welcome, ever.
   try { await store.registerSession(config.getSessionId(), finalHandle, one_liner); } catch {}
   try { await store.heartbeat(finalHandle, one_liner); } catch {}
-  try { discord.postJoin(finalHandle, one_liner); } catch {}
-  try { await Promise.race([sendPersonalizedWelcome(finalHandle, one_liner), new Promise((r) => setTimeout(r, 2500))]); } catch {}
 }
 
 async function ensureAuthFlow(opts) {
@@ -436,7 +239,7 @@ async function _resetPendingAuth() {
 
 
 async function handler(args) {
-  const { handle, one_liner, auth_method } = args;
+  const { handle, one_liner } = args;
 
   // Normalize handle if provided
   const h = handle
@@ -479,43 +282,8 @@ async function handler(args) {
       // unread (the reason to come back) and, if we have no email on file, nudge
       // the return loop right at the teachable moment. Both are best-effort with
       // tight timeouts — never hold up the response; degrade to the plain message.
-      let unreadCount = 0;
-      let hasEmail = null;
-      try {
-        [unreadCount, hasEmail] = await Promise.all([
-          Promise.race([
-            store.getUnreadCount(existingHandle),
-            new Promise(resolve => setTimeout(() => resolve(0), 1500))
-          ]).catch(() => 0),
-          Promise.race([
-            fetchHasEmail(config.getAuthToken()),
-            new Promise(resolve => setTimeout(() => resolve(null), 1500))
-          ]).catch(() => null)
-        ]);
-      } catch (e) {}
-
-      const unreadLine = unreadCount > 0
-        ? `\n\n📬 **${unreadCount} unread** — say \`vibe inbox\` to read ${unreadCount > 1 ? 'them' : 'it'}.`
-        : '';
-
-      // Only nudge when we genuinely can't reach them out-of-band. If they have
-      // unread right now, the value is concrete: "these landed while you were
-      // away — next time we'll email you." Otherwise it's a gentle one-liner.
-      const emailNudge = (EXTRAS_ENABLED && hasEmail === false)
-        ? (unreadCount > 0
-            ? `\n\n📧 These landed while you were away. Add an email and /vibe pings you next time — say **"vibe email you@example.com"** _(offline only · one-click unsubscribe)_.`
-            : `\n\n📧 **Don't miss a DM** — add an email and /vibe pings you when someone messages you while you're away: **"vibe email you@example.com"** _(offline only · one-click unsubscribe)_.`)
-        : '';
-
-      // `vibe logout` is not a tool this server registers — the sign-off that
-      // exists is `vibe bye`, which stops presence for this session and keeps
-      // the saved identity. No re-init needed afterwards.
       return {
-        display: `## Already signed in as @${existingHandle}${unreadLine}
-
-To see who's online: \`vibe who\`
-To check messages: \`vibe inbox\`
-Heading out? \`vibe bye\` ends presence for this session — you stay @${existingHandle}${emailNudge}`
+        display: `Already signed in as @${existingHandle}. Say "vibe start" to see what is waiting.`,
       };
     }
   }
@@ -534,7 +302,7 @@ Heading out? \`vibe bye\` ends presence for this session — you stay @${existin
   // ===========================================
   // BROWSER AUTH (Default): GitHub OAuth
   // ===========================================
-  if (auth_method === 'browser' || !auth_method) {
+  {
     // Save one_liner for the completion handler
     const cfg = config.load();
     if (h) cfg.handle = h;
@@ -562,94 +330,6 @@ Heading out? \`vibe bye\` ends presence for this session — you stay @${existin
     return authRequiredResult(flow, welcomeBanner);
   }
 
-  // ===========================================
-  // LEGACY AUTH: Local Ed25519 keypairs
-  // ===========================================
-  const crypto = require('../crypto');
-
-  // Generate Ed25519 keypair if not already present
-  let keypair = config.getKeypair();
-  let keypairNote = '';
-  if (!keypair) {
-    keypair = crypto.generateKeypair();
-    config.saveKeypair(keypair);
-    keypairNote = '\n🔐 _AIRC keypair generated for message signing_';
-  }
-
-  // Save identity
-  config.setSessionIdentity(h, one_liner || '', keypair);
-
-  const cfg = config.load();
-  cfg.handle = h;
-  if (one_liner) cfg.one_liner = one_liner;   // same: absent is not "clear it"
-  cfg.visible = true;
-  cfg.authMethod = 'legacy';
-  config.save(cfg);
-
-  // Register session with API
-  const sessionId = config.getSessionId();
-  const registration = await store.registerSession(sessionId, h, one_liner, keypair.publicKey);
-
-  if (!registration.success) {
-    return {
-      display: `## Identity Set (Local Only)
-
-**@${h}**
-_${one_liner}_
-
-⚠️ Session registration failed: ${registration.error}
-Local config saved. Heartbeats will use username fallback.`
-    };
-  }
-
-  // Send initial heartbeat
-  await store.heartbeat(h, one_liner);
-
-  // Post to Discord
-  discord.postJoin(h, one_liner);
-
-  // Send personalized welcome from @vibe (non-blocking)
-  // Send personalized welcome and wait for it
-  let welcomeResult = null;
-  try {
-    welcomeResult = await Promise.race([
-      sendPersonalizedWelcome(h, one_liner),
-      new Promise(resolve => setTimeout(() => resolve(null), 2500))
-    ]);
-  } catch (e) {
-    console.error('[vibe_init] Welcome message failed:', e.message);
-  }
-
-  // Check for unread messages
-  let unreadNotice = '';
-  try {
-    const unreadCount = await store.getUnreadCount(h);
-    if (unreadCount > 0) {
-      unreadNotice = `\n\n📬 **NEW MESSAGE — ${unreadCount} UNREAD** — say "check my messages"`;
-    }
-  } catch (e) {}
-
-  return {
-    display: `${welcomeBanner}
-## Welcome to /vibe! (Legacy Auth)
-
-**@${h}**
-_${one_liner}_${unreadNotice}${keypairNote}
-
-📨 **Check your messages** — @seth sent you a personalized welcome!
-
-⚠️ **Using local keys** — consider upgrading to GitHub auth:
-\`vibe init\` — Sign in with GitHub for verified identity
-
-### Onboarding Checklist
-[ ] Read your welcome message from @seth
-[ ] Reply to @seth
-[ ] Message one recommended builder
-[ ] Post your first ship
-[ ] Leave some feedback
-
-_Say "vibe onboarding" anytime to check your progress_`
-  };
 }
 
 module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE };

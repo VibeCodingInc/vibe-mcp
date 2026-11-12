@@ -71,13 +71,3 @@ test('store.sendMessage surfaces the server refusal message through the real HTT
     'parsed.message must survive requestOnce on non-2xx');
 });
 
-test('vibe_reply (REAL sendMessage, no stub) shows the server words with no retry advice', async () => {
-  const toolPath = require.resolve('./reply.js');
-  delete require.cache[toolPath];
-  const reply = require(toolPath);
-  const res = await reply.handler({ message: 'x', to: 'stan', reply_to: 'msg_askA' });
-  assert.match(res.display, /reply target not found in this conversation/,
-    'the server refusal reaches the human verbatim');
-  assert.ok(!/worth one retry/.test(res.display), 'retrying the same target cannot help');
-  assert.ok(!res.display.includes('✓ Replied'), 'no success claim');
-});
