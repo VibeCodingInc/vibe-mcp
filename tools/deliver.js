@@ -89,6 +89,9 @@ async function deliver(m) {
     }
   } catch (e) {}
 
+  // Writing to someone is what lets their answer reach you mid-work (reach.js).
+  require('../reach').know(them);
+
   return { display, data: { sent: true, message_id: result.id || null } };
 }
 

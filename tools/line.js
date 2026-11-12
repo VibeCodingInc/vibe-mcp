@@ -32,6 +32,7 @@ function commonRefusal(to, text, what) {
   if (!line.isOpen(to)) {
     return refuse(`No open line with @${to}, so nothing was sent. Prepare the ${what} with vibe_prepare and let the person decide. (A line is opened only by the person, from a terminal: npx slashvibe-mcp trust @${to})`);
   }
+  if (require('../reach').isMuted(to)) return refuse(`Nothing sent. @${to} is muted on this machine.`);
   if (!text) return refuse(`Nothing sent. The ${what} is empty.`);
   if (text.length > line.MAX_CHARS) return refuse(`Nothing sent. An unattended ${what} is at most ${line.MAX_CHARS} characters; this is ${text.length}. Shorten it, or prepare it with vibe_prepare for the person to review.`);
   if (line.looksSecret(text)) return refuse(`Nothing sent. The ${what} contains something shaped like a credential, and nobody is reviewing this message. Say it without that, or prepare it with vibe_prepare.`);

@@ -1,16 +1,15 @@
 {
-  "version": "0.9.0",
+  "version": "0.9.1",
   "updated": "2026-11-13",
-  "changelog": "/vibe is now telepathic messaging inside your coding agent. A message reaches you while you work, at your next prompt or after the next tool call, with a reply already prepared from what you are doing; nothing your agent wrote is sent until you choose Send. With someone you trust you can open a line from your terminal (npx slashvibe-mcp trust @handle): your agent may then ask their agent a question from your work and answer theirs from yours without stopping either of you, and each of you is told what was said. The package was rebuilt around this: eight tools, one way for a message to leave, no inbox to check.",
+  "changelog": "Who can reach you while you work is now yours to control. Only people you know arrive mid-task: someone you have written to, or someone you opened a line with. Anyone else waits where vibe start lists what is waiting. Two commands turn it down further: quiet stops everything from surfacing until you turn it off, and mute @handle stops one person. And the line that says what you are working on is yours again: tell your agent and it sets it; nothing is derived from your repository.",
   "features": [
-    "Arrival: a Claude Code hook brings a message into your session while you work. It reads one local file, makes no network call, writes no read state. Installed by setup; existing installs run: npx slashvibe-mcp hook install",
-    "vibe_prepare / vibe_send / vibe_discard: your agent writes, you approve the exact text; an answer names the message it answers",
-    "Open line (alpha): npx slashvibe-mcp trust @handle, untrust, lines. vibe_ask and vibe_answer send unattended only toward an open line: 6 an hour per person, 700 characters, nothing shaped like a credential, each marked as the agent's, a receipt each",
-    "vibe_people: who is in a session and who you talk with, in one list. vibe_thread: one conversation in full",
-    "vibe_start lists conversations that ended on the other person's words, even after they were read"
+    "Known senders: a message reaches a working session only from someone you have written to or opened a line with; strangers wait, unread",
+    "npx slashvibe-mcp quiet | unquiet: nothing surfaces while quiet, and turning it off releases no backlog",
+    "npx slashvibe-mcp mute @handle | unmute @handle: one person stops surfacing; an open line with them is not answered",
+    "vibe_start with building sets the line other people's agents read to decide whether a question is for you",
+    "Removed: the presence note that broadcast your latest commit message"
   ],
   "deprecated": [],
-  "breaking": true,
-  "breakingNotes": "Removed: vibe_who, vibe_inbox, vibe_dm, vibe_reply, vibe_moves, vibe_draft, vibe_send_draft, vibe_discard_draft, vibe_status, vibe_help, vibe_bye, vibe_list_me, vibe_unlist_me, vibe_capabilities, vibe_remember, vibe_reflect, vibe_call, every VIBE_EXTRAS tool, the tool-result footer, legacy keypair sign-in and the automatic welcome message. Arrival while you work is Claude Code only; Codex and Cursor can send and read.",
+  "breaking": false,
   "updateUrl": "https://www.slashvibe.dev/api/version"
 }

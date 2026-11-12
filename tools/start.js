@@ -4,7 +4,8 @@
  * One screen: who you are, how many people are in a session, what is unread,
  * and which conversations ended on their words. Handles, counts, ages and
  * ids only. The words themselves stay in the thread until it is opened, and
- * nobody is suggested: who to talk to is the person's decision.
+ * nobody is suggested: who to talk to is the person's decision. It is also
+ * where the person's own line ("what I am working on") is set.
  */
 
 'use strict';
@@ -14,7 +15,7 @@ const { inertField } = require('../incoming');
 const store = require('../store');
 const { isHereNow, normalizeHandle } = require('./_shared');
 const init = require('./init');
-const { gatherWithTimeout } = require('./_work-context');
+const reach = require('../reach');
 const { wroteLastPeople } = require('../arrival');
 const { isQaHandle } = require('./drafts');
 const line = require('../line');
@@ -26,7 +27,7 @@ const definition = {
     type: 'object',
     properties: {
       handle: { type: 'string', description: 'Only when signing in for the first time' },
-      building: { type: 'string', description: 'One line on what you are working on. Only when signing in for the first time.' },
+      building: { type: 'string', description: 'One line, in the person\'s words, on what they are working on. Other people\'s agents read it to decide whether a question is for them, so set it only with words the person gave or agreed to. No file paths, secrets, or client names they have not said aloud.' },
     },
   },
 };
@@ -49,16 +50,20 @@ async function handler(args = {}) {
   const myHandle = config.getHandle();
   const me = normalizeHandle(myHandle || '');
 
-  // What other people's agents will be told you are working on: a short note
-  // derived from the repo you are in (redacted and capped in _work-context).
-  // Opt out with `autoContext: false` in config.
-  if (config.get('autoContext', true)) {
-    gatherWithTimeout(2000).then((work) => {
-      if (work?.suggestions?.brief) {
-        return store.heartbeat(myHandle, config.getOneLiner(), { note: work.suggestions.brief, branch: null });
-      }
-    }).catch(() => {});
+  // The one line other people's agents read to decide whether a question is
+  // for you. It is yours: set only from words you gave or agreed to, never
+  // derived from your repository. (0.9.0 and earlier broadcast the latest
+  // commit message as a presence note; that is gone.)
+  let lineSet = null;
+  const wanted = typeof args.building === 'string' ? args.building.trim() : '';
+  if (wanted) {
+    lineSet = wanted.slice(0, 120);
+    const cfg = config.load(); cfg.one_liner = lineSet; config.save(cfg);
+    config.setSessionIdentity(myHandle, lineSet);
+    try { require('../auth-store').setOneLiner(lineSet); } catch {}
+    await store.heartbeat(myHandle, lineSet).catch(() => {});
   }
+  const myLine = lineSet || config.getOneLiner() || '';
 
   // A read that FAILED is not an empty room and not an empty inbox: both
   // outcomes are kept, and an unknown is shown as unknown, never as zero.
@@ -126,6 +131,12 @@ async function handler(args = {}) {
     display += '\n\nmessages will not reach you while you work yet. turn that on once: npx slashvibe-mcp hook install';
   }
 
+  // What others see about you, and whether anything can reach you right now.
+  display += myLine
+    ? `\n\nyou say you are working on: "${cell(myLine, 88)}"`
+    : '\n\nyou have not said what you are working on.\nother people\'s agents read that line to decide whether a question is for you.\noffer to set one: vibe_start with building.';
+  if (reach.isQuiet()) display += '\nquiet is on: nothing reaches you while you work. off: npx slashvibe-mcp unquiet';
+
   display += '\n\nopen a conversation: vibe thread @handle · see who is reachable: vibe people';
 
   // The payload says exactly what the screen says: a body withheld from the
@@ -136,6 +147,8 @@ async function handler(args = {}) {
     here: presenceRead ? hereCount : null,
     waiting: unreadSenders.slice(0, 5).map((t) => ({ handle: t.handle, unread: t.unread, lastMessageId: t.lastMessageId || null })),
     wroteLast: lastWord,
+    line: myLine || null,
+    quiet: reach.isQuiet(),
     lineReceipts: spoken.map((r) => ({ kind: r.kind, with: r.with, at: r.at })),
   };
 }

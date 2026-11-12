@@ -13,6 +13,8 @@ const config = require('./config');
 const authStore = require('./auth-store');
 const store = require('./store');
 const arrival = require('./arrival');
+const reach = require('./reach');
+const line = require('./line');
 
 let heartbeatInterval = null;
 let pollTimer = null;
@@ -109,6 +111,22 @@ async function poll() {
  * VERIFIED session: an arrival names a sender to a person, and that is not
  * something to do on the strength of an unverified credential.
  */
+/**
+ * Known = an open line, a send recorded on this machine, or (checked once and
+ * then remembered) any message of yours in the conversation, so someone you
+ * wrote to from another device still reaches you here. Reading the
+ * conversation does not mark it read. A failed read is "not known yet".
+ */
+async function knows(me, them) {
+  if (line.isOpen(them) || reach.isKnown(them)) return true;
+  try {
+    const thread = await store.getThread(me, them);
+    const mine = String(me).toLowerCase();
+    if ((thread || []).some((m) => String(m.from || '').toLowerCase() === mine)) { reach.know(them); return true; }
+  } catch {}
+  return false;
+}
+
 const startedAt = Date.now();
 let lastPruneAt = 0;
 let waitingAtStart = null;
@@ -116,6 +134,13 @@ async function noteArrivals(handle, threads) {
   if (!authStore.isVerified?.()) return;
   if (['0', 'off', 'false'].includes(String(process.env.VIBE_ARRIVALS || '').toLowerCase())) return;
   if (Date.now() - lastPruneAt > 60 * 60 * 1000) { lastPruneAt = Date.now(); arrival.prune(handle); }
+  // Quiet: nothing surfaces. What comes in meanwhile is remembered as waiting,
+  // so turning quiet off does not release a burst of old arrivals.
+  if (reach.isQuiet()) {
+    if (waitingAtStart === null) waitingAtStart = new Set();
+    for (const t of threads) if (t.unread > 0 && t.lastMessageId) waitingAtStart.add(t.lastMessageId);
+    return;
+  }
   // What was already unread on the FIRST look is "waiting" (shown when the
   // session opens), not an arrival. It is remembered by message id, so after
   // that first look a new id is an arrival whatever the two clocks say; only
@@ -126,10 +151,20 @@ async function noteArrivals(handle, threads) {
     waitingAtStart = new Set(threads.filter((t) => t.unread > 0 && t.lastMessageId && !early.has(t.lastMessageId))
       .map((t) => t.lastMessageId));
   }
-  const live = threads.filter((t) => !waitingAtStart.has(t.lastMessageId));
-  const candidates = arrival.pickArrivals(live, handle)
+  const fresh = threads.filter((t) => !waitingAtStart.has(t.lastMessageId));
+  const wanted = arrival.pickArrivals(fresh, handle)
     .filter((t) => !arrival.isClaimed(t.lastMessageId) && !arrival.isSpooled(t.lastMessageId));
+  // Only someone you know reaches you mid-work (reach.js). A muted person, or
+  // someone you have never written to, stays waiting: remembered here so the
+  // question is asked once per message, not once per poll.
+  const candidates = [];
+  for (const t of wanted) {
+    if (!reach.isMuted(t.lastFrom) && await knows(handle, t.lastFrom)) candidates.push(t);
+    else waitingAtStart.add(t.lastMessageId);
+  }
   if (candidates.length === 0) return;
+  const allowed = new Set(candidates.map((t) => t.lastMessageId));
+  const live = fresh.filter((t) => allowed.has(t.lastMessageId));
   const roster = await store.getActiveUsers().catch(() => []);
   let bindingFor = null;
   try { bindingFor = require('./tools/drafts').getReturnBinding; } catch {}
