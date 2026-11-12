@@ -115,7 +115,29 @@ async function fetchLive() {
   if (!verified?.valid || !verified?.handle) return [];
   authStore.markVerified(verified.handle);
 
-  return normalizeMessages(await store.getRawInbox(verified.handle));
+  // The same rule as arrival (reach.js): only people you know are put in
+  // front of you. Quiet shows nothing; a muted or unknown sender's message
+  // stays waiting where vibe_start counts it.
+  const reach = require('./reach');
+  const line = require('./line');
+  if (reach.isQuiet()) return [];
+  const me = String(verified.handle).toLowerCase();
+  const rows = (await store.getRawInbox(verified.handle)).slice(0, 8);
+  const kept = [];
+  for (const row of rows) {
+    const from = row && row.from;
+    if (!from || reach.isMuted(from)) continue;
+    let known = line.isOpen(from) || reach.isKnown(from);
+    if (!known) {
+      try {
+        const thread = await store.getThread(verified.handle, from);
+        known = (thread || []).some((m) => String(m.from || '').toLowerCase() === me);
+        if (known) reach.know(from);
+      } catch {}
+    }
+    if (known) kept.push(row);
+  }
+  return normalizeMessages(kept);
 }
 
 async function main() {

@@ -47,6 +47,20 @@ if (args[0] === 'hook') {
     process.stderr.write(`${error?.message || error}\n`);
     process.exitCode = 1;
   }
+} else if (['quiet', 'unquiet', 'mute', 'unmute'].includes(args[0])) {
+  // Who may reach you while you work (reach.js). Local, and yours to type.
+  const reach = require('./reach');
+  const say = (t) => process.stdout.write(`${t}\n`);
+  try {
+    if (args[0] === 'quiet') { reach.setQuiet(true); say('Quiet. Nothing will reach you while you work; messages wait until you ask what is waiting. Turn it off: npx slashvibe-mcp unquiet'); }
+    else if (args[0] === 'unquiet') { reach.setQuiet(false); say('Quiet is off. Messages from people you know reach you while you work again.'); }
+    else if (args[0] === 'mute' && args[1]) { const h = reach.mute(args[1]); say(`Muted @${h}. Their messages will not surface in your sessions; they stay in the conversation. Undo: npx slashvibe-mcp unmute @${h}`); }
+    else if (args[0] === 'unmute' && args[1]) { say(reach.unmute(args[1]) ? `Unmuted @${reach.norm(args[1])}.` : `@${reach.norm(args[1])} was not muted.`); }
+    else { const m = reach.muted(); say(`${reach.isQuiet() ? 'Quiet is on.' : 'Quiet is off.'} ${m.length ? `Muted: ${m.map((h) => `@${h}`).join(', ')}` : 'Nobody is muted.'}`); say('npx slashvibe-mcp quiet | unquiet | mute @handle | unmute @handle'); }
+  } catch (error) {
+    process.stderr.write(`${error?.message || error}\n`);
+    process.exitCode = 1;
+  }
 } else if (args.includes('setup')) {
   require('./setup.js');
 } else if (process.stdin.isTTY) {

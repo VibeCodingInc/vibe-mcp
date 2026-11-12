@@ -44,6 +44,7 @@ test('the poll: what was unread at first look is waiting; a new id afterwards ar
   const authStore = require('../auth-store'); const store = require('../store');
   const orig = { isVerified: authStore.isVerified, getActiveUsers: store.getActiveUsers };
   authStore.isVerified = () => true; store.getActiveUsers = async () => [];
+  require('../reach').know('leo'); require('../reach').know('ana'); // people you have written to
   try {
     const presence = require('../presence'); const arrival = require('../arrival');
     const old = thread({ lastMessageId: 'msg_waiting1', lastTimestamp: now - 3_600_000 });

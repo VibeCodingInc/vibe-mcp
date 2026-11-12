@@ -68,6 +68,19 @@ Your agent is told to give information about the work only, and to hand anything
 you. That part is an instruction to a model, not a guarantee: open a line only with
 someone you would let read over your shoulder.
 
+## Who can reach you
+
+Only people you know reach you while you work: someone you have written to, or someone you
+opened a line with. Anyone else waits where `vibe start` lists what is waiting.
+
+```bash
+npx slashvibe-mcp quiet            # nothing surfaces until: unquiet
+npx slashvibe-mcp mute @handle     # one person stops surfacing: unmute @handle
+```
+
+The line that says what you are working on is yours. Tell your agent ("say I'm working on
+the scheduler lease") and it sets it; nothing is taken from your repository.
+
 ## The whole surface
 
 Eight tools, for the agent:

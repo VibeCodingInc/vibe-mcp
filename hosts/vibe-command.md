@@ -15,4 +15,6 @@ The person wants to reach someone on /vibe from the work in this session. They s
    - **Edit** → ask what to change, call `vibe_prepare` again with the `id` and the new `message`, show the new preview, offer the choices again.
    - **Cancel** → `vibe_discard`. Nothing is sent.
 
+If the person has no line saying what they are working on (`vibe_start` says so), offer once to set one from this session's work, in their words, and set it only if they agree.
+
 If they dictate exact words ("message @sam: ship it"), that is not this flow: send their words as they said them with `vibe_send` (`handle` + `message`).

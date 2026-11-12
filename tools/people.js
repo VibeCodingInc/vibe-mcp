@@ -15,6 +15,7 @@ const store = require('../store');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
 const { inertField } = require('../incoming');
 const line = require('../line');
+const reach = require('../reach');
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -77,6 +78,7 @@ async function handler() {
       if (t.unread > 0) bits.push(`${t.unread} unread`);
       if (hereSet.has(normalizeHandle(t.handle))) bits.push('here now');
       if (line.isOpen(t.handle)) bits.push('open line');
+      if (reach.isMuted(t.handle)) bits.push('muted');
       lines.push(`@${inertField(t.handle, 39)} · ${bits.filter(Boolean).join(' · ')}`);
     }
   }

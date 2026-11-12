@@ -165,7 +165,7 @@ test('the response has EXACTLY the promised keys — nothing rides along', withS
   const { res } = await run();
   // wroteLast joined the contract with arrival.js: it is stated on the screen
   // (handle, age, id — no body), so it ships under the same rule as `waiting`.
-  assert.deepEqual(Object.keys(res).sort(), ['display', 'here', 'lineReceipts', 'unread', 'waiting', 'wroteLast'],
+  assert.deepEqual(Object.keys(res).sort(), ['display', 'here', 'line', 'lineReceipts', 'quiet', 'unread', 'waiting', 'wroteLast'],
     `unexpected keys: ${Object.keys(res).join(', ')}`);
 }));
 
