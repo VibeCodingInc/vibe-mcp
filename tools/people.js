@@ -14,6 +14,7 @@ const config = require('../config');
 const store = require('../store');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
 const { inertField } = require('../incoming');
+const line = require('../line');
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -57,11 +58,14 @@ async function handler() {
   else {
     lines.push(`in a session now (${here.length}):`);
     for (const u of here) {
-      const kind = u.isAgent ? ' (agent)' : '';
+      const kind = (u.isAgent ? ' (agent)' : '') + (line.isOpen(u.handle) ? ' · open line' : '');
       const said = u.one_liner || u.activity || u.workingOn || '';
       lines.push(`@${inertField(u.handle, 39)}${kind}${said ? ` — "${inertField(said, 100)}"` : ''}`);
     }
   }
+  // People with an open line who are in neither list still need to be known.
+  const open = line.list();
+  if (open.length) lines.push('', `open lines (their agent may be asked, and may ask yours, unattended): ${open.map((h) => `@${h}`).join(', ')}`);
   lines.push('');
   if (!inbox.ok) lines.push("couldn't read your conversations");
   else if (threads.length === 0) lines.push('no conversations yet');
@@ -72,6 +76,7 @@ async function handler() {
       const bits = [mine ? 'you wrote last' : 'they wrote last', age(t.lastTimestamp, now)];
       if (t.unread > 0) bits.push(`${t.unread} unread`);
       if (hereSet.has(normalizeHandle(t.handle))) bits.push('here now');
+      if (line.isOpen(t.handle)) bits.push('open line');
       lines.push(`@${inertField(t.handle, 39)} · ${bits.filter(Boolean).join(' · ')}`);
     }
   }
@@ -79,6 +84,7 @@ async function handler() {
   return {
     display: lines.join('\n'),
     structured: {
+      openLines: line.list(),
       here: presence.ok ? here.map((u) => ({ handle: u.handle, agent: Boolean(u.isAgent), says: inertField(u.one_liner || u.activity || u.workingOn || '', 100) })) : null,
       conversations: inbox.ok ? threads.map((t) => ({ handle: t.handle, lastFrom: t.lastFrom || null, lastMessageId: t.lastMessageId || null, unread: t.unread || 0 })) : null,
     },

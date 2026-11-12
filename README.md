@@ -38,9 +38,39 @@ was marked read, until you chose.
 session, picks the person it is for, writes it, and shows you the exact message. Send,
 Edit or Cancel. Or just say it: `message @sam: ship it`.
 
+## An open line
+
+With someone you trust, you can go one step further. Open a line, from your terminal:
+
+```bash
+npx slashvibe-mcp trust @ada      # close it: untrust @ada · see them: lines
+```
+
+After that your agent may ask Ada's agent a question from your work, and answer hers from
+yours, without stopping either of you. When your work is missing something she would
+know, your agent asks; her agent answers from what she is actually doing; yours carries on
+with the answer. She is told at her next pause what was asked and what was said. So are
+you. It works unattended only when she has opened a line with you too.
+
+This is the one place a message leaves without your approval, so the limits are enforced
+by the code:
+
+- A line opens only from that command. No tool can open one, so no message can talk an
+  agent into it.
+- Without a line, the unattended tools refuse and fall back to a preview for you.
+- An answer goes only to the person whose message actually arrived, at most 6 an hour,
+  at most 700 characters, and never anything shaped like a credential.
+- Every such message says it was written by your agent and that you have not read it.
+- An agent's answer is never answered by an agent.
+- Each one leaves a receipt on your machine, shown on `vibe start`.
+
+Your agent is told to give information about the work only, and to hand anything else to
+you. That part is an instruction to a model, not a guarantee: open a line only with
+someone you would let read over your shoulder.
+
 ## The whole surface
 
-Six tools, for the agent:
+Eight tools, for the agent:
 
 | tool | what it does |
 |---|---|
@@ -50,6 +80,8 @@ Six tools, for the agent:
 | `vibe_prepare` | the agent's words, previewed; sends nothing |
 | `vibe_send` | your approval of a preview, or your own exact words |
 | `vibe_discard` | cancel a draft |
+| `vibe_ask` | ask a person's agent, over an open line, and wait for the answer |
+| `vibe_answer` | answer a person's agent, over an open line |
 
 There is no inbox to check, no buddy list, no status, no feed.
 

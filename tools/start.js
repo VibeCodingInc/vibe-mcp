@@ -17,6 +17,7 @@ const init = require('./init');
 const { gatherWithTimeout } = require('./_work-context');
 const { wroteLastPeople } = require('../arrival');
 const { isQaHandle } = require('./drafts');
+const line = require('../line');
 
 const definition = {
   name: 'vibe_start',
@@ -97,6 +98,18 @@ async function handler(args = {}) {
     });
   }
 
+  // What this person's agent said for them over an open line since yesterday.
+  // Their own agent's words, so shown in full: nobody else reviewed them.
+  const spoken = line.receipts().filter((r) => r.kind === 'answered' || r.kind === 'asked').slice(-5);
+  if (spoken.length > 0) {
+    display += '\n\nover your open lines, your agent:';
+    spoken.forEach((r) => {
+      display += r.kind === 'answered'
+        ? `\nanswered @${cell(r.with, 39)}, who asked "${cell(r.asked, 100)}": "${cell(r.said, 200)}"`
+        : `\nasked @${cell(r.with, 39)}: "${cell(r.said, 200)}"`;
+    });
+  }
+
   display += '\n\nopen a conversation: vibe thread @handle · see who is reachable: vibe people';
 
   // The payload says exactly what the screen says: a body withheld from the
@@ -107,6 +120,7 @@ async function handler(args = {}) {
     here: presenceRead ? hereCount : null,
     waiting: unreadSenders.slice(0, 5).map((t) => ({ handle: t.handle, unread: t.unread, lastMessageId: t.lastMessageId || null })),
     wroteLast: lastWord,
+    lineReceipts: spoken.map((r) => ({ kind: r.kind, with: r.with, at: r.at })),
   };
 }
 

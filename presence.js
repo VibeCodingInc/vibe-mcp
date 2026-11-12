@@ -40,11 +40,18 @@ function noteActivity() {
   if (wasIdle && pollTimer) { clearTimeout(pollTimer); schedule(); }
 }
 
+// With an open line, someone's agent may be waiting on this one: look every
+// 10s however idle the person is.
+function pollDelay() {
+  const base = cadenceFor(Date.now() - lastActivityAt);
+  try { return require('./line').list().length ? Math.min(base, 10 * 1000) : base; } catch { return base; }
+}
+
 function schedule() {
   const t = setTimeout(async () => {
     await poll();
     if (pollTimer) schedule(); // stop() clears the timer
-  }, cadenceFor(Date.now() - lastActivityAt));
+  }, pollDelay());
   t.unref?.();
   pollTimer = t;
 }

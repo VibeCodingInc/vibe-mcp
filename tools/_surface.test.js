@@ -41,14 +41,14 @@ async function withWire(fn, { reply = (m) => ({ id: `msg_${m.n}`, storedLength: 
   return sends;
 }
 
-test('the surface is six tools and sign-in plumbing; nothing else is registered', () => {
+test('the surface is six tools, the two open-line tools and sign-in plumbing; nothing else is registered', () => {
   const get = rpc([{ id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } }, { id: 2, method: 'tools/list' }]);
   assert.deepEqual(get(2).result.tools.map((t) => t.name).sort(),
     ['vibe_init', 'vibe_people', 'vibe_send', 'vibe_start', 'vibe_thread', 'vibe_token'],
     'signed out: the draft plumbing is hidden, everything a first request can hit is visible');
   const src = fs.readFileSync(INDEX, 'utf8');
   const registered = [...src.matchAll(/^\s{2}(vibe_[a-z]+):/gm)].map((m) => m[1]).sort();
-  assert.deepEqual(registered, ['vibe_discard', 'vibe_init', 'vibe_people', 'vibe_prepare', 'vibe_send', 'vibe_start', 'vibe_thread', 'vibe_token']);
+  assert.deepEqual(registered, ['vibe_answer', 'vibe_ask', 'vibe_discard', 'vibe_init', 'vibe_people', 'vibe_prepare', 'vibe_send', 'vibe_start', 'vibe_thread', 'vibe_token']);
   assert.match(get(1).result.instructions, /Never send without the person's explicit choice/);
 });
 

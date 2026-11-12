@@ -25,6 +25,28 @@ if (args[0] === 'hook') {
         process.exitCode = 1;
       }
     });
+} else if (['trust', 'untrust', 'lines'].includes(args[0])) {
+  // Open lines (line.js). This command, typed by the person, is the ONLY way a
+  // line opens; nothing a session's agent can call does it.
+  const line = require('./line');
+  const say = (t) => process.stdout.write(`${t}\n`);
+  try {
+    if (args[0] === 'trust' && args[1]) {
+      const h = line.open(args[1]);
+      say(`Open line with @${h}.`);
+      say(`Your agent may now ask @${h}'s agent a question from your work, and answer theirs from yours, without stopping you. It is told to give information about the work only; the code caps it at ${line.MAX_PER_HOUR} messages an hour, refuses anything shaped like a credential, and marks each message as your agent's, unread by you. You are told what was said. It works both ways only if @${h} opens one with you.`);
+      say(`Close it: npx slashvibe-mcp untrust @${h}`);
+    } else if (args[0] === 'untrust' && args[1]) {
+      say(line.close(args[1]) ? `Closed the line with @${line.norm(args[1])}.` : `There was no open line with @${line.norm(args[1])}.`);
+    } else {
+      const open = line.list();
+      say(open.length ? `Open lines: ${open.map((h) => `@${h}`).join(', ')}` : 'No open lines.');
+      say('Open one: npx slashvibe-mcp trust @handle   ·   close one: npx slashvibe-mcp untrust @handle');
+    }
+  } catch (error) {
+    process.stderr.write(`${error?.message || error}\n`);
+    process.exitCode = 1;
+  }
 } else if (args.includes('setup')) {
   require('./setup.js');
 } else if (process.stdin.isTTY) {
