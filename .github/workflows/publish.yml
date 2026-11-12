@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # npm trusted publishing (OIDC) + provenance; no stored token
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,10 +63,34 @@ jobs:
       - name: Release conformance
         run: npm run test:release
 
-      - name: Publish to npm (provenance)
+      # Trusted publishing: npm exchanges this run's GitHub OIDC identity for a
+      # short-lived publish credential. There is no NPM_TOKEN secret to expire
+      # (the dead token is what failed 0.8.28 and 0.9.0 with E404). npm only
+      # accepts the exchange from the publisher configured on npmjs.com for
+      # this package: VibeCodingInc/vibe-mcp, workflow file publish.yml — so
+      # renaming this file breaks publishing until that setting is updated.
+      # See .github/PUBLISHING.md.
+      #
+      # The checks above ran on Node 20 (same as CI). The OIDC exchange needs
+      # npm >= 11.5.1, which Node 24 bundles, so switch toolchains for the
+      # publish step only.
+      - name: Setup Node.js for publishing (npm with trusted publishing)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify npm supports trusted publishing
+        run: |
+          echo "node $(node -v), npm $(npm -v)"
+          node -e '
+            const [a, b, c] = process.argv[1].split(".").map(Number);
+            const ok = a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1)));
+            if (!ok) { console.error("npm " + process.argv[1] + " is older than 11.5.1 — trusted publishing unavailable"); process.exit(1); }
+          ' "$(npm -v)"
+
+      - name: Publish to npm (trusted publishing, provenance)
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # POST-publish verification — parity moved here from the pre-publish gate
   # after the 0.8.17 deadlock (auto-deploy made production advertise the
