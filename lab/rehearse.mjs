@@ -27,12 +27,13 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const jwt = (h) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Math.floor(Date.now() / 1000) + 86400 })).toString('base64url')}.sig`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function identity(root, handle, says, stubUrl) {
+function identity(root, handle, says, stubUrl, trusts = []) {
   const home = path.join(root, handle, '.vibe');
   const work = path.join(root, handle, 'work');
   fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(work, { recursive: true });
   fs.writeFileSync(path.join(home, 'auth.json'), JSON.stringify({ handle, token: jwt(handle), provider: 'github', authenticated_at: new Date().toISOString() }));
   fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ handle, one_liner: says }));
+  if (trusts.length) fs.writeFileSync(path.join(home, 'lines.json'), JSON.stringify(Object.fromEntries(trusts.map((h) => [h, { since: Date.now() }]))));
   const env = { VIBE_HOME: home, VIBE_API_URL: stubUrl, VIBE_SETUP_NO_AUTORUN: '1', CI: '1' };
   const mcp = path.join(root, handle, 'mcp.json');
   fs.writeFileSync(mcp, JSON.stringify({ mcpServers: { vibe: { command: process.execPath, args: [path.join(REPO, 'index.js')], env } } }));
@@ -43,7 +44,9 @@ function identity(root, handle, says, stubUrl) {
 }
 
 function session(id, prompt, { allowSend = false } = {}) {
-  const tools = ['Read', 'Edit', 'Write', 'Bash(sleep:*)', 'mcp__vibe__vibe_people', 'mcp__vibe__vibe_thread', 'mcp__vibe__vibe_prepare', 'mcp__vibe__vibe_discard', 'mcp__vibe__vibe_start'];
+  const tools = ['Read', 'Edit', 'Write', 'Bash(sleep:*)', 'mcp__vibe__vibe_people', 'mcp__vibe__vibe_thread', 'mcp__vibe__vibe_prepare', 'mcp__vibe__vibe_discard', 'mcp__vibe__vibe_start',
+    // The open-line tools are always offered: the code decides whether they may send.
+    'mcp__vibe__vibe_ask', 'mcp__vibe__vibe_answer'];
   if (allowSend) tools.push('mcp__vibe__vibe_send');
   const child = spawn('claude', ['-p', prompt, '--mcp-config', id.mcp, '--strict-mcp-config', '--settings', id.settings,
     '--allowedTools', ...tools, '--disallowedTools', 'Agent', 'WebSearch', '--output-format', 'stream-json', '--verbose'],
@@ -73,7 +76,7 @@ async function run(name) {
   const stub = await startStub({ people: sc.people });
   const ids = {};
   for (const [h, p] of Object.entries(sc.people)) {
-    ids[h] = identity(root, h, p.says, stub.url);
+    ids[h] = identity(root, h, p.says, stub.url, p.trusts || []);
     for (const [file, text] of Object.entries(p.files || {})) fs.writeFileSync(path.join(ids[h].work, file), text);
   }
   const lab = { stub, ids, sleep, session: (h, prompt, o) => session(ids[h], prompt, o), read: (h, f) => fs.readFileSync(path.join(ids[h].work, f), 'utf8') };

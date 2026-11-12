@@ -138,12 +138,13 @@ test('DEFECT 4b — the same call twice gives the same screen (nothing rotates)'
   assert.equal(a, b, 'no random selection, no rotating tip — a stable first screen');
 }));
 
-test('a genuinely new arrival is pointed at whoever invited them — never a stranger', withStore({
+test('a genuinely new arrival is told it takes two and given the line to send — never offered a stranger', withStore({
   getActiveUsers: async () => [here('zoe'), here('kai')],
   getInbox: async () => [],
 }, async () => {
   const { text, res, all } = await run();
-  assert.match(text, /whoever invited you/i);
+  assert.match(text, /takes two: send the person you work with this/);
+  assert.match(text, /^  npx slashvibe-mcp$/m);
   assert.ok(!text.includes('@zoe') && !text.includes('@kai'), 'no online stranger is offered instead');
 }));
 
@@ -164,7 +165,7 @@ test('the response has EXACTLY the promised keys — nothing rides along', withS
   const { res } = await run();
   // wroteLast joined the contract with arrival.js: it is stated on the screen
   // (handle, age, id — no body), so it ships under the same rule as `waiting`.
-  assert.deepEqual(Object.keys(res).sort(), ['display', 'here', 'unread', 'waiting', 'wroteLast'],
+  assert.deepEqual(Object.keys(res).sort(), ['display', 'here', 'lineReceipts', 'unread', 'waiting', 'wroteLast'],
     `unexpected keys: ${Object.keys(res).join(', ')}`);
 }));
 
