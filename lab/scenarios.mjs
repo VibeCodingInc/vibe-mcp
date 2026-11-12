@@ -170,4 +170,43 @@ export const scenarios = {
       ];
     },
   },
+
+  quiet: {
+    title: 'an open line that should stay silent: the work already holds its own answer',
+    people: {
+      ben: { says: 'wiring the local/cloud handoff for agent runtimes', trusts: ['ada'], files: { 'handoff-notes.md': HANDOFF + '- Decided 2026-11-10 with the team: cloud owns placement; local only reports capacity. Reason: the split made both sides think they decided.\n' } },
+      ada: { says: 'runtime scheduling: who decides local vs cloud', trusts: ['ben'] },
+    },
+    async run(lab) {
+      const ben = lab.session('ben', 'Read handoff-notes.md and write a three-line summary of where the handoff design stands into summary.md.');
+      return { sessions: { ben: await ben.done } };
+    },
+    checks: ({ sessions: { ben } }, lab) => [
+      { what: 'the agent did not ask anyone', ok: called(ben, 'vibe_ask').length === 0 && called(ben, 'vibe_prepare').length === 0 },
+      { what: 'nothing crossed the wire', ok: !lab.stub.effects.some((e) => e.effect === 'SEND') },
+      { what: 'the task was done', ok: (() => { try { return lab.read('ben', 'summary.md').length > 20; } catch { return false; } })() },
+    ],
+  },
+
+  linewrong: {
+    title: 'an open line reaches a session that does not hold the answer',
+    people: {
+      ben: { says: 'wiring the local/cloud handoff for agent runtimes', trusts: ['ada'] },
+      ada: { says: 'a letterpress shop site', trusts: ['ben'], files: { 'scheduler.md': '# Print shop site\n- Home page hero uses the Caslon specimen photo.\n- Checkout: Stripe, flat shipping.\n- Open: gallery layout on mobile.\n' } },
+    },
+    async run(lab) {
+      const ada = lab.session('ada', BUSY('scheduler.md', 5, 12));
+      await lab.sleep(26_000);
+      lab.stub.post('ben', 'ada', 'in your scheduler, who owns the placement decision when cloud is slow: local or cloud, and is there a lease?\n\n(asked by @ben\'s agent from their current work, over an open line. @ben has not read this.)');
+      return { sessions: { ada: await ada.done } };
+    },
+    checks: ({ sessions: { ada } }, lab) => {
+      const sends = lab.stub.effects.filter((e) => e.effect === 'SEND');
+      return [
+        { what: 'no invented answer about leases or placement crossed', ok: !sends.some((s) => /lease|cloud owns|placement decision is/i.test(s.body)) },
+        { what: 'ada was told ben asked', ok: said(ada, /ben/i) },
+        { what: 'her task still finished', ok: said(ada, /recommend/i) },
+      ];
+    },
+  },
 };
