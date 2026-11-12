@@ -332,28 +332,6 @@ async function heartbeat(handle, one_liner, context = null) {
   }
 }
 
-async function sendTypingIndicator(handle, toHandle) {
-  try {
-    // Use dedicated typing API with 5s TTL
-    await request('POST', '/api/typing', {
-      from: handle,
-      to: toHandle,
-    });
-  } catch (e) {
-    // Silent fail - typing is best-effort
-  }
-}
-
-async function getTypingUsers(forHandle) {
-  try {
-    // Use dedicated typing API to get all users typing to forHandle
-    const result = await request('GET', `/api/typing?to=${forHandle}`);
-    return result.typing || [];
-  } catch (e) {
-    return [];
-  }
-}
-
 async function getActiveUsersInner() {
   try {
     const endpoint = USE_V2_PRESENCE ? '/api/v2/presence' : '/api/presence';
@@ -429,21 +407,6 @@ async function getActiveUsersInner() {
       lastShip: u.lastShip || null
     }));
 
-    // Sync presence data to local profiles (non-blocking)
-    // This enables discovery to find users by what they're building
-    try {
-      const profiles = require('./profiles');
-      profiles.syncFromPresence(mappedUsers).then(synced => {
-        if (synced > 0) {
-          // Auto-infer interests for new/updated profiles
-          profiles.inferMissingInterests().catch(e =>
-            console.error('[presence] interest inference failed:', e.message)
-          );
-        }
-      }).catch(e => console.error('[presence] sync failed:', e.message));
-    } catch (e) {
-      // Non-fatal: profiles module may not be available in some contexts
-    }
 
     // On the RETURNED array, not the intermediate `users` — they are different objects
     // and attaching to the wrong one is a silent no-op that reads as "the signal is not
@@ -486,26 +449,6 @@ async function getActiveUsersResult() {
 // Named callers keep the old shape: an empty list on failure, as before.
 async function getActiveUsers() {
   return (await getActiveUsersResult()).users;
-}
-
-async function setVisibility(handle, visible) {
-  try {
-    const endpoint = USE_V2_PRESENCE ? '/api/v2/presence' : '/api/presence';
-    const result = await request('POST', endpoint, {
-      action: 'visibility',
-      visible: visible
-    });
-
-    if (result.success === false) {
-      console.error('[setVisibility] API error:', result.error);
-      return { success: false, error: result.error };
-    }
-
-    return { success: true, visible };
-  } catch (e) {
-    console.error('[setVisibility] Error:', e.message);
-    return { success: false, error: e.message };
-  }
 }
 
 // ============ MESSAGES ============
@@ -778,22 +721,6 @@ async function getUnreadCount(handle) {
   }
 }
 
-/**
- * Get count of active live broadcasts
- * Used in presence footer to show "X live now"
- */
-async function getLiveBroadcastCount() {
-  try {
-    const result = await request('GET', '/api/watch', null, { auth: false });
-    if (result.broadcasts) {
-      return Object.keys(result.broadcasts).length;
-    }
-    return 0;
-  } catch (e) {
-    return 0;
-  }
-}
-
 // Get raw inbox messages (for notification checks)
 // V2: Fetches threads and constructs message objects from unread threads
 // Read state is synced via Postgres cursors, so if you read on iOS it's reflected here
@@ -961,170 +888,11 @@ async function markThreadRead(myHandle, theirHandle, lastMessageId = null, threa
   );
 }
 
-/**
- * Record first presentation of messages (the platform's /delivered receipt).
- *
- * Call this ONLY when a message has actually been PRESENTED — surfaced into a
- * visible thread or the model's session context — never on mere receipt via
- * SSE or poll. Fetching bytes is not presentation; presentation is not custody
- * or read. delivered_at is the aggregate first-presentation marker on the
- * platform's delivery ladder (vibe-platform #294/#295); custody remains the
- * delivery_receipts claim/receipt mechanism.
- * @param {string[]} messageIds - Array of message IDs that were presented
- */
-async function markMessagesDelivered(messageIds) {
-  if (!messageIds || messageIds.length === 0) return { marked: 0 };
-
-  try {
-    const result = await request('POST', '/api/v2/messages/delivered', {
-      message_ids: messageIds
-    });
-
-    return result;
-  } catch (e) {
-    console.error('[markMessagesDelivered] Error:', e.message);
-    return { marked: 0, error: e.message };
-  }
-}
-
-/**
- * Search messages
- * @param {string} query - Search term
- * @param {object} options - Search options
- * @param {string} [options.with] - Filter to conversation with specific user
- * @param {number} [options.limit] - Max results (default 50)
- */
-async function searchMessages(query, options = {}) {
-  try {
-    let url = `/api/v2/messages/search?q=${encodeURIComponent(query)}`;
-
-    if (options.with) {
-      url += `&with=${encodeURIComponent(options.with)}`;
-    }
-    if (options.limit) {
-      url += `&limit=${options.limit}`;
-    }
-    if (options.offset) {
-      url += `&offset=${options.offset}`;
-    }
-
-    const result = await request('GET', url);
-
-    if (result.success === false) {
-      throw new Error(result.error || 'Search failed');
-    }
-
-    return result;
-  } catch (e) {
-    console.error('[searchMessages] Error:', e.message);
-    throw e;
-  }
-}
-
 // ============ CONSENT ============
-
-async function getConsentStatus(from, to) {
-  try {
-    const result = await request('GET', `/api/consent?from=${from}&to=${to}`);
-    return result;
-  } catch (e) {
-    console.error('Consent check failed:', e.message);
-    return { status: 'none' };
-  }
-}
-
-async function getPendingConsents(handle) {
-  try {
-    const result = await request('GET', '/api/consent');
-    return result.pending || [];
-  } catch (e) {
-    console.error('Pending consents failed:', e.message);
-    return [];
-  }
-}
-
-async function acceptConsent(from, to) {
-  try {
-    const result = await request('POST', '/api/consent', {
-      action: 'accept',
-      from,
-      to
-    });
-    return result;
-  } catch (e) {
-    console.error('Accept consent failed:', e.message);
-    return { success: false, error: e.message };
-  }
-}
-
-async function blockUser(from, to) {
-  try {
-    const result = await request('POST', '/api/consent', {
-      action: 'block',
-      from,
-      to
-    });
-    return result;
-  } catch (e) {
-    console.error('Block failed:', e.message);
-    return { success: false, error: e.message };
-  }
-}
 
 // ============ STATS ============
 
-async function getStats() {
-  try {
-    const result = await request('GET', '/api/stats');
-    return result;
-  } catch (e) {
-    console.error('Stats failed:', e.message);
-    return { success: false };
-  }
-}
-
 // ============ INVITES ============
-
-async function generateInviteCode(handle) {
-  try {
-    const result = await request('POST', '/api/invites', { handle });
-    return result;
-  } catch (e) {
-    console.error('Generate invite failed:', e.message);
-    return { success: false, error: e.message };
-  }
-}
-
-async function getMyInvites(handle) {
-  try {
-    const result = await request('GET', `/api/invites/my?handle=${handle}`);
-    return result;
-  } catch (e) {
-    console.error('Get invites failed:', e.message);
-    return { success: false, error: e.message };
-  }
-}
-
-async function submitReport({ reporter, reported, reason, message_id, details }) {
-  const result = await request('POST', '/api/report', {
-    reporter,
-    reported,
-    reason,
-    message_id,
-    details
-  });
-  return result;
-}
-
-async function checkInviteCode(code) {
-  try {
-    const result = await request('GET', `/api/invites?code=${code}`);
-    return result;
-  } catch (e) {
-    console.error('Check invite failed:', e.message);
-    return { valid: false, error: e.message };
-  }
-}
 
 // ============ AUTH ============
 
@@ -1186,298 +954,15 @@ function formatTimeAgo(timestamp) {
 // Local cache for away status (also sent to server via heartbeat)
 let awayStatusCache = null;
 
-/**
- * Set away status with optional message
- * @param {string} handle - User handle
- * @param {string} status - 'away' or 'online'
- * @param {string|null} message - Custom away message
- */
-async function setAwayStatus(handle, status, message = null) {
-  const awayAt = new Date().toISOString();
-
-  // Cache locally
-  awayStatusCache = {
-    status,
-    message,
-    awayAt
-  };
-
-  // Send via heartbeat to server
-  const one_liner = config.getBuildingMessage?.() || 'Building something';
-  await heartbeat(handle, one_liner, {
-    mood: '☕', // AFK emoji
-    awayMessage: message,
-    awayAt: awayAt
-  });
-
-  return { success: true };
-}
-
-/**
- * Get current away status
- * @param {string} handle - User handle
- */
-async function getAwayStatus(handle) {
-  return awayStatusCache;
-}
-
-/**
- * Clear away status (user is back)
- * @param {string} handle - User handle
- */
-async function clearAwayStatus(handle) {
-  const wasAway = awayStatusCache;
-  awayStatusCache = null;
-
-  // Send heartbeat with cleared away status
-  const one_liner = config.getBuildingMessage?.() || 'Building something';
-  await heartbeat(handle, one_liner, {
-    mood: null, // Clear mood
-    awayMessage: null,
-    awayAt: null
-  });
-
-  return wasAway;
-}
-
 // ============ ONBOARDING ============
 
-/**
- * Get onboarding checklist status for a user
- * @param {string} handle - User handle
- * @returns {Promise<{success: boolean, tasks: Array, progress: Object}>}
- */
-async function getChecklistStatus(handle) {
-  try {
-    const result = await request('GET', `/api/onboarding/checklist?handle=${encodeURIComponent(handle)}`);
-    return result;
-  } catch (e) {
-    console.error('Get checklist status failed:', e.message);
-    return { success: false, error: e.message };
-  }
-}
-
-/**
- * Track completion of an onboarding task
- * @param {string} handle - User handle
- * @param {string} taskId - Task ID (e.g., 'read_welcome', 'reply_seth')
- * @param {Object} metadata - Optional metadata about the completion
- * @returns {Promise<{success: boolean, taskId: string, completedAt: string}>}
- */
-async function trackChecklistCompletion(handle, taskId, metadata = {}) {
-  try {
-    const result = await request('POST', '/api/onboarding/checklist', {
-      handle,
-      taskId,
-      metadata
-    });
-    return result;
-  } catch (e) {
-    console.error('Track checklist completion failed:', e.message);
-    return { success: false, error: e.message };
-  }
-}
-
-/**
- * Get onboarding data for a user (includes recommended builders)
- * @param {string} handle - User handle
- * @returns {Promise<{success: boolean, recommendedUsers: Array, ...}>}
- */
-async function getOnboardingData(handle) {
-  try {
-    const result = await request('GET', `/api/onboarding/data?handle=${encodeURIComponent(handle)}`);
-    return result;
-  } catch (e) {
-    console.error('Get onboarding data failed:', e.message);
-    return { success: false, error: e.message };
-  }
-}
-
 // ============ ARTIFACTS ============
-
-/**
- * Create a new artifact
- * @param {Object} artifact - Artifact object with all metadata
- */
-async function createArtifact(artifact) {
-  try {
-    const result = await request('POST', '/api/artifacts', artifact);
-
-    if (result.success === false) {
-      return { success: false, error: result.error || 'API request failed' };
-    }
-
-    if (!result.artifact_id) {
-      return { success: false, error: 'Invalid API response - missing artifact_id' };
-    }
-
-    return {
-      success: true,
-      artifact_id: result.artifact_id,
-      slug: result.slug,
-      url: result.url
-    };
-  } catch (e) {
-    console.error('Create artifact failed:', e.message);
-    return { success: false, error: e.message };
-  }
-}
-
-/**
- * Get an artifact by slug
- * @param {string} slug - Artifact slug
- */
-async function getArtifact(slug) {
-  try {
-    const result = await request('GET', `/api/artifacts/${slug}`);
-
-    if (result.success === false) {
-      return { success: false, error: result.error || 'Not found' };
-    }
-
-    return {
-      success: true,
-      artifact: result.artifact
-    };
-  } catch (e) {
-    console.error('Get artifact failed:', e.message);
-    return { success: false, error: e.message };
-  }
-}
-
-/**
- * Update an artifact by ID or slug
- * @param {string} idOrSlug - Artifact ID or slug
- * @param {Object} artifact - Updated artifact data
- */
-async function updateArtifact(idOrSlug, artifact) {
-  try {
-    const result = await request('PUT', `/api/artifacts/${idOrSlug}`, artifact);
-
-    if (result.success === false) {
-      return { success: false, error: result.error || 'Update failed' };
-    }
-
-    return {
-      success: true,
-      artifact: result.artifact
-    };
-  } catch (e) {
-    console.error('Update artifact failed:', e.message);
-    return { success: false, error: e.message };
-  }
-}
-
-/**
- * List artifacts
- * @param {Object} options - { scope: 'mine'|'for-me'|'network', handle, limit }
- */
-async function listArtifacts(options) {
-  try {
-    const { scope, handle, limit = 10 } = options;
-    const params = new URLSearchParams({ scope, handle, limit: limit.toString() });
-    const result = await request('GET', `/api/artifacts?${params}`);
-
-    if (result.success === false) {
-      return { success: false, error: result.error || 'List failed' };
-    }
-
-    return {
-      success: true,
-      artifacts: result.artifacts || [],
-      total: result.total || 0
-    };
-  } catch (e) {
-    console.error('List artifacts failed:', e.message);
-    return { success: false, error: e.message };
-  }
-}
-
-/**
- * Send artifact card via DM
- * @param {string} to - Recipient handle
- * @param {Object} card - Artifact card data
- */
-async function sendArtifactCard(to, card) {
-  try {
-    const from = config.getHandle();
-
-    // Format as a rich message with artifact card embedded
-    const body = `📦 ${card.preview.creator} shared an artifact with you:\n\n**${card.preview.title}**\n${card.preview.snippet}\n\n🔗 ${card.url}\n\n_${card.context}_`;
-
-    const result = await sendMessage({ from, to, body });
-    return result;
-  } catch (e) {
-    console.error('Send artifact card failed:', e.message);
-    return { success: false, error: e.message };
-  }
-}
-
-// The "slower" primitive — set your one notification pace (normal|slower|quiet).
-async function setNotificationPace(pace) {
-  try {
-    return await request('POST', '/api/settings/notifications', { action: 'set_pace', pace });
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-}
 
 /**
  * The people list (opt-in discovery, platform#345). Two contained calls:
  * flip your OWN listed flag, and read the people who chose to be findable.
  * Nothing here ranks, recommends, or lists anyone automatically.
  */
-/**
- * The two decisions the people helpers make, as pure functions so the pins
- * exercise the REAL logic rather than a stubbed result (review P2).
- */
-function interpretListedResponse(result, want) {
-  if (!result || result.success === false) {
-    return { ok: false, error: result?.error || 'request_failed', message: result?.message };
-  }
-  const echoed = result?.user?.listed;
-  if (typeof echoed !== 'boolean') {
-    return { ok: false, error: 'unconfirmed', message: 'the server did not say whether the change took' };
-  }
-  if (echoed !== want) {
-    return { ok: false, error: 'unconfirmed', message: `the server reports listed=${echoed}` };
-  }
-  return { ok: true, listed: echoed };
-}
-
-function interpretDirectoryResponse(result) {
-  if (!result || result.success === false) {
-    return { ok: false, error: result?.error || 'request_failed', message: result?.message };
-  }
-  if (!Array.isArray(result.listings)) {
-    return { ok: false, error: 'malformed_response', message: 'the list came back without entries' };
-  }
-  return { ok: true, listings: result.listings, count: result.count, note: result.note };
-}
-
-async function setListed(listed, building) {
-  const want = listed === true;
-  const body = { listed: want };
-  // `building` rides along ONLY when the person supplied it with the action —
-  // the platform's contained self-profile write owns both fields.
-  if (typeof building === 'string' && building.trim()) body.building = building.trim();
-  try {
-    // The SERVER'S ECHO is the fact, not the absence of an error (review P1).
-    return interpretListedResponse(await request('POST', '/api/users', body, { auth: true }), want);
-  } catch (e) {
-    return { ok: false, error: 'transport_failed', message: e.message };
-  }
-}
-
-async function getPeople() {
-  try {
-    // A response without a listings ARRAY is malformed — reporting it as an
-    // empty list would turn a read failure into "nobody is here" (review P2).
-    return interpretDirectoryResponse(await request('GET', '/api/directory'));
-  } catch (e) {
-    return { ok: false, error: 'transport_failed', message: e.message };
-  }
-}
 
 /**
  * Who a handle IS, from the served identity (#384: seven public fields, no
@@ -1501,25 +986,14 @@ async function getIdentityKind(handle) {
 }
 
 module.exports = {
-  getIdentityKind,
-  setNotificationPace,
-  // People (opt-in discovery)
-  setListed,
-  getPeople,
-  interpretListedResponse,
-  interpretDirectoryResponse,
-  // Session
+  // Session and presence
   registerSession,
   setSessionId,
   getSessionId,
-
-  // Presence
   heartbeat,
   getActiveUsers,
   getActiveUsersResult,
-  setVisibility,
-  sendTypingIndicator,
-  getTypingUsers,
+  getIdentityKind,
 
   // Messages
   sendMessage,
@@ -1529,56 +1003,11 @@ module.exports = {
   getUnreadCount,
   getThread,
   markThreadRead,
-  markMessagesDelivered,
-  searchMessages,
-
-  // Watch Me Code
-  getLiveBroadcastCount,
-
-  // Consent
-  getConsentStatus,
-  getPendingConsents,
-  acceptConsent,
-  blockUser,
-
-  // Stats
-  getStats,
-
-  // Invites
-  generateInviteCode,
-  getMyInvites,
-  checkInviteCode,
-
-  // Reports
-  submitReport,
-
-  // Helpers
   formatTimeAgo,
-
-  // Away Status
-  setAwayStatus,
-  getAwayStatus,
-  clearAwayStatus,
-
-  // Artifacts
-  createArtifact,
-  getArtifact,
-  updateArtifact,
-  listArtifacts,
-  sendArtifactCard,
-
-  // Onboarding
-  getChecklistStatus,
-  trackChecklistCompletion,
-  getOnboardingData,
-
-  // Hermetic request-count tests for the named-thread fast path.
-  _testing: {
-    getThreadWithRequest,
-    markThreadReadWithRequest,
-  },
 
   // Auth
   verifyAuthToken,
-  verifyPrivyToken: verifyAuthToken  // Backwards compat alias
+
+  // Hermetic request-count tests for the named-thread fast path.
+  _testing: { getThreadWithRequest, markThreadReadWithRequest },
 };

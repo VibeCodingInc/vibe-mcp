@@ -15,7 +15,7 @@
  * Output is one JSON object on stdout. Exit 0 = the store answered (read the
  * object: sent may be false); exit 2 = bad usage; exit 1 = the store failed.
  */
-const moves = require('./tools/moves');
+const moves = require('./tools/drafts');
 const config = require('./config');
 
 // stdout through a pipe can be asynchronous: exit only once the write has
@@ -61,7 +61,7 @@ async function main() {
 
   if (verb === 'send') {
     if (!id || !rev) return out({ error: 'usage', message: 'vibe-draft send <id> <rev>' }, 2);
-    const r = await moves.vibe_send_draft.handler({ id, rev });
+    const r = await moves.vibe_send.handler({ id, rev });
     const data = (r && r.data) || {};
     const stored = storedStatus(id);
     return out({ id, sent: Boolean(data.sent), message_id: data.message_id || null, status: stored.status, unconfirmed: stored.unconfirmed, display: r && r.display ? String(r.display) : null, definite: Boolean(data.definite) });
@@ -70,7 +70,7 @@ async function main() {
   if (verb === 'discard') {
     if (!id) return out({ error: 'usage', message: 'vibe-draft discard <id>' }, 2);
     const before = storedStatus(id);
-    const r = await moves.vibe_discard_draft.handler({ id });
+    const r = await moves.vibe_discard.handler({ id });
     const stored = storedStatus(id);
     // A structured fact, not prose to be regex'd by a companion: was there an
     // earlier attempt whose delivery is unconfirmed? Cancelling only stops

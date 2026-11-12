@@ -25,59 +25,9 @@ import { createRequire } from 'node:module';
 
 const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// The default MCP tool surface (coreTools). A fresh install shows only the pre-auth
-// subset until `vibe init` (progressive disclosure), and admin tools appear only
-// under VIBE_ADMIN=true — so we assert the default surface hermetically from the
-// installed coreTools registration, and separately assert the server BOOTS and its
-// pre-auth surface is a subset of this set. Kept explicit so any surface change is
-// a visible test edit.
-// 0.8 core mode: the registration is split into kernelTools (always on) and
-// extraTools (registered only under VIBE_EXTRAS=1). The full culture surface
-// is kernel + extras — identical to the 0.7.1 twenty tools.
-const EXPECTED_KERNEL = [
-  'vibe_bye', 'vibe_dm', 'vibe_help', 'vibe_inbox', 'vibe_init', 'vibe_reply',
-  'vibe_start', 'vibe_status', 'vibe_token', 'vibe_who',
-  // The four verbs of the communications runtime (canon PR #333 / epic #329):
-  // the manifest plus remember/reflect/call; message is dm/inbox/reply above.
-  'vibe_capabilities', 'vibe_call', 'vibe_reflect', 'vibe_remember',
-  // Opt-in people list (vibe-mcp#28): browse, list yourself, unlist yourself.
-  'vibe_people', 'vibe_list_me', 'vibe_unlist_me',
-].sort();
-const EXPECTED_EXTRAS = [
-  'vibe_corpse', 'vibe_email', 'vibe_fable', 'vibe_feed', 'vibe_game',
-  'vibe_intro', 'vibe_play', 'vibe_poem', 'vibe_ship', 'vibe_weave',
-].sort();
-
 let workDir;   // throwaway root: install + isolated HOME
 let installedCli;
 let installedDir; // node_modules/slashvibe-mcp
-
-// The MCP tool surfaces the INSTALLED artifact exposes. index.js splits
-// registration into `kernelTools` (always on), `extraTools` (only when
-// VIBE_EXTRAS=1), and `adminTools` (only when VIBE_ADMIN=true). We parse each
-// object literal and load each module — keeping those with a definition.name.
-// Hermetic (leaf modules, no server boot) and a per-module closure check: a
-// module whose deps were left out of the pack throws on require.
-function toolsFromBlock(startMarker, endMarker) {
-  const req = createRequire(pathToFileURL(path.join(installedDir, 'index.js')));
-  const idx = readFileSync(path.join(installedDir, 'index.js'), 'utf8');
-  const block = idx.slice(idx.indexOf(startMarker), idx.indexOf(endMarker));
-  assert.ok(block.includes('vibe_'), `could not locate the registration block at ${startMarker}`);
-  const names = new Set();
-  for (const m of block.matchAll(/(vibe_\w+)\s*:\s*require\(\s*['"](\.\/tools\/[\w-]+)['"]\s*\)/g)) {
-    const mod = req(m[2]);
-    if (mod && mod.definition && mod.definition.name) names.add(mod.definition.name);
-  }
-  return [...names].sort();
-}
-
-function kernelToolsFromInstall() {
-  return toolsFromBlock('const kernelTools = {', 'const EXTRAS_ENABLED');
-}
-
-function extraToolsFromInstall() {
-  return toolsFromBlock('const extraTools = {', 'const adminTools');
-}
 
 before(() => {
   workDir = mkdtempSync(path.join(tmpdir(), 'vibe-pack-'));
@@ -144,11 +94,6 @@ test('installs from the tarball and boots (files allowlist is complete)', async 
   assert.ok(r[1]?.result, 'server did not respond to initialize — a required file may be missing from the pack');
   const preAuth = (r[2]?.result?.tools || []).map(t => t.name);
   assert.ok(preAuth.length > 0, 'installed server exposed no tools on boot');
-  // Pre-auth surface (progressive disclosure) must be a subset of the default
-  // (kernel) registration.
-  const registered = new Set(kernelToolsFromInstall());
-  const stray = preAuth.filter(n => !registered.has(n));
-  assert.deepEqual(stray, [], `pre-auth surface exposes unregistered tools: ${stray.join(', ')}`);
 });
 
 test('installed artifact exposes both documented executable shims', () => {
@@ -274,69 +219,20 @@ test('installed MCP process handles host termination gracefully', async () => {
   assert.deepEqual(await exited, { code: 0, signal: null });
 });
 
-test('installed artifact registers exactly the expected tool surfaces', () => {
-  // Read hermetically from the shipped index.js — no auth needed, so this is
-  // stable regardless of whether a fresh env is signed in.
-  assert.deepEqual(kernelToolsFromInstall(), EXPECTED_KERNEL,
-    'kernel surface drift vs EXPECTED_KERNEL — update this list only when the registration intentionally changes');
-  assert.deepEqual(extraToolsFromInstall(), EXPECTED_EXTRAS,
-    'extras surface drift vs EXPECTED_EXTRAS — update this list only when the registration intentionally changes');
+test('the installed artifact exposes exactly the surface: six tools and sign-in plumbing', async () => {
+  const src = readFileSync(path.join(installedDir, 'index.js'), 'utf8');
+  const registered = [...src.matchAll(/^\s{2}(vibe_[a-z]+):/gm)].map((m) => m[1]).sort();
+  assert.deepEqual(registered, ['vibe_discard', 'vibe_init', 'vibe_people', 'vibe_prepare', 'vibe_send', 'vibe_start', 'vibe_thread', 'vibe_token']);
+  const r = await rpc([INIT, INITED, { jsonrpc: '2.0', id: 2, method: 'tools/list' }]);
+  assert.deepEqual((r[2]?.result?.tools || []).map((t) => t.name).sort(),
+    ['vibe_init', 'vibe_people', 'vibe_send', 'vibe_start', 'vibe_thread', 'vibe_token']);
 });
 
-// Help drift, both modes: whatever mode the server is in, every `vibe X` help
-// advertises must be registered IN THAT MODE. With extras off, extras must not
-// be advertised in command form; with extras on, they may.
-async function assertHelpMatchesSurface(extras, registered) {
-  const r = await rpc([
-    INIT, INITED,
-    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'vibe_help', arguments: { topic: 'commands' } } },
-  ], { extras });
-  const text = JSON.stringify(r[3]?.result || '');
-  assert.ok(text.length > 20, 'vibe_help returned nothing to check');
-  const advertised = new Set();
-  for (const m of text.matchAll(/vibe (\w[\w-]*)/g)) {
-    const base = m[1];
-    if (base === 'help' || /^[A-Z]/.test(base)) continue; // meta + heading words like "Commands"
-    advertised.add(base);
-  }
-  const orphan = [...advertised].filter(b => !registered.has(`vibe_${b}`));
-  assert.deepEqual(orphan, [],
-    `help (extras=${extras}) advertises commands with no registered tool: ${orphan.map(b => `vibe ${b}`).join(', ')}`);
-}
-
-test('help advertises no command that is not a registered tool (drift guard, kernel)', async () => {
-  await assertHelpMatchesSurface(false, new Set(kernelToolsFromInstall()));
-});
-
-test('help advertises no command that is not a registered tool (drift guard, extras)', async () => {
-  await assertHelpMatchesSurface(true, new Set([...kernelToolsFromInstall(), ...extraToolsFromInstall()]));
-});
-
-// The same guard, on the surface people actually read. vibe_help was protected while
-// the BOARD rotated a suggestion advertising `play` — a tool 0.8.0 moved behind
-// VIBE_EXTRAS — so a default session was routinely told to use something it does not
-// have. Any tool whose output suggests a command belongs here, not just help.
-test('the presence board suggests no command that is not registered', async () => {
-  const registered = new Set(kernelToolsFromInstall());
-  const src = readFileSync(path.join(installedDir, 'tools/who.js'), 'utf8');
-  // Suggestions are written as `say "<verb> ..."` or bare `"<verb> with @handle"`.
-  const suggested = new Set();
-  for (const m of src.matchAll(/["`]\s*(?:say\s+")?(\w[\w-]*)\s+(?:with\s+)?@?handle/g)) {
-    suggested.add(m[1].toLowerCase());
-  }
-  const orphan = [...suggested].filter((v) => !registered.has(`vibe_${v}`));
-  assert.deepEqual(orphan, [],
-    `the board suggests commands with no registered tool: ${orphan.map((v) => `vibe ${v}`).join(', ')}`);
-});
-
-test('restored play tools still read their legacy payload types (existing-session compat)', async () => {
-  // Byte-identical restore, but assert the compat readers are present in the shipped code.
-  const grep = (file, needle) => {
-    const p = path.join(workDir, 'proj', 'node_modules', 'slashvibe-mcp', 'tools', file);
-    const src = execFileSync('cat', [p], { encoding: 'utf8' });
-    return src.includes(needle);
-  };
-  assert.ok(grep('game.js', "=== 'game'"), 'game.js lost its legacy game-payload reader');
-  assert.ok(grep('poem.js', "=== 'poem'"), 'poem.js lost its legacy poem-payload reader');
-  assert.ok(grep('corpse.js', "=== 'corpse'"), 'corpse.js lost its legacy corpse-payload reader');
+test('the installed artifact ships the arrival hook, and it runs with no dependencies', () => {
+  const hook = path.join(installedDir, 'hooks', 'arrival-hook.cjs');
+  const out = execFileSync('node', [hook], {
+    input: JSON.stringify({ hook_event_name: 'UserPromptSubmit' }),
+    env: { ...process.env, VIBE_ARRIVALS_DIR: path.join(workDir, 'no-such-spool') }, encoding: 'utf8',
+  });
+  assert.deepEqual(JSON.parse(out), { suppressOutput: true });
 });

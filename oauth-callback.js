@@ -61,10 +61,10 @@ const SUCCESS_PAGE = `<!DOCTYPE html>
   <div class="card">
     <div class="logo">/<span>vibe</span></div>
     <p class="line"><span class="dot">&#x1F7E2;</span> you're in</p>
-    <p class="meta">your session is signed in and you're on the board.</p>
+    <p class="meta">your session is signed in.</p>
     <div class="next">
-      back in your terminal, say <code>vibe who</code> to see who's around,
-      or <code>vibe inbox</code> if someone already wrote to you.
+      back in your terminal, say <code>vibe start</code>. when someone writes to you,
+      it reaches you there while you work.
     </div>
     <p class="close">you can close this window.</p>
   </div>

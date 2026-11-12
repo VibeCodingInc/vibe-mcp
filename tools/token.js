@@ -101,10 +101,7 @@ Expires: ${verification.expiresAt ? new Date(verification.expiresAt * 1000).toLo
 
 Your messages are now signed server-side (more secure).
 ${removedKeypair ? '🔒 Old local keys have been removed.\n' : ''}
-You're ready to vibe! Try:
-• \`vibe who\` — See who's online
-• \`vibe inbox\` — Check messages
-• \`vibe dm @someone "hello"\` — Send a message`,
+Say "vibe start" to see what is waiting.`,
     handle,
     github: verification.github,
     authMethod: 'github'
