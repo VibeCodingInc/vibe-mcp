@@ -200,6 +200,8 @@ module.exports = {
   HOOK_MATCHER,
   HOOK_TIMEOUT_SECONDS,
   HookSettingsError,
+  atomicWrite,
+  readSettings,
   createHookSettingsManager,
   hookCommand,
   installEntry,

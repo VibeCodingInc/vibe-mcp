@@ -50,6 +50,9 @@
   "files": [
     "README.md",
     "hosts/vibe-command.md",
+    "hooks/arrival-hook.cjs",
+    "arrival.js",
+    "arrival-hook-settings.js",
     "actor-session.js",
     "ambient-escapes.js",
     "api-auth.js",

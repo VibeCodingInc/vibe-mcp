@@ -43,6 +43,7 @@ const withStore = (stubs, fn) => async () => {
     heartbeat: async () => ({}),
     registerSession: async () => ({}),
     getLiveBroadcastCount: async () => 0,
+    getIdentityKind: async () => null, // no network in the first-screen tests
   };
   const merged = { ...base, ...stubs };
   // start reads getInboxResult (which keeps the read OUTCOME); a test that
@@ -213,8 +214,25 @@ test('the response has EXACTLY the promised keys — nothing rides along', withS
   getInbox: async () => INBOX,
 }, async () => {
   const { res } = await run();
-  assert.deepEqual(Object.keys(res).sort(), ['display', 'here', 'unread', 'waiting'],
+  // wroteLast joined the contract with arrival.js: it is stated on the screen
+  // (handle, age, id — no body), so it ships under the same rule as `waiting`.
+  assert.deepEqual(Object.keys(res).sort(), ['display', 'here', 'unread', 'waiting', 'wroteLast'],
     `unexpected keys: ${Object.keys(res).join(', ')}`);
+}));
+
+test('a thread they ended, read but never answered, is still on the first screen — without its words', withStore({
+  getActiveUsers: async () => [here('zoe')],
+  getInbox: async () => [{
+    handle: 'leo', unread: 0, lastFrom: 'leo', lastMessage: 'did the deck land?',
+    lastMessageId: 'msg_leo55', lastActorKind: 'human', lastTimestamp: Date.now() - 55 * 86_400_000,
+  }],
+}, async () => {
+  const { text, res } = await run();
+  assert.match(text, /^they wrote last:$/m);
+  assert.match(text, /^@leo · 55d ago · #msg_leo55$/m);
+  assert.ok(!text.includes('did the deck land'), 'the words stay in the thread');
+  assert.deepEqual(res.wroteLast, [{ handle: 'leo', lastMessageId: 'msg_leo55', days: 55 }]);
+  assert.ok(!JSON.stringify(res).includes('did the deck land'), 'and out of the payload');
 }));
 
 test('a genuinely empty inbox states zero explicitly', withStore({

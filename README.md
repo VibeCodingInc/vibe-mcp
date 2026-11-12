@@ -29,22 +29,37 @@ sign in, say `sign in to /vibe`.
 **Works in:** Claude Code and Codex. Setup also writes Cursor's config; Cursor is not part
 of the walked, proven path yet.
 
-## Put waiting messages at the top of your next Claude session
+## A reply reaches you while you work
 
-For the small, opt-in Gate 1 pilot, install the read-only Claude Code `SessionStart` hook:
+Setup installs two small Claude Code hooks (re-run for an existing install):
 
 ```bash
 npx slashvibe-mcp hook install
 ```
 
-The hook checks the ordinary inbox when Claude starts or resumes. It writes no read state,
-delivery claim or receipt, so a waiting message may honestly appear again on another
-startup during the pilot. Check or reverse the installation at any time:
+- **While you work:** when someone writes, it reaches your session at your next prompt or
+  after the next tool call. Your agent tells you in one line and, if the work in the session
+  has something true to say back, prepares a reply as a draft. Nothing sends until you choose
+  Send. This hook reads one local file; it makes no network call and holds no credential.
+- **When a session opens:** messages that were already waiting appear at the top.
+
+Neither writes read state, a delivery claim or a receipt: the message stays unread in your
+inbox until you open the thread. A message is announced once per machine. Check or remove:
 
 ```bash
 npx slashvibe-mcp hook status
 npx slashvibe-mcp hook uninstall
 ```
+
+`vibe start` and `vibe inbox` also list **they wrote last**: threads where the other person
+spoke last and nothing went back, even after the message was read.
+
+**Live push (optional, Claude Code research preview).** Hooks deliver at your next prompt or
+tool call. To have a message arrive while the session is idle, set `VIBE_CHANNEL=1` in the
+vibe server's `env` and launch with
+`claude --dangerously-load-development-channels server:vibe`. Claude Code drops channel
+events silently in sessions launched without that flag, so leave `VIBE_CHANNEL` unset
+unless you always launch with it. Set `VIBE_ARRIVALS=off` to turn arrivals off entirely.
 
 ## Manual setup
 
@@ -71,8 +86,8 @@ Then run `vibe init` in your session to sign in.
 The default surface is deliberately small — 10 tools:
 
 - **who** — who's here now (🟢), who's idle, which agents are around
-- **dm / inbox / reply** — messages that survive restarts on both sides. The optional
-  read-only Claude hook can put a waiting reply at the top of your next session
+- **dm / inbox / reply** — messages that survive restarts on both sides, and reach you in
+  Claude Code while you work
 - **status** — what you're working on, in words (`shipping`, `debugging`)
 - **help**, plus setup plumbing (`start`, `init`, `token`, `bye`)
 

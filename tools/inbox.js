@@ -418,9 +418,16 @@ async function handler(args) {
     // or a suggestion? Naming the relationship costs three words.
     // ids ride inline so the summary stays one compact line (and greppable)
     const recentLine = sorted.slice(0, 3).map((th) => `@${th.handle}${th.lastMessageId ? ` (#${th.lastMessageId})` : ''}`).join(', ');
+    // "Nothing unread" is not "nothing waiting": a message read once and never
+    // answered used to disappear here. State the wire's fact — they wrote last.
+    const { wroteLastPeople } = require('../arrival');
+    const lastWord = await wroteLastPeople(threads, myHandle, { isQa: require('./moves').isQaHandle, kindOf: store.getIdentityKind });
+    const lastWordBlock = lastWord.length
+      ? `\n\n_they wrote last:_ ${lastWord.map((t) => `@${t.handle} · ${t.days}d ago${t.lastMessageId ? ` (#${t.lastMessageId})` : ''}`).join(', ')}`
+      : '';
     return {
       display: recentLine
-        ? `📭 nothing unread.\n\n_your recent threads:_ ${recentLine}\n_open one with_ \`vibe inbox @handle\` _· reply to a message exactly with its #id_`
+        ? `📭 nothing unread.${lastWordBlock}\n\n_your recent threads:_ ${recentLine}\n_open one with_ \`vibe inbox @handle\` _· reply to a message exactly with its #id_`
         : '📭 nothing unread.',
       actions: formatActions(actions.recommendedConnections([]))
     };
