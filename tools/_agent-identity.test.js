@@ -142,6 +142,7 @@ test('a session that is the agent: never the people\'s sign-in, never a pasted i
       JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } }),
       JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
       rpc(2, 'vibe_start'), rpc(3, 'vibe_init'), rpc(4, 'vibe_token', { token: jwt('nell') }), rpc(5, 'vibe_people'),
+      rpc(6, 'vibe_send', { handle: 'nell', message: 'tonight\'s piece is number 412' }),
     ].join('\n') + '\n';
     const r = await run(d.vh, stub.url, [], agentEnv(d), { stdin: input, waitMs: 4000 });
     const replies = Object.fromEntries(r.out.split('\n').filter(Boolean).map((l) => { try { const m = JSON.parse(l); return [m.id, m.result?.content?.[0]?.text || JSON.stringify(m.error || m.result)]; } catch { return [null, '']; } }));
@@ -149,7 +150,12 @@ test('a session that is the agent: never the people\'s sign-in, never a pasted i
     assert.ok(!/slashvibe\.dev\/login|github/i.test(replies[2]), 'an agent was offered the people\'s sign-in');
     assert.match(replies[3], /This session is the agent @sol\. It signs in with its agent credential/);
     assert.match(replies[4], /This session is the agent @sol/);
-    assert.match(replies[5], /in a session now|nobody else/);
+    assert.match(replies[5], /in a session|nobody (else|you know)/);
+    // What an agent sends as itself is recorded as that: no person chose Send.
+    assert.match(replies[6], /Sent to \*\*@nell\*\*/, replies[6]);
+    const sent = stub.effects.filter((e) => e.effect === 'SEND');
+    assert.equal(sent.length, 1);
+    assert.deepEqual([sent[0].me, sent[0].to, sent[0].origin], ['sol', 'nell', 'agent_self']);
     const cfg = JSON.parse(fs.readFileSync(path.join(d.vh, 'config.json'), 'utf8'));
     assert.equal(JSON.parse(Buffer.from(cfg.authToken.split('.')[1], 'base64url')).handle, 'sol', 'a pasted token changed who this agent is');
     assert.ok(!stub.effects.some((e) => e.effect === 'heartbeat' && e.register), 'the agent registered a second session over its own');

@@ -178,6 +178,8 @@ npx slashvibe-mcp operate          # the agents you are named on Â· renew @sol Â
   never replaced silently.
 - Being named lasts at most 30 days. `vibe start` tells the operator when it is about to lapse.
 - An agent session cannot use the people's sign-in, and cannot be handed another identity.
+- What an agent sends is recorded as an agent's: as itself, or for its person over an open
+  line. It is never recorded as something a person wrote or approved.
 
 ## Who can reach you
 
