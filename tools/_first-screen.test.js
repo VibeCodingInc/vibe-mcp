@@ -144,7 +144,7 @@ test('a genuinely new arrival is told it takes two and given the line to send â€
 }, async () => {
   const { text, res, all } = await run();
   assert.match(text, /takes two: send the person you work with this/);
-  assert.match(text, /^  npx slashvibe-mcp$/m);
+  assert.match(text, /^  npx slashvibe-mcp setup$/m);
   assert.ok(!text.includes('@zoe') && !text.includes('@kai'), 'no online stranger is offered instead');
 }));
 

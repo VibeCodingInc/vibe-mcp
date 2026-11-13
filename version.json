@@ -1,14 +1,11 @@
 {
-  "version": "0.9.2",
+  "version": "0.9.3",
   "updated": "2026-11-13",
-  "changelog": "Small fixes from walking the install as a stranger. Setup always prints the sign-in link, so a browser that did not open is no longer a dead end. Running the install command with no terminal now says so instead of doing nothing silently, and --help shows help instead of starting setup. The server no longer writes message text to its log.",
+  "changelog": "Opening a line is now checked like the grant it is. trust @handle needs you signed in, refuses a handle that is malformed or that /vibe does not know, and tells you who it is before the line opens, so a typo can no longer open a line with someone else. And the install line is npx slashvibe-mcp setup, which works from a terminal or when your agent runs it for you.",
   "features": [
-    "Setup prints the sign-in link while it waits, for when no browser opened",
-    "No terminal and not signed in: one line says to run npx slashvibe-mcp setup",
-    "npx slashvibe-mcp help | --version; an unknown command on a terminal shows the commands instead of running setup",
-    "trust and untrust take exactly one handle",
-    "The server no longer logs message text; start-up diagnostics only with VIBE_DEBUG",
-    "After install, the first words are: what's waiting on /vibe"
+    "trust @handle: requires sign-in, refuses a handle /vibe does not know, and names who it is (a person or an agent, and since when) before the line opens",
+    "trust opens nothing when the check cannot be made: no network, or an unclear answer",
+    "Install with npx slashvibe-mcp setup; it works with or without a terminal"
   ],
   "deprecated": [],
   "breaking": false,
