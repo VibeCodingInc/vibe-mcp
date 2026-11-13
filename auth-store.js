@@ -126,10 +126,10 @@ function hydrate() {
 
     _hydrated = true;
 
-    if (_token) {
-      console.error('[auth-store] Hydrated: @' + _handle);
-    } else {
-      console.error('[auth-store] Hydrated: no token');
+    // Diagnostic only. Unconditional, this was the first line a newcomer read
+    // when they ran the install command.
+    if (process.env.VIBE_DEBUG) {
+      console.error(_token ? '[auth-store] Hydrated: @' + _handle : '[auth-store] Hydrated: no token');
     }
   } catch (e) {
     console.error('[auth-store] Hydration failed:', e.message);

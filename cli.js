@@ -14,7 +14,31 @@
 
 const args = process.argv.slice(2);
 
-if (args[0] === 'hook') {
+const COMMANDS = ['setup', 'hook', 'trust', 'untrust', 'lines', 'quiet', 'unquiet', 'mute', 'unmute'];
+const USAGE = `slashvibe-mcp: telepathic messaging, inside your coding agent
+
+  npx slashvibe-mcp setup              install: configure your coding agent and sign in with GitHub
+  npx slashvibe-mcp hook status        are the Claude Code hooks installed (also: install, uninstall)
+  npx slashvibe-mcp trust @handle      open a line with someone you trust (close: untrust @handle)
+  npx slashvibe-mcp lines              who you have an open line with
+  npx slashvibe-mcp quiet              nothing reaches you while you work (undo: unquiet)
+  npx slashvibe-mcp mute @handle       one person stops surfacing (undo: unmute @handle)
+
+With no command it sets up on first run in a terminal; a coding agent starts it as an MCP server.
+https://github.com/VibeCodingInc/vibe-mcp#readme`;
+
+if (['help', '--help', '-h'].includes(args[0])) {
+  process.stdout.write(`${USAGE}\n`);
+} else if (['--version', '-v', 'version'].includes(args[0])) {
+  process.stdout.write(`${require('./package.json').version}\n`);
+} else if (args[0] && process.stdin.isTTY && !COMMANDS.includes(args[0]) && !args.includes('setup')) {
+  // A person typed something we do not know. This used to fall through to the
+  // full setup: "--help" wrote agent configs and opened GitHub in a browser.
+  // Only on a terminal: a host that launches the server with arguments of its
+  // own must still get the server.
+  process.stderr.write(`Unknown command: ${args[0]}\n\n${USAGE}\n`);
+  process.exitCode = 1;
+} else if (args[0] === 'hook') {
   require('./hook-cli')
     .run(args.slice(1))
     .catch((error) => {
@@ -31,7 +55,11 @@ if (args[0] === 'hook') {
   const line = require('./line');
   const say = (t) => process.stdout.write(`${t}\n`);
   try {
-    if (args[0] === 'trust' && args[1]) {
+    if (['trust', 'untrust'].includes(args[0]) && args.length > 2) {
+      // One handle, exactly as typed. "trust @sam and @ada" must not quietly
+      // open a line with whoever the first word happens to name.
+      throw new Error(`One handle at a time: npx slashvibe-mcp ${args[0]} @handle`);
+    } else if (args[0] === 'trust' && args[1]) {
       const h = line.open(args[1]);
       say(`Open line with @${h}.`);
       say(`Your agent may now ask @${h}'s agent a question from your work, and answer theirs from yours, without stopping you. It is told to give information about the work only; the code caps it at ${line.MAX_PER_HOUR} messages an hour, refuses anything shaped like a credential, and marks each message as your agent's, unread by you. You are told what was said. It works both ways only if @${h} opens one with you.`);
@@ -102,10 +130,21 @@ if (args[0] === 'hook') {
     console.log('Commands:');
     console.log('  npx slashvibe-mcp setup   — re-run setup wizard');
     console.log('');
-    console.log('In Claude Code, just say "who\'s vibing?" to get started.');
+    console.log('In your coding agent, say "what\'s waiting on /vibe" to get started.');
     process.exit(0);
   }
 } else {
-  // Running as MCP server (stdin is a pipe from Claude Code)
+  // Running as MCP server (stdin is a pipe from Claude Code).
+  //
+  // The same shape is an agent running the install line for its person from a
+  // shell tool: no terminal, so no setup, and until now no word of why. Say it
+  // once on stderr (a host ignores it; an agent's shell shows it). Only before
+  // first sign-in, so a working install stays silent.
+  try {
+    const config = require('./config');
+    if (!config.isInitialized() && !config.getAuthToken()) {
+      process.stderr.write('slashvibe-mcp: no terminal here, so this started as an MCP server and is waiting for a coding agent. To install /vibe, run: npx slashvibe-mcp setup\n');
+    }
+  } catch {}
   require('./index.js');
 }

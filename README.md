@@ -14,7 +14,11 @@ npx slashvibe-mcp
 
 It configures your coding agent, opens GitHub to sign you in (your GitHub username becomes
 your @handle), and installs the hooks that let messages reach you in Claude Code. Then
-restart your coding session.
+restart your coding session and say `what's waiting on /vibe`.
+
+Run it in your own terminal. If your coding agent is running it for you, have it run
+`npx slashvibe-mcp setup` instead: without a terminal the bare command starts the server
+and installs nothing.
 
 ## What it is like
 
@@ -83,7 +87,7 @@ the scheduler lease") and it sets it; nothing is taken from your repository.
 
 ## The whole surface
 
-Eight tools, for the agent:
+Eight tools, for the agent (plus `vibe_init` and `vibe_token`, which only handle sign-in):
 
 | tool | what it does |
 |---|---|

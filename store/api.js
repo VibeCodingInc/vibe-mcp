@@ -515,9 +515,9 @@ async function sendMessage(from, to, body, type = 'dm', payload = null, options 
       }
     }
 
-    console.error('[vibe] Sending request to endpoint:', endpoint, 'with data:', JSON.stringify(data).substring(0, 200));
+    // Never log the request or the response here: both carry the message text,
+    // and a host keeps an MCP server's stderr in its log files.
     const result = await request('POST', endpoint, data);
-    console.error('[vibe] Got result:', JSON.stringify(result).substring(0, 300));
 
     // Handle auth errors
     if (!result.success && result.error?.includes('Authentication')) {

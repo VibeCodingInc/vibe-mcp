@@ -60,9 +60,9 @@ function formatPresenceLabel({ humans = 0, agents = 0 } = {}) {
  */
 function generatePreAuthBanner(presence) {
   const label = formatPresenceLabel(presence);
-  const onlineText = label ? `🟢 ${label}` : '🟢 join the crew';
+  const onlineText = label ? `🟢 ${label}` : 'not signed in yet';
   return `
-  █░█ █ █▄▄ █▀▀     ask here · answer there
+  █░█ █ █▄▄ █▀▀     telepathic messaging
   ▀▄▀ █ █▄█ ██▄     ${onlineText}
   ──────────────────────────────────────────────────
 `;
