@@ -6,6 +6,7 @@
     "At session start: \"1 person you have not written to is waiting. Say: what's waiting on /vibe\"",
     "It is a count only. No name and none of their words reach you or your agent until you ask",
     "Muted people are not counted, and quiet shows nothing",
+    "Messages that were waiting now read plainly at session start: \"1 message waiting · from @sam: …\"",
     "Already installed? Run npx slashvibe-mcp hook install once so your session-start hook is this version"
   ],
   "deprecated": [],

@@ -85,7 +85,8 @@ test('someone you know is shown as before, beside the count for those you do not
     const { out, raw } = await sitDown(homeFor('nell', { quiet: false, muted: {}, known: known('sam') }), stub.url);
     const lines = out.systemMessage.split('\n');
     assert.ok(lines.includes("/vibe · 1 person you have not written to is waiting. Say: what's waiting on /vibe"));
-    assert.ok(lines.some((l) => /2 waiting messages loaded into startup context/.test(l)));
+    assert.ok(lines.some((l) => /^\/vibe · 2 messages waiting · latest from @/.test(l)));
+    assert.ok(!/startup context|delivery receipt|may appear again|pilot/.test(out.systemMessage), 'the line the person reads is written for the builder');
     assert.match(out.hookSpecificOutput.additionalContext, /the lease is two seconds/);
     assert.match(out.hookSpecificOutput.additionalContext, /welcome back/);
     assert.ok(!raw.includes('zebra-quartz') && !/@cy|"cy"/.test(raw), 'a stranger was named or quoted');

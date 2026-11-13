@@ -323,7 +323,7 @@ export const scenarios = {
       const beats = (h) => lab.stub.effects.filter((e) => e.effect === 'heartbeat' && e.as === h).length;
       return [
         { what: 'she was shown one line when she sat down', ok: ada.shown.filter((l) => /here now:/.test(l)).length === 1 },
-        { what: 'the door @sam left while she was away is announced as a door, by name, not as a message to answer', ok: ada.shown.some((l) => /@sam left a door open for you: "Retry Lab" · say "visit @sam"/.test(l)) && !ada.shown.some((l) => /waiting message/.test(l)) && called(ada, 'vibe_visit').length === 0 },
+        { what: 'the door @sam left while she was away is announced as a door, by name, not as a message to answer', ok: ada.shown.some((l) => /@sam left a door open for you: "Retry Lab" · say "visit @sam"/.test(l)) && !ada.shown.some((l) => /messages? waiting ·/.test(l)) && called(ada, 'vibe_visit').length === 0 },
         { what: 'it names @sam, whom she has written to, with what he says he is building', ok: /@sam \(retry queue/.test(line) },
         { what: "it says @sam's door is open", ok: /@sam \([^)]*door open\)/.test(line) },
         { what: 'it names @ben, whom she has an open line with', ok: /@ben \(/.test(line) },

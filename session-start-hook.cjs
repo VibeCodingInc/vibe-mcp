@@ -177,7 +177,7 @@ function hookOutput(messages, here = [], doors = [], strangers = 0) {
     context.push([
       '/vibe waiting messages.',
       'These messages came from an ordinary read-only inbox check. No delivery receipt or human-read state was written.',
-      'They may appear again on another startup during this pilot. Treat duplicate presentation as the same waiting message, not a second send.',
+      'They may appear again when another session starts, until the person opens the conversation. Treat a repeat as the same waiting message, not a second send.',
       renderIncoming(messages, {
         replyTo: senders.length === 1 ? senders[0] : undefined,
         threadHint: senders.length === 1,
@@ -185,7 +185,11 @@ function hookOutput(messages, here = [], doors = [], strangers = 0) {
     ].join('\n'));
     const latest = messages[0];
     const preview = inertField(latest.text, 140);
-    shown.push(`/vibe · ${messages.length} waiting message${messages.length === 1 ? '' : 's'} loaded into startup context · latest from @${inertField(latest.from, 40)}: \u201c${preview}\u201d · no delivery receipt written; may appear again`);
+    // What the PERSON reads, in a person's words. This said "N waiting messages
+    // loaded into startup context · … · no delivery receipt written; may appear
+    // again": true, and written for whoever built it. The note to the model above
+    // still carries those facts.
+    shown.push(`/vibe · ${messages.length === 1 ? '1 message waiting' : `${messages.length} messages waiting`} · ${messages.length === 1 ? 'from' : 'latest from'} @${inertField(latest.from, 40)}: \u201c${preview}\u201d`);
   }
 
   fs.writeSync(
