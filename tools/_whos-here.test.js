@@ -76,6 +76,10 @@ test('the line is one line: five names, then a count, and their words are flatte
   assert.ok(!/[\n\u001b`]/.test(odd), 'their words broke out of the line');
   assert.ok(odd.length < 90);
   assert.equal(hereLine(pickHere([{ handle: 'sam' }], { known: ['sam'] })), 'here now: @sam');
+  // Whatever else a presence row carries, only the handle and the person's own line are shown.
+  const row = { handle: 'sam', one_liner: 'retry queue', project: 'acme-secret-client', cwd: '/Users/sam/acme-secret-client', sessionId: 'sess_9', file: 'billing.ts', branch: 'fix/leak', clientMetadata: { file: 'x' } };
+  assert.equal(hereLine(pickHere([row], { known: ['sam'] })), 'here now: @sam (retry queue)');
+  assert.deepEqual(Object.keys(pickHere([row], { known: ['sam'] })[0]).sort(), ['door', 'handle', 'says']);
 });
 
 test('sitting down: known people are named; a stranger, a muted person, quiet and signed out show nothing', async () => {
