@@ -6,7 +6,7 @@
  * Usage: npx slashvibe-mcp setup
  *
  * What it does:
- * 1. Detects Claude Code config location (~/.claude.json or ~/claude_desktop_config.json)
+ * 1. Finds Claude Code's config (~/.claude.json)
  * 2. Adds /vibe MCP server to the config
  * 3. Tests the connection
  * 4. Opens browser for GitHub auth
@@ -61,7 +61,7 @@ function printStep(num, text, status = 'pending') {
 
 // ─── Universal installer ─────────────────────────────────────────────────
 // One npx configures every coding agent on the machine that speaks MCP:
-// Claude Code, Codex, Cursor. Same server entry, three config dialects.
+// Claude Code. (Earlier versions also wrote Codex and Cursor configs; see below.)
 // A host is configured when its config dir/file exists (i.e. it's installed);
 // Claude Code is always configured (creating ~/.claude.json if needed) so the
 // original single-host behavior is preserved.
@@ -132,7 +132,7 @@ function saveConfig(configPath, config) {
 }
 
 /**
- * Add vibe to an mcpServers-style JSON config (Claude Code, Cursor).
+ * Add vibe to an mcpServers-style JSON config (Claude Code).
  * Returns 'added' | 'exists'. Throws (without writing) if the existing
  * config is unparseable — the user's file is corrupt-but-recoverable and
  * clobbering it with only our entry would make that permanent.
@@ -169,87 +169,19 @@ function configureClaudeCode({ createIfMissing = false } = {}) {
   }
 }
 
-/**
- * Configure Cursor (~/.cursor/mcp.json). Runs only if ~/.cursor exists.
- */
-function configureCursor() {
-  const cursorDir = path.join(os.homedir(), '.cursor');
-  if (!fs.existsSync(cursorDir)) return null; // Cursor not installed
-  const configPath = path.join(cursorDir, 'mcp.json');
-  try {
-    return { host: 'Cursor', path: configPath, status: addVibeToJsonConfig(configPath) };
-  } catch (e) {
-    return { host: 'Cursor', path: configPath, status: 'error', error: e.message };
-  }
-}
+// CLAUDE CODE ONLY (2026-11-14). This file used to add /vibe to Cursor and Codex
+// as well, write a Codex prompt, and announce "Claude Code, Codex, Cursor". What
+// /vibe does (a message reaching you while you work, who's here, doors) runs on
+// Claude Code hooks, and everything we publish names Claude Code only. Setup
+// writing into two other tools' configuration, for a product we do not say
+// supports them, is a surprise on someone's machine. Configs written by earlier
+// versions are left exactly as they are.
 
 /**
- * Does a Codex config.toml already declare a vibe MCP server, in any of the
- * spellings TOML allows? Line-based, section-aware scan — comments and
- * whitespace handled, no TOML dependency in the published package:
- *   [mcp_servers.vibe]        [mcp_servers . "vibe"]      (header forms)
- *   [mcp_servers.vibe.env]                                 (sub-tables)
- *   vibe = { ... } inside [mcp_servers]                    (inline table)
- * A commented-out header (# [mcp_servers.vibe]) does NOT count.
- */
-function codexConfigHasVibe(toml) {
-  let section = '';
-  for (const raw of toml.split('\n')) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const header = line.match(/^\[\s*([^\]]+?)\s*\]/);
-    if (header) {
-      // Normalize: strip quotes and whitespace around dots
-      section = header[1].split('.').map(p => p.trim().replace(/^"(.*)"$/, '$1')).join('.');
-      if (section === 'mcp_servers.vibe' || section.startsWith('mcp_servers.vibe.')) return true;
-      continue;
-    }
-    if (section === 'mcp_servers' && /^"?vibe"?\s*=/.test(line)) return true;
-  }
-  return false;
-}
-
-// Codex home honors $CODEX_HOME (custom-home installs) before ~/.codex.
-function codexHome() {
-  return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
-}
-
-/**
- * Configure Codex (config.toml under $CODEX_HOME or ~/.codex). Runs only if
- * that dir exists. TOML is appended (not parsed) — we only ever add our own
- * [mcp_servers.vibe] block, and skip if one is already present in any form.
- */
-function configureCodex() {
-  const codexDir = codexHome();
-  if (!fs.existsSync(codexDir)) return null; // Codex not installed
-  const configPath = path.join(codexDir, 'config.toml');
-  try {
-    const existing = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
-    if (codexConfigHasVibe(existing)) {
-      return { host: 'Codex', path: configPath, status: 'exists' };
-    }
-    const block = [
-      '',
-      '[mcp_servers.vibe]',
-      `command = "${VIBE_SERVER_ENTRY.command}"`,
-      `args = [${VIBE_SERVER_ENTRY.args.map(a => `"${a}"`).join(', ')}]`,
-      '',
-      '[mcp_servers.vibe.env]',
-      ...Object.entries(VIBE_SERVER_ENTRY.env).map(([k, v]) => `${k} = "${v}"`),
-      ''
-    ].join('\n');
-    fs.writeFileSync(configPath, existing + (existing && !existing.endsWith('\n') ? '\n' : '') + block, 'utf8');
-    return { host: 'Codex', path: configPath, status: 'added' };
-  } catch (e) {
-    return { host: 'Codex', path: configPath, status: 'error', error: e.message };
-  }
-}
-
-/**
- * Configure every detected host. Returns results for the ones present.
+ * Configure Claude Code. Returns the result (a list, for the callers that print it).
  */
 function configureAllHosts() {
-  const found = [configureClaudeCode(), configureCodex(), configureCursor()].filter(Boolean);
+  const found = [configureClaudeCode()].filter(Boolean);
   // No host detected at all — someone ran this before installing a coding agent, or
   // in a container. Rather than silently doing nothing (or, as before, inventing a
   // Claude Code config to have something to report), create the Claude Code config so
@@ -265,8 +197,7 @@ function configureAllHosts() {
  * Install the /vibe host command — the one-line entry to context-guided
  * messaging ("from what I'm doing, who should I talk to?"). Written only where
  * no /vibe command or skill already exists; never overwritten, so a person's
- * own /vibe stays theirs. Claude Code reads ~/.claude/commands/vibe.md;
- * Codex reads $CODEX_HOME/prompts/vibe.md.
+ * own /vibe stays theirs. Claude Code reads ~/.claude/commands/vibe.md.
  */
 function installHostCommands() {
   const src = path.join(__dirname, 'hosts', 'vibe-command.md');
@@ -291,12 +222,6 @@ function installHostCommands() {
   if (fs.existsSync(claudeDir)) {
     const taken = fs.existsSync(path.join(claudeDir, 'skills', 'vibe', 'SKILL.md')) || fs.existsSync(path.join(claudeDir, 'commands', 'vibe.md'));
     tryInstall('Claude Code', path.join(claudeDir, 'commands', taken ? 'vibe-moves.md' : 'vibe.md'), body);
-  }
-  const cx = codexHome();
-  // Codex prompts take no frontmatter; strip it.
-  if (fs.existsSync(cx)) {
-    const taken = fs.existsSync(path.join(cx, 'prompts', 'vibe.md'));
-    tryInstall('Codex', path.join(cx, 'prompts', taken ? 'vibe-moves.md' : 'vibe.md'), body.replace(/^---[\s\S]*?---\n/, ''));
   }
   return installed;
 }
@@ -348,58 +273,11 @@ async function testConnection() {
   }
 }
 
-/**
- * Get online count
- */
-async function getOnlineCount() {
-  try {
-    const response = await fetch(`${API_BASE}/api/presence`);
-    const data = await response.json();
-    // Before sign-in the roster is private: the server answers with counts only
-    // (`{ anonymous: true, counts: { humansActive, active, ... }, active: [] }`).
-    // Counting names here printed "0 builders online" to every newcomer while
-    // eleven people were on. Read the count the server actually gives.
-    if (data.counts && typeof data.counts === 'object') {
-      const n = data.counts.humansActive ?? data.counts.active;
-      if (Number.isFinite(n)) return n;
-    }
-    return (data.active?.length || 0) + (data.away?.length || 0);
-  } catch (e) {
-    return 0;
-  }
-}
-
-/**
- * Get online users with details for display
- */
-async function getOnlineUsers(token) {
-  try {
-    // Handles are only served to a signed-in caller; pass the fresh token so the
-    // "here now" list after sign-in is real, not an empty anonymous answer.
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    const response = await fetch(`${API_BASE}/api/presence`, { headers });
-    const data = await response.json();
-    const people = (u) => !u.isAgent;
-    // "Here now" means active humans only. Away rows were once appended below,
-    // which let the headline count disagree with the rows under it (codex P2).
-    const active = (data.active || []).filter(people);
-    const workText = (u) => u.workingOn || u.working_on || u.one_liner || '';
-
-    // Format: { users: [{handle, status, one_liner}], total: number }
-    const users = active.slice(0, 5).map(u => ({
-      handle: u.username || u.handle,
-      status: 'active',
-      one_liner: workText(u)
-    }));
-
-    const total = Number.isFinite(data.counts?.humansActive)
-      ? data.counts.humansActive
-      : active.length;
-    return { users, total };
-  } catch (e) {
-    return { users: [], total: 0 };
-  }
-}
+// NO ROSTER HERE (2026-11-14). Setup used to print "N people here now" and, after
+// sign-in, list up to five of them by handle with what each says they are working
+// on: strangers, shown to a newcomer in their first minute, by a product whose
+// promise is that only people you know are put in front of you. Who's here is one
+// line at session start, for people you know (session-start-hook.cjs).
 
 /**
  * Open URL in browser
@@ -450,15 +328,57 @@ function saveAuthConfig(handle, token) {
   fs.chmodSync(vibeDir, 0o700);
 
   // Save config — 0600: it carries the auth token.
+  //
+  // MERGE, never replace. This wrote four fields over the whole file, so signing in
+  // again erased everything else the person had set on this machine (found
+  // 2026-11-14, on the founder's own config).
   const configPath = path.join(vibeDir, 'config.json');
+  let existing = {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) existing = parsed;
+  } catch {}
   const config = {
+    ...existing,
     handle,
+    username: handle,
     authToken: token,
     authMethod: 'browser',
     authenticatedAt: new Date().toISOString()
   };
+  delete config.privyToken;
+  delete config.pendingAuth;
 
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+  // `mode` only applies when the file is created. One that already existed with
+  // looser permissions kept them while holding the token.
+  fs.chmodSync(configPath, 0o600);
+  retireDeadCredential(vibeDir, handle);
+}
+
+/**
+ * ONE CREDENTIAL PER IDENTITY. A second file, auth.json, can hold a sign-in for the
+ * same handle (other /vibe clients write it). After a fresh sign-in here, a copy
+ * there that has EXPIRED is a dead credential with the person's name on it: nothing
+ * can use it, and anything that reads it is misled (it showed the founder as about
+ * to be signed out a day after he had signed in). Remove it, and only it: a token
+ * that is still valid, belongs to someone else, or cannot be read is left alone.
+ */
+function retireDeadCredential(vibeDir, handle) {
+  const file = path.join(vibeDir, 'auth.json');
+  try {
+    const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const token = stored && stored.token;
+    if (typeof token !== 'string') return false;
+    const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+    const whose = String(claims.handle || claims.sub || '').toLowerCase();
+    const expired = Number.isFinite(claims.exp) && claims.exp * 1000 <= Date.now();
+    if (whose !== String(handle).toLowerCase() || !expired) return false;
+    fs.unlinkSync(file);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -470,7 +390,7 @@ async function setup() {
   console.log('');
 
   // Step 1: Detect coding agents on this machine
-  printStep(1, 'Detecting coding agents...', 'running');
+  printStep(1, 'Looking for Claude Code...', 'running');
   const homeDir = os.homedir();
   // Detection reports what is HERE. `['Claude Code'] // always configured` was a
   // detection step that had already decided its answer: a machine with no Claude Code
@@ -479,14 +399,12 @@ async function setup() {
   // and fixing what a person actually reads.
   const detected = [];
   if (findClaudeConfig()) detected.push('Claude Code');
-  if (fs.existsSync(codexHome())) detected.push('Codex');
-  if (fs.existsSync(path.join(homeDir, '.cursor'))) detected.push('Cursor');
   console.log(detected.length
-    ? `${colors.dim}     → ${detected.join(', ')}${colors.reset}`
-    : `${colors.dim}     → none yet — setting up Claude Code so /vibe is ready when you install it${colors.reset}`);
-  printStep(1, 'Detecting coding agents...', 'done');
+    ? `${colors.dim}     → Claude Code${colors.reset}`
+    : `${colors.dim}     → not found yet — setting it up so /vibe is ready when you install Claude Code${colors.reset}`);
+  printStep(1, 'Looking for Claude Code...', 'done');
 
-  // Step 2: Add /vibe MCP server to every detected host
+  // Step 2: Add /vibe MCP server to Claude Code
   printStep(2, 'Adding /vibe MCP server...', 'running');
   const hostResults = configureAllHosts();
   const hostCommands = installHostCommands();
@@ -508,7 +426,7 @@ async function setup() {
     process.exit(1);
   }
   if (configuredCount < hostResults.length) {
-    console.log(`${colors.yellow}     → Partial install: ${configuredCount}/${hostResults.length} agents configured${colors.reset}`);
+    console.log(`${colors.yellow}     → Partial install: ${configuredCount}/${hostResults.length} configured${colors.reset}`);
   }
   printStep(2, 'Adding /vibe MCP server...', 'done');
 
@@ -526,10 +444,7 @@ async function setup() {
     process.exit(1);
   }
 
-  const onlineCount = await getOnlineCount();
-  console.log(onlineCount > 0
-      ? `${colors.dim}     → Connected — ${onlineCount} ${onlineCount === 1 ? 'person' : 'people'} here now${colors.reset}`
-      : `${colors.dim}     → Connected${colors.reset}`);
+  console.log(`${colors.dim}     → Connected${colors.reset}`);
   printStep(3, 'Testing connection...', 'done');
 
   // Step 4: Authenticate
@@ -559,29 +474,12 @@ async function setup() {
     printStep(4, 'Opening browser for GitHub auth...', 'done');
     console.log(`${colors.dim}     → Authenticated as @${authResult.handle}${colors.reset}`);
 
-    // Success! Show who's online immediately
-    const presence = await getOnlineUsers(authResult.token);
-
     console.log('');
     console.log(`${colors.green}  ✓ Setup complete!${colors.reset}`);
     console.log('');
 
-    // Show who's vibing right now
-    if (presence.users.length > 0) {
-      console.log(`${colors.bold}  🟢 ${presence.total} people here now:${colors.reset}`);
-      for (const user of presence.users) {
-        const statusIcon = user.status === 'active' ? colors.green + '●' : colors.yellow + '○';
-        const liner = user.one_liner ? ` — ${user.one_liner.slice(0, 40)}` : '';
-        console.log(`     ${statusIcon}${colors.reset} @${user.handle}${colors.dim}${liner}${colors.reset}`);
-      }
-      if (presence.total > 5) {
-        console.log(`${colors.dim}     ... and ${presence.total - 5} more${colors.reset}`);
-      }
-      console.log('');
-    }
-
     console.log(`${colors.bold}  Quick start:${colors.reset}`);
-    console.log(`${colors.dim}  1. Restart your coding agent${detected.length > 1 ? `s (${detected.join(', ')})` : ''}${colors.reset}`);
+    console.log(`${colors.dim}  1. Restart your Claude Code session${colors.reset}`);
     console.log(`${colors.dim}  2. Say: "what's waiting on /vibe" to see who has written to you${colors.reset}`);
     console.log(`${colors.dim}     or: "message @their-handle: ..." to someone you already know${colors.reset}`);
     // Receiving is the product: a reply has to reach you while you work, not
@@ -643,7 +541,7 @@ async function setup() {
       console.log(`${colors.bold}  Try these steps:${colors.reset}`);
       console.log(`${colors.dim}  1. Check internet connection${colors.reset}`);
       console.log(`${colors.dim}  2. Try again: ${colors.cyan}npx slashvibe-mcp setup${colors.reset}`);
-      console.log(`${colors.dim}  3. Or in Claude Code, type: ${colors.cyan}add the vibe mcp server${colors.reset}`);
+      console.log(`${colors.dim}  3. The link above still works if the browser did not open${colors.reset}`);
     }
     if (oauth && err.message !== 'AUTH_TIMEOUT') await oauth.cancel();
     console.log('');
@@ -676,4 +574,6 @@ module.exports = {
   configureAllHosts,
   testConnection,
   saveAuthConfig,
+  retireDeadCredential,
+  installHostCommands,
 };
