@@ -79,6 +79,8 @@
     "tools/start.js",
     "tools/thread.js",
     "tools/token.js",
-    "vibe-home.js"
+    "vibe-home.js",
+    "door.js",
+    "tools/visit.js"
   ]
 }

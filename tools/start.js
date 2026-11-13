@@ -136,6 +136,14 @@ async function handler(args = {}) {
     ? `\n\nyou say you are working on: "${cell(myLine, 88)}"`
     : '\n\nyou have not said what you are working on.\nother people\'s agents read that line to decide whether a question is for you.\noffer to set one: vibe_start with building.';
   if (reach.isQuiet()) display += '\nquiet is on: nothing reaches you while you work. off: npx slashvibe-mcp unquiet';
+  // Your own door, and who holds it. Local facts; nothing here is published.
+  try {
+    const own = require('../door').mine();
+    if (own) {
+      const told = Object.keys(own.told);
+      display += `\n\u{1F6AA} your door${own.name ? ` "${cell(own.name, 80)}"` : ''} \u2192 ${require('../door').shortUrl(own.url)} · ${told.length ? `left with ${told.slice(0, 5).map((h) => `@${cell(h, 39)}`).join(', ')}${told.length > 5 ? ` +${told.length - 5}` : ''}` : 'not left with anyone yet: npx slashvibe-mcp door share'}`;
+    }
+  } catch (e) {}
 
   display += '\n\nopen a conversation: vibe thread @handle · see who is reachable: vibe people';
 

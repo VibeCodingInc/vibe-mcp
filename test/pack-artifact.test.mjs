@@ -219,10 +219,10 @@ test('installed MCP process handles host termination gracefully', async () => {
   assert.deepEqual(await exited, { code: 0, signal: null });
 });
 
-test('the installed artifact exposes exactly the surface: six tools and sign-in plumbing', async () => {
+test('the installed artifact exposes exactly the surface: six tools, the open line, the visit and sign-in plumbing', async () => {
   const src = readFileSync(path.join(installedDir, 'index.js'), 'utf8');
   const registered = [...src.matchAll(/^\s{2}(vibe_[a-z]+):/gm)].map((m) => m[1]).sort();
-  assert.deepEqual(registered, ['vibe_answer', 'vibe_ask', 'vibe_discard', 'vibe_init', 'vibe_people', 'vibe_prepare', 'vibe_send', 'vibe_start', 'vibe_thread', 'vibe_token']);
+  assert.deepEqual(registered, ['vibe_answer', 'vibe_ask', 'vibe_discard', 'vibe_init', 'vibe_people', 'vibe_prepare', 'vibe_send', 'vibe_start', 'vibe_thread', 'vibe_token', 'vibe_visit']);
   const r = await rpc([INIT, INITED, { jsonrpc: '2.0', id: 2, method: 'tools/list' }]);
   assert.deepEqual((r[2]?.result?.tools || []).map((t) => t.name).sort(),
     ['vibe_init', 'vibe_people', 'vibe_send', 'vibe_start', 'vibe_thread', 'vibe_token']);

@@ -14,6 +14,7 @@ const HANDOFF = `# Handoff notes
 `;
 const BUSY = (file, n = 4, s = 13) => `Read ${file}. Then run \`sleep ${s}\` ${n} separate times (one Bash call each, one after another; they stand in for load tests) and finish with a two-line recommendation.`;
 const QUESTION = 'we split it: local decides when to hand off, cloud decides where. worried local quietly becomes the decider when cloud is slow. how did you stop that?';
+const DOOR_URL = 'https://sam-retries.vercel.app/';
 const said = (t, re) => re.test([t.final, ...t.texts].join('\n'));
 const called = (t, name) => t.tools.filter((c) => c.name === name);
 
@@ -227,6 +228,67 @@ export const scenarios = {
       { what: 'the agent prepared and sent nothing', ok: ada.tools.length === 0 && !lab.stub.effects.some((e) => e.effect === 'SEND') },
       { what: 'the message is still unread (nothing marked read)', ok: !lab.stub.effects.some((e) => e.effect === 'READ_CURSOR') },
       { what: 'the task finished', ok: said(ada, /recommend/i) },
+    ],
+  },
+  door: {
+    title: 'a door: left with someone you know, visited, and invisible to someone you do not know',
+    people: {
+      sam: { says: 'retry queue for webhook delivery; picking backoff and dead-letter rules', knows: ['nell'] },
+      nell: { says: 'a webhook sender that loses events when a customer endpoint is down', knows: ['sam'] },
+      cy: { says: 'a letterpress shop site' },
+    },
+    async run(lab) {
+      const terminal = [];
+      // @sam, in his own terminal: leaves a door, shares it, and tries to hand it to a stranger.
+      terminal.push(await lab.cli('sam', ['door', DOOR_URL, 'Retry Lab:', 'drag the slider, watch 10,000 webhooks back off']));
+      terminal.push(await lab.cli('sam', ['door', 'share']));
+      terminal.push(await lab.cli('sam', ['door', 'share', '@cy']));
+      const afterShare = lab.stub.effects.filter((e) => e.effect === 'SEND').length;
+      const ask = 'Who is on /vibe right now? Then visit @sam.';
+      const nell = await lab.session('nell', ask).done;
+      const cy = await lab.session('cy', ask).done;
+      return { terminal, afterShare, sessions: { nell, cy } };
+    },
+    checks: ({ terminal, afterShare, sessions: { nell, cy } }, lab) => {
+      const sends = lab.stub.effects.filter((e) => e.effect === 'SEND');
+      const everything = (t) => [t.final, ...t.texts, ...t.returned].join('\n');
+      const visit = called(nell, 'vibe_visit')[0];
+      return [
+        { what: 'the door went to @nell, whom @sam knows: one message, and it is the card', ok: sends.length >= 1 && sends[0].me === 'sam' && sends[0].to === 'nell' && sends[0].body.includes(DOOR_URL) },
+        { what: 'handing it to @cy, whom @sam does not know, was refused in the terminal', ok: terminal[2].code === 1 && /stays closed to them/.test(terminal[2].err) },
+        { what: 'nothing was ever sent toward @cy', ok: !sends.some((e) => e.to === 'cy') && !lab.stub.messages.some((m) => m.to === 'cy') },
+        { what: '@nell saw the door beside @sam in the list of who is here', ok: nell.returned.some((r) => /@sam[^\n]*door|"doors":\{"sam"/.test(r)) },
+        { what: '@nell\'s session walked through it (vibe_visit @sam)', ok: Boolean(visit) && /sam/i.test(visit.input.handle || '') },
+        { what: '@nell was told where she is, in @sam\'s words for it', ok: nell.returned.some((r) => /Visiting @sam: "Retry Lab/.test(r)) && said(nell, /Retry Lab/) },
+        { what: 'the visit sent nothing: no message left after the share', ok: sends.length === afterShare && afterShare === 1 },
+        { what: 'the visit marked nothing read', ok: !lab.stub.effects.some((e) => e.effect === 'READ_CURSOR') },
+        { what: '@cy asked the same thing and no surface showed him a door', ok: !/door \u2192|door open|Retry Lab|sam-retries/.test(everything(cy)) },
+        { what: '@cy\'s visit found nothing to open', ok: cy.returned.some((r) => /has not left a door for you/.test(r)) || !called(cy, 'vibe_visit').length },
+      ];
+    },
+  },
+  doorarrives: {
+    title: 'a door is left for you while you work: you are told, nothing is opened, nothing is answered',
+    people: {
+      sam: { says: 'retry queue for webhook delivery; picking backoff and dead-letter rules', knows: ['ada'] },
+      ada: { says: 'runtime scheduling: who decides local vs cloud', knows: ['sam'], files: { 'scheduler.md': SCHED } },
+    },
+    async run(lab) {
+      const s = lab.session('ada', BUSY('scheduler.md'));
+      await lab.sleep(24_000);
+      const terminal = [
+        await lab.cli('sam', ['door', DOOR_URL, 'Retry Lab:', 'drag the slider, watch 10,000 webhooks back off']),
+        await lab.cli('sam', ['door', 'share', '@ada']),
+      ];
+      return { terminal, sessions: { ada: await s.done } };
+    },
+    checks: ({ sessions: { ada } }, lab) => [
+      { what: 'the person was shown, while working, that @sam left a door open, by its name', ok: ada.shown.some((l) => /@sam left a door open for you: "Retry Lab/.test(l)) },
+      { what: 'the session said so', ok: said(ada, /door/i) },
+      { what: 'nothing was opened: no visit without being asked', ok: called(ada, 'vibe_visit').length === 0 },
+      { what: 'no reply was drafted or sent', ok: called(ada, 'vibe_prepare').length === 0 && lab.stub.effects.filter((e) => e.effect === 'SEND').length === 1 },
+      { what: 'nothing was marked read', ok: !lab.stub.effects.some((e) => e.effect === 'READ_CURSOR') },
+      { what: 'the task still finished (a recommendation was given)', ok: said(ada, /recommend|lease/i) },
     ],
   },
 };

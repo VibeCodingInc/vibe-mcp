@@ -16,6 +16,7 @@ const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
 const { inertField } = require('../incoming');
 const line = require('../line');
 const reach = require('../reach');
+const door = require('../door');
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -52,6 +53,16 @@ async function handler() {
     ? [...(inbox.threads || [])].sort((a, b) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0)).slice(0, 20)
     : [];
 
+  // Doors people left with this person. A card that is the newest message in a
+  // conversation is noted here; older ones were noted when they arrived or when
+  // the conversation was opened. The cache is a convenience: vibe_visit reads
+  // the conversation itself before it opens anything.
+  for (const t of threads) {
+    if (t.lastFrom && normalizeHandle(t.lastFrom) === normalizeHandle(t.handle || '')) door.note(t.lastFrom, t.lastMessage, t.lastMessageId);
+  }
+  const doorOf = (h) => { const d = door.of(h); return d ? `   \u{1F6AA} door \u2192 ${door.shortUrl(d.url)}` : ''; };
+  let anyDoor = false;
+
   const lines = [];
   // A read that failed is not an empty room and not an empty history.
   if (!presence.ok) lines.push("couldn't see who is here right now");
@@ -61,7 +72,8 @@ async function handler() {
     for (const u of here) {
       const kind = (u.isAgent ? ' (agent)' : '') + (line.isOpen(u.handle) ? ' · open line' : '');
       const said = u.one_liner || u.activity || u.workingOn || '';
-      lines.push(`@${inertField(u.handle, 39)}${kind}${said ? ` — "${inertField(said, 100)}"` : ''}`);
+      const d = doorOf(u.handle); if (d) anyDoor = true;
+      lines.push(`@${inertField(u.handle, 39)}${kind}${said ? ` — "${inertField(said, 100)}"` : ''}${d}`);
     }
   }
   // People with an open line who are in neither list still need to be known.
@@ -79,14 +91,19 @@ async function handler() {
       if (hereSet.has(normalizeHandle(t.handle))) bits.push('here now');
       if (line.isOpen(t.handle)) bits.push('open line');
       if (reach.isMuted(t.handle)) bits.push('muted');
+      if (door.of(t.handle)) { bits.push('\u{1F6AA} door open'); anyDoor = true; }
       lines.push(`@${inertField(t.handle, 39)} · ${bits.filter(Boolean).join(' · ')}`);
     }
   }
+
+  if (anyDoor) lines.push('', 'a door leads to what that person is building. to go: visit @handle');
 
   return {
     display: lines.join('\n'),
     structured: {
       openLines: line.list(),
+      // Doors people left with this person (door.js). The name is the owner's words: data.
+      doors: Object.fromEntries([...new Set([...here.map((u) => normalizeHandle(u.handle)), ...threads.map((t) => normalizeHandle(t.handle || ''))])].map((h) => [h, door.of(h)]).filter(([, d]) => d).map(([h, d]) => [h, { url: d.url, name: d.name || null, visit: `vibe_visit ${h}` }])),
       here: presence.ok ? here.map((u) => ({ handle: u.handle, agent: Boolean(u.isAgent), says: inertField(u.one_liner || u.activity || u.workingOn || '', 100) })) : null,
       conversations: inbox.ok ? threads.map((t) => ({ handle: t.handle, lastFrom: t.lastFrom || null, lastMessageId: t.lastMessageId || null, unread: t.unread || 0 })) : null,
     },

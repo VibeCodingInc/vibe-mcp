@@ -77,6 +77,12 @@ async function handler(args) {
   if (marked && marked.success === false) {
     return { display: `Couldn't read your conversation with @${them}. Nothing is shown rather than an empty one.` };
   }
+  // A door left in this conversation is remembered for vibe_people (door.js).
+  try {
+    const door = require('../door');
+    const found = door.findInThread(thread, them);
+    if (found) door.note(them, door.card(them, found.url, found.name), found.id); else door.forget(them);
+  } catch (e) {}
   return { display: render(me, them, thread) };
 }
 
