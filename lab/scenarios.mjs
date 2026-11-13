@@ -378,6 +378,33 @@ export const scenarios = {
     },
   },
 
+  // The person pastes the problem instead of pointing at a file, so the agent
+  // can answer in one go with no tool call at all. This is where the bump was
+  // missed in filming (3 takes of 4) and on production.
+  bumpinline: {
+    title: 'the bump when the problem is pasted inline: stuck, and someone you know is here working on exactly that',
+    people: {
+      ada: { says: 'a webhook sender that loses events when a customer endpoint is down', knows: ['sam', 'ben'] },
+      sam: { says: 'retry queue for webhook delivery; picking backoff and dead-letter rules', knows: ['ada'] },
+      ben: { says: 'a letterpress shop site', knows: ['ada'] },
+      cy: { says: STRANGER_LINE },
+    },
+    async run(lab) {
+      return { sessions: { ada: await lab.session('ada', 'We deliver webhooks to customer endpoints. Failures retry 3 times, 1s apart, then drop, so an endpoint that is down for 10 minutes loses everything. I tried fixed 5s and I tried doubling, both wrong under load, and we can hold at most 50k pending retries in memory. I have been stuck on what backoff schedule to use and when to dead-letter all morning and I keep going in circles. Help.').done } };
+    },
+    checks: ({ sessions: { ada } }) => {
+      const all = [ada.final, ...ada.texts].join('\n');
+      const bumps = called(ada, 'vibe_bump');
+      return [
+        { what: 'stuck, the session looked for someone near (vibe_bump, once)', ok: bumps.length === 1 },
+        { what: 'she still got help with the problem itself', ok: /jitter|backoff|dead-letter/i.test(ada.final) },
+        { what: 'she was told @sam is here, working on the same thing', ok: /@sam/.test(ada.final) },
+        { what: 'the stranger was never named', ok: !/@cy\b|ask me anything/i.test(all) },
+        { what: 'nothing was sent, visited or drafted', ok: called(ada, 'vibe_visit').length + called(ada, 'vibe_prepare').length + called(ada, 'vibe_send').length === 0 },
+      ];
+    },
+  },
+
   bumpnobody: {
     title: 'the bump: stuck, and the only person who fits is a stranger: nothing is offered',
     people: {
