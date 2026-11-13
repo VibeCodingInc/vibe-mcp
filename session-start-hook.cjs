@@ -50,7 +50,7 @@ const HANDLE = /^[a-z0-9][a-z0-9_-]{1,38}$/;
  *   - never themselves, never someone they muted, never an agent;
  *   - only a live heartbeat counts as here (`isHere` decides).
  */
-function pickHere(users, { me = '', known = [], muted = [], isHere = () => true, doorOf = () => null } = {}) {
+function pickHere(users, { me = '', known = [], muted = [], isHere = () => true, doorOf = () => null, maxSays = 48 } = {}) {
   const mine = String(me || '').toLowerCase();
   const knownSet = new Set(known.map((h) => String(h).toLowerCase()));
   const mutedSet = new Set(muted.map((h) => String(h).toLowerCase()));
@@ -61,7 +61,7 @@ function pickHere(users, { me = '', known = [], muted = [], isHere = () => true,
     if (!HANDLE.test(h) || h === mine || seen.has(h)) continue;
     if (!knownSet.has(h) || mutedSet.has(h) || u.isAgent || !isHere(u)) continue;
     seen.add(h);
-    out.push({ handle: h, says: inertField(u.one_liner || u.activity || u.workingOn || '', 48), door: Boolean(doorOf(h)) });
+    out.push({ handle: h, says: inertField(u.one_liner || u.activity || u.workingOn || '', maxSays), door: Boolean(doorOf(h)) });
   }
   return out;
 }

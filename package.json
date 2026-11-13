@@ -81,6 +81,7 @@
     "tools/token.js",
     "vibe-home.js",
     "door.js",
-    "tools/visit.js"
+    "tools/visit.js",
+    "tools/bump.js"
   ]
 }

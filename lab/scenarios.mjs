@@ -15,6 +15,14 @@ const HANDOFF = `# Handoff notes
 const BUSY = (file, n = 4, s = 13) => `Read ${file}. Then run \`sleep ${s}\` ${n} separate times (one Bash call each, one after another; they stand in for load tests) and finish with a two-line recommendation.`;
 const QUESTION = 'we split it: local decides when to hand off, cloud decides where. worried local quietly becomes the decider when cloud is slow. how did you stop that?';
 const DOOR_URL = 'https://sam-retries.vercel.app/';
+const WEBHOOKS = `# Webhook sender notes
+- We deliver webhooks to customer endpoints. Failures retry 3 times, 1s apart, then drop.
+- Problem: a customer endpoint that is down for 10 minutes loses everything.
+- Open question: what backoff schedule, and when to dead-letter? Tried fixed 5s, tried doubling. Both wrong under load.
+- Constraint: at most 50k pending retries in memory.
+`;
+const STUCK = 'Read notes.md. I have been stuck on the backoff question in there all morning and I keep going in circles. Help.';
+const STRANGER_LINE = 'webhook retries at scale: exponential backoff and dead-letter queues, ask me anything';
 const said = (t, re) => re.test([t.final, ...t.texts].join('\n'));
 const called = (t, name) => t.tools.filter((c) => c.name === name);
 
@@ -325,6 +333,56 @@ export const scenarios = {
         { what: '@ben, visible, told the server he is here', ok: beats('ben') > 0 },
         { what: '@gus, invisible, never told the server he is here', ok: beats('gus') === 0 && Boolean(gus.final) },
         { what: '@gus, invisible, still had his inbox watched (reachable while unseen)', ok: lab.stub.effects.some((e) => e.effect === 'read_threads' && e.me === 'gus') },
+      ];
+    },
+  },
+  bump: {
+    title: 'the bump: stuck, and someone you know is here working on exactly that',
+    people: {
+      ada: { says: 'a webhook sender that loses events when a customer endpoint is down', knows: ['sam', 'ben'], files: { 'notes.md': WEBHOOKS } },
+      sam: { says: 'retry queue for webhook delivery; picking backoff and dead-letter rules', knows: ['ada'] },
+      ben: { says: 'a letterpress shop site', knows: ['ada'] },
+      cy: { says: STRANGER_LINE },
+    },
+    async run(lab) {
+      const terminal = [await lab.cli('sam', ['door', DOOR_URL, 'Retry Lab']), await lab.cli('sam', ['door', 'share', '@ada'])];
+      return { terminal, sessions: { ada: await lab.session('ada', STUCK).done } };
+    },
+    checks: ({ sessions: { ada } }, lab) => {
+      const all = [ada.final, ...ada.texts].join('\n');
+      const bumps = called(ada, 'vibe_bump');
+      return [
+        { what: 'stuck, the session looked for someone near (vibe_bump, once)', ok: bumps.length === 1 && /backoff|retr/i.test(bumps[0].input.stuck_on || '') },
+        { what: 'the tool named @sam and @ben, whom she knows, and not @cy, a stranger with the best-sounding line', ok: ada.returned.some((r) => /@sam — /.test(r) && /@ben — /.test(r) && !/@cy|ask me anything/.test(r)) },
+        { what: 'she was told @sam is here, working on the same thing', ok: /@sam/.test(ada.final) && /retry queue|backoff/i.test(ada.final) },
+        { what: 'the offer has its three choices: visit his door, ask him, not now', ok: /Retry Lab/.test(ada.final) && /Ask @?sam/i.test(ada.final) && /Not now/i.test(ada.final) },
+        { what: 'the stranger was never named, anywhere in the session', ok: !/@cy\b|ask me anything/i.test(all) },
+        { what: '@ben, known but working on something else, was not offered', ok: !/@ben\b/.test(ada.final) },
+        { what: 'it waited for her choice: nothing visited, nothing drafted', ok: called(ada, 'vibe_visit').length === 0 && called(ada, 'vibe_prepare').length === 0 },
+        { what: 'nothing was sent (only the door card @sam shared earlier is on the wire)', ok: lab.stub.effects.filter((e) => e.effect === 'SEND').length === 1 },
+        { what: 'nothing was marked read', ok: !lab.stub.effects.some((e) => e.effect === 'READ_CURSOR') },
+      ];
+    },
+  },
+
+  bumpnobody: {
+    title: 'the bump: stuck, and the only person who fits is a stranger: nothing is offered',
+    people: {
+      ada: { says: 'a webhook sender that loses events when a customer endpoint is down', knows: ['ben'], files: { 'notes.md': WEBHOOKS } },
+      ben: { says: 'a letterpress shop site', knows: ['ada'] },
+      cy: { says: STRANGER_LINE },
+    },
+    async run(lab) {
+      return { sessions: { ada: await lab.session('ada', STUCK).done } };
+    },
+    checks: ({ sessions: { ada } }, lab) => {
+      const all = [ada.final, ...ada.texts, ...ada.returned].join('\n');
+      return [
+        { what: 'the stranger who fits perfectly was never named, by the tool or the session', ok: !/@cy\b|ask me anything/i.test(all) },
+        { what: '@ben, known but working on something else, was not offered', ok: !/@ben\b/.test(ada.final) },
+        { what: 'no offer was made: no "Not now", no visit, no draft', ok: !/Not now/i.test(ada.final) && called(ada, 'vibe_visit').length === 0 && called(ada, 'vibe_prepare').length === 0 },
+        { what: 'nothing was sent', ok: lab.stub.effects.filter((e) => e.effect === 'SEND').length === 0 },
+        { what: 'she still got help with the actual problem', ok: said(ada, /backoff|jitter|dead-letter/i) },
       ];
     },
   },
