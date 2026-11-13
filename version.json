@@ -1,13 +1,14 @@
 {
-  "version": "0.9.8",
-  "updated": "2026-11-13",
-  "changelog": "For anyone new. If a friend wrote to you before you ever wrote to them, you used to hear nothing: only people you know reach you while you work, and on day one you know nobody. Now, when you open a session, one line tells you that someone you have not written to is waiting, and how to ask. It says nothing about who they are or what they wrote until you ask.",
+  "version": "0.9.9",
+  "updated": "2026-11-14",
+  "changelog": "Nobody you do not know is put in front of you, including when you install. Setup used to end by listing strangers who were online and what they were working on, and \"who's on /vibe\" listed every signed-in person. Now you see the people you know by name and everyone else as a number. Setup also only touches Claude Code now, and signing in again no longer wipes the settings you had.",
   "features": [
-    "At session start: \"1 person you have not written to is waiting. Say: what's waiting on /vibe\"",
-    "It is a count only. No name and none of their words reach you or your agent until you ask",
-    "Muted people are not counted, and quiet shows nothing",
-    "Messages that were waiting now read plainly at session start: \"1 message waiting · from @sam: …\"",
-    "Already installed? Run npx slashvibe-mcp hook install once so your session-start hook is this version"
+    "Setup no longer lists strangers or how many people are online",
+    "Who's on /vibe: people you know are named with what they are working on; everyone else is counted (\"and 7 other people you have not written to\")",
+    "Setup configures Claude Code only. It no longer writes Codex or Cursor settings; anything it wrote there before is left alone",
+    "Signing in again keeps your other settings, and keeps the sign-in file private to you",
+    "One sign-in per identity: an expired leftover sign-in for the same handle is removed when you sign in",
+    "Not changed by this update: the service itself still returns the full list to any signed-in app. That is being fixed on the service side"
   ],
   "deprecated": [],
   "breaking": false,

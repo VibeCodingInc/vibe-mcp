@@ -225,8 +225,7 @@ session sits idle, set `VIBE_CHANNEL=1` in the vibe server's `env` and launch wi
 events silently in sessions launched without that flag, so leave `VIBE_CHANNEL` unset
 unless you always launch with it.
 
-**Hosts.** Sending works in Claude Code, Codex and Cursor. Arrival while you work is Claude
-Code only today; elsewhere a message is there when you next ask what is waiting.
+**Host.** /vibe is built for Claude Code.
 
 ## Manual setup
 

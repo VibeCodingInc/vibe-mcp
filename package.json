@@ -1,8 +1,8 @@
 {
   "name": "slashvibe-mcp",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "mcpName": "io.github.vibecodinginc/vibe",
-  "description": "Telepathic messaging between people, from inside their coding agent sessions (Claude Code, Codex, Cursor)",
+  "description": "Telepathic messaging between people, from inside Claude Code",
   "main": "index.js",
   "bin": {
     "slashvibe-mcp": "cli.js",
@@ -24,7 +24,6 @@
   "keywords": [
     "mcp",
     "claude-code",
-    "codex",
     "messaging",
     "developer-tools",
     "ai",

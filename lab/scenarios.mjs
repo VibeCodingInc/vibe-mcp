@@ -100,8 +100,14 @@ export const scenarios = {
   loop: {
     title: 'the whole loop: a question leaves one session, is answered from another, and the answer returns beside the work',
     people: {
-      ben: { says: 'wiring the local/cloud handoff for agent runtimes', files: { 'handoff-notes.md': HANDOFF } },
-      ada: { says: 'runtime scheduling: who decides local vs cloud', files: { 'scheduler.md': SCHED } },
+      // These two already work together. Without that the scenario cannot pass, and
+      // should not: since 0.9.1 a stranger's message does not reach a working session,
+      // and since 0.9.9 a stranger is not named in vibe_people. The scenario predates
+      // both and declared no relationship, so on 0.9.7 @ada was (correctly) never
+      // interrupted and four checks failed. First contact between strangers is the
+      // `stranger` and `invited` scenarios, not this one.
+      ben: { says: 'wiring the local/cloud handoff for agent runtimes', knows: ['ada'], files: { 'handoff-notes.md': HANDOFF } },
+      ada: { says: 'runtime scheduling: who decides local vs cloud', knows: ['ben'], files: { 'scheduler.md': SCHED } },
     },
     async run(lab) {
       const ada = lab.session('ada', `${BUSY('scheduler.md', 9, 13)} If a /vibe message arrives and you prepare an answer, I approve it in advance: choose Send.`, { allowSend: true });

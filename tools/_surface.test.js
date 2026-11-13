@@ -168,12 +168,25 @@ test('people: who is in a session and who you talk with; no bodies, and a failed
   try {
     await withWire(async () => {
       const r = await people.handler();
-      assert.match(r.display, /in a session now \(1\):/);
-      assert.match(r.display, /@grace — "compilers `and` ❲such❳"|@grace — "compilers/);
+      // @linus is someone this person talks with, so he is named. @grace is a stranger
+      // who is also in a session: she is counted, and neither her handle nor her line
+      // appears anywhere, in the words or in the structured copy the agent reads.
+      assert.match(r.display, /people you know, in a session now \(1\):/);
+      assert.match(r.display, /@linus — "kernels"/);
+      assert.match(r.display, /and 1 other person you have not written to/);
+      assert.ok(!/grace|compilers/.test(r.display + JSON.stringify(r.structured)), 'a stranger was named or quoted');
+      assert.equal(r.structured.others, 1);
+      assert.deepEqual(r.structured.here.map((p) => p.handle), ['linus']);
       assert.match(r.display, /@linus · they wrote last · 3d ago · 2 unread/);
       assert.ok(!r.display.includes('SECRET BODY') && !JSON.stringify(r.structured).includes('SECRET BODY'));
       assert.ok(!r.display.includes('@ada'), 'you are not in your own list');
-    }, { users: [{ handle: 'grace', status: 'active', lastSeen: now, one_liner: 'compilers' }, { handle: 'ada', status: 'active', lastSeen: now }] });
+    }, { users: [{ handle: 'grace', status: 'active', lastSeen: now, one_liner: 'compilers' }, { handle: 'linus', status: 'active', lastSeen: now, one_liner: 'kernels' }, { handle: 'ada', status: 'active', lastSeen: now }] });
+    // Only strangers in the room: a number, no names.
+    await withWire(async () => {
+      const r = await people.handler();
+      assert.match(r.display, /nobody you know is in a session right now \(1 other person is\)/);
+      assert.ok(!/grace|compilers/.test(r.display + JSON.stringify(r.structured)));
+    }, { users: [{ handle: 'grace', status: 'active', lastSeen: now, one_liner: 'compilers' }] });
     const origP = store.getActiveUsersResult;
     store.getActiveUsersResult = async () => ({ ok: false, users: [] });
     try {

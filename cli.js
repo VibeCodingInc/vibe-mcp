@@ -303,7 +303,7 @@ if (['help', '--help', '-h'].includes(args[0])) {
     console.log(cred.handle
       ? `/vibe is configured — signed in as @${cred.handle}.`
       : '/vibe is configured.');
-    console.log('Restart your coding agent (Claude Code / Codex / Cursor) to connect.');
+    console.log('Restart your Claude Code session to connect.');
     console.log('');
     console.log('Commands:');
     console.log('  npx slashvibe-mcp setup   — re-run setup wizard');
