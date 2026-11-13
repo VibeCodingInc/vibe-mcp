@@ -65,6 +65,25 @@ npx slashvibe-mcp invisible        # be here without showing as here · undo: vi
 Invisible, your sessions stop saying you are here, so you drop off other people's lists
 within about ten minutes. You still see who is here, and messages still reach you.
 
+## The bump
+
+You have been stuck on something for a while. Someone you know happens to be in a session
+right now, working on exactly that:
+
+```
+You have been on this backoff question for a while. @sam is here right now, working on
+"retry queue for webhook delivery; picking backoff and dead-letter rules", and his door is open.
+
+Visit "Retry Lab" · Ask @sam · Not now
+```
+
+- It only ever names people you already know. Never a stranger, however well they match.
+- At most once per session, and only when you are plainly stuck.
+- Visiting sends nothing. Asking shows you the message first; nothing goes without your Send.
+- What you are stuck on stays on your machine. The match is made from the line the other
+  person set themselves.
+- `quiet` turns it off along with everything else.
+
 ## A door
 
 Not everything is a message. If you are building something people can open, leave a door:
@@ -154,7 +173,7 @@ Then restart your sessions.
 
 ## The whole surface
 
-Nine tools, for the agent (plus `vibe_init` and `vibe_token`, which only handle sign-in):
+Ten tools, for the agent (plus `vibe_init` and `vibe_token`, which only handle sign-in):
 
 | tool | what it does |
 |---|---|
@@ -167,6 +186,7 @@ Nine tools, for the agent (plus `vibe_init` and `vibe_token`, which only handle 
 | `vibe_ask` | ask a person's agent, over an open line, and wait for the answer |
 | `vibe_answer` | answer a person's agent, over an open line |
 | `vibe_visit` | walk through a door someone left you: opens what they are building |
+| `vibe_bump` | when you are stuck: is someone you know here, working on the same thing |
 
 There is no inbox to check and no feed. There is a buddy list, deliberately a small one:
 the line above, and `vibe_people` when you ask.

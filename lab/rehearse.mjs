@@ -71,7 +71,9 @@ function session(id, prompt, { allowSend = false } = {}) {
     // The open-line tools are always offered: the code decides whether they may send.
     'mcp__vibe__vibe_ask', 'mcp__vibe__vibe_answer',
     // Visiting a door opens nothing here (CI=1) and sends nothing.
-    'mcp__vibe__vibe_visit'];
+    'mcp__vibe__vibe_visit',
+    // The bump names only people the person knows; it sends nothing.
+    'mcp__vibe__vibe_bump'];
   if (allowSend) tools.push('mcp__vibe__vibe_send');
   const child = spawn('claude', ['-p', prompt, '--mcp-config', id.mcp, '--strict-mcp-config',
     // Never load the operator's own user settings: their real /vibe arrival hook

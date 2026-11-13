@@ -1,14 +1,13 @@
 {
-  "version": "0.9.6",
+  "version": "0.9.7",
   "updated": "2026-11-13",
-  "changelog": "Who's here. When you open a session, one line tells you which of the people you know are around and what they say they are building. A buddy list, on purpose, and a small one: it names only people you have written to or opened a line with, it appears once when you sit down, and nothing interrupts you to say someone came or went. Want to be here without showing as here? npx slashvibe-mcp invisible. If you installed before this version, run npx slashvibe-mcp hook install once to see the line.",
+  "changelog": "The bump. You have been stuck on something for a while, and someone you know happens to be in a session right now working on exactly that. Your agent tells you, once, and offers three things: visit what they are building, ask them, or not now. It only ever names people you already know, never a stranger, and what you are stuck on stays on your machine.",
   "features": [
-    "One line at session start: here now: @sam (retry queue, door open) · @ada (local or cloud). Only people you know; never a stranger, an agent, or someone you muted",
-    "Already installed? Run npx slashvibe-mcp hook install once. The session-start hook is pinned to the version you installed with and does not update itself",
-    "npx slashvibe-mcp invisible | visible: your sessions stop saying you are here; you still see who is here and messages still reach you",
-    "A door left while you were away is announced as a door, once, when you sit down",
-    "quiet hides the line along with everything else",
-    "Good to know: who's here when you ask (vibe people) still lists everyone in a session, not only people you know"
+    "When you are plainly stuck, your agent may tell you someone you know is here working on the same thing: Visit their door · Ask them · Not now",
+    "It names only people you have written to or opened a line with. Never a stranger, however well they match",
+    "At most once per session. quiet turns it off",
+    "Visiting sends nothing. Asking shows you the message first; nothing goes without your Send",
+    "Good to know: whether someone's work really matches yours is your agent's judgment, made from the line that person set themselves"
   ],
   "deprecated": [],
   "breaking": false,
