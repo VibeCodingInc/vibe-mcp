@@ -109,11 +109,12 @@ test('a door left while you were away is announced once, as a door, and marks "d
     stub.post('sam', 'ada', door.card('sam', 'https://sam-retries.vercel.app/', 'Retry Lab'));
     stub.post('cy', 'ada', door.card('cy', 'https://cy.example-project.dev/', 'come look'));
     const first = await sitDown(vh, stub.url);
-    assert.equal(first.systemMessage, '/vibe · here now: @sam (retry queue, door open)\n/vibe · \u{1F6AA} @sam left a door open for you: "Retry Lab" · say "visit @sam"');
+    // @cy, whom she has never written to, also left something: that is a count and nothing more.
+    assert.equal(first.systemMessage, '/vibe · here now: @sam (retry queue, door open)\n/vibe · \u{1F6AA} @sam left a door open for you: "Retry Lab" · say "visit @sam"\n/vibe · 1 person you have not written to is waiting. Say: what\'s waiting on /vibe');
     assert.match(first.hookSpecificOutput.additionalContext, /Do not open it and do not reply to it/);
-    assert.ok(!/waiting message|@cy|come look/.test(JSON.stringify(first)), 'a card was shown as a message, or a stranger\'s door was shown');
+    assert.ok(!/messages? waiting ·|@cy|come look/.test(JSON.stringify(first)), 'a card was shown as a message, or a stranger\'s door was shown');
     const second = await sitDown(vh, stub.url);
-    assert.equal(second.systemMessage, '/vibe · here now: @sam (retry queue, door open)', 'the same door was announced twice');
+    assert.equal(second.systemMessage, '/vibe · here now: @sam (retry queue, door open)\n/vibe · 1 person you have not written to is waiting. Say: what\'s waiting on /vibe', 'the same door was announced twice');
     assert.ok(!stub.effects.some((e) => e.effect === 'READ_CURSOR'));
   } finally { await stub.close(); }
 });

@@ -141,7 +141,10 @@ test('installed artifact can install, run, and remove the read-only SessionStart
     env: { ...env, VIBE_SESSION_START_FIXTURE: fixture },
     input: JSON.stringify({ hook_event_name: 'SessionStart', source: 'startup' }),
   }));
-  assert.match(output.systemMessage, /no delivery receipt written; may appear again/);
+  // The person's line reads like a person wrote it; the facts about receipts are in
+  // the note to the model, not in front of the person.
+  assert.doesNotMatch(output.systemMessage, /delivery receipt|startup context|may appear again/);
+  assert.match(output.hookSpecificOutput.additionalContext, /No delivery receipt or human-read state was written/);
   assert.match(output.hookSpecificOutput.additionalContext, /The packed hook works\./);
 
   execFileSync(process.execPath, [installedCli, 'hook', 'uninstall'], { env, stdio: 'pipe' });

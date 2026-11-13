@@ -323,7 +323,7 @@ export const scenarios = {
       const beats = (h) => lab.stub.effects.filter((e) => e.effect === 'heartbeat' && e.as === h).length;
       return [
         { what: 'she was shown one line when she sat down', ok: ada.shown.filter((l) => /here now:/.test(l)).length === 1 },
-        { what: 'the door @sam left while she was away is announced as a door, by name, not as a message to answer', ok: ada.shown.some((l) => /@sam left a door open for you: "Retry Lab" · say "visit @sam"/.test(l)) && !ada.shown.some((l) => /waiting message/.test(l)) && called(ada, 'vibe_visit').length === 0 },
+        { what: 'the door @sam left while she was away is announced as a door, by name, not as a message to answer', ok: ada.shown.some((l) => /@sam left a door open for you: "Retry Lab" · say "visit @sam"/.test(l)) && !ada.shown.some((l) => /messages? waiting ·/.test(l)) && called(ada, 'vibe_visit').length === 0 },
         { what: 'it names @sam, whom she has written to, with what he says he is building', ok: /@sam \(retry queue/.test(line) },
         { what: "it says @sam's door is open", ok: /@sam \([^)]*door open\)/.test(line) },
         { what: 'it names @ben, whom she has an open line with', ok: /@ben \(/.test(line) },
@@ -383,6 +383,33 @@ export const scenarios = {
         { what: 'no offer was made: no "Not now", no visit, no draft', ok: !/Not now/i.test(ada.final) && called(ada, 'vibe_visit').length === 0 && called(ada, 'vibe_prepare').length === 0 },
         { what: 'nothing was sent', ok: lab.stub.effects.filter((e) => e.effect === 'SEND').length === 0 },
         { what: 'she still got help with the actual problem', ok: said(ada, /backoff|jitter|dead-letter/i) },
+      ];
+    },
+  },
+
+  invited: {
+    title: 'a newcomer whose friend wrote first: told that someone is waiting, and nothing else, until they ask',
+    startHook: true,
+    people: {
+      nell: { says: '', files: { 'notes.md': '# Webhook sender notes\n- Failures retry 3 times, 1s apart, then drop.\n- Open question: what backoff schedule, and when to dead-letter?\n' } },
+      sam: { says: 'retry queue for webhook delivery; picking backoff and dead-letter rules' },
+    },
+    async run(lab) {
+      lab.stub.post('sam', 'nell', 'you made it! pineapple-lantern. what are you building this week?');
+      const first = await lab.session('nell', 'Read notes.md and tell me in one sentence what the open question is.').done;
+      const cursorsAfterFirst = lab.stub.effects.filter((e) => e.effect === 'READ_CURSOR').length;
+      const second = await lab.session('nell', "what's waiting on /vibe?").done;
+      return { cursorsAfterFirst, sessions: { 'nell (sits down to work)': first, 'nell (asks what is waiting)': second } };
+    },
+    checks: ({ cursorsAfterFirst, sessions }, lab) => {
+      const [first, second] = Object.values(sessions);
+      const all = (t) => [t.final, ...t.texts, ...t.returned, ...t.shown, JSON.stringify(t.tools)].join('\n');
+      return [
+        { what: 'sitting down, she was shown that one person she has not written to is waiting, and how to ask', ok: first.shown.some((l) => /1 person you have not written to is waiting\. Say: what's waiting on \/vibe/.test(l)) },
+        { what: 'nothing about who, and none of their words, reached that session', ok: !/sam|pineapple-lantern|you made it|retry queue/i.test(all(first)) },
+        { what: 'the session did its task and did not go looking (no /vibe tool calls, nothing marked read)', ok: first.tools.length === 0 && cursorsAfterFirst === 0 && said(first, /backoff|dead-letter/i) },
+        { what: 'when she asked what is waiting, she was told @sam wrote, and what he said', ok: second.tools.length >= 1 && /@?sam/.test(second.final) && /you made it/i.test(second.final) },
+        { what: 'nothing was sent in either session', ok: lab.stub.effects.filter((e) => e.effect === 'SEND').length === 0 },
       ];
     },
   },
