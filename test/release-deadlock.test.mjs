@@ -142,3 +142,11 @@ test('the publish workflow orders parity strictly AFTER npm publish', () => {
   // And the registry-mode conformance runs there too — post-publish proof.
   assert.match(verifyJob, /release-conformance\.mjs --registry/);
 });
+
+test('the publish workflow uses trusted publishing — no stored npm token', () => {
+  const wf = readFileSync(join(ROOT, '.github/workflows/publish.yml'), 'utf8');
+  // Strip comments: the prose explains the dead NPM_TOKEN by name.
+  const code = wf.split('\n').map((l) => l.replace(/(^|\s)#.*$/, '')).join('\n');
+  assert.ok(!/NPM_TOKEN|NODE_AUTH_TOKEN/.test(code), 'publish.yml reads a stored npm token again');
+  assert.match(code, /id-token:\s*write/, 'the publish job needs id-token: write for the OIDC exchange');
+});
