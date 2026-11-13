@@ -76,3 +76,44 @@ test('a heartbeat carries no folder path, folder name, file or branch; the path 
     assert.ok(!('cwd' in JSON.parse(bodies.at(-1))), `VIBE_SESSION_BEACON=${JSON.stringify(v)} sent the path`);
   }
 });
+
+test('opening a session says nothing about the person that they did not say', async (t) => {
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      seen.push({ method: req.method, path: req.url.split('?')[0], body: Buffer.concat(chunks).toString() });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => new Promise((r) => server.close(r)));
+  const quiet = console.error; console.error = () => {}; t.after(() => { console.error = quiet; });
+
+  // A fresh copy of the store, pointed at this server.
+  process.env.VIBE_API_URL = `http://127.0.0.1:${server.address().port}`;
+  for (const key of Object.keys(require.cache)) if (/[\\/]store[\\/]/.test(key)) delete require.cache[key];
+  const store = require('../store');
+
+  // A session opens for someone who has set no line (presence.js calls it this way).
+  await store.registerSession('sess_1', 'nell');
+  assert.ok(seen.length > 0, 'registration did not reach the server');
+  assert.ok(!seen.some((r) => r.path === '/api/users'), 'a profile write was made for someone who set nothing');
+  for (const r of seen) {
+    assert.ok(!/something cool/i.test(r.body), 'an invented line was sent in the person\'s name');
+    assert.ok(!/"building"/.test(r.body), 'a building line was sent that nobody set');
+  }
+
+  // Blank is not a line either.
+  for (const blank of ['', '   ', null, undefined]) await store.registerSession('sess_1', 'nell', blank);
+  assert.ok(!seen.some((r) => r.path === '/api/users'));
+
+  // Their own words, when they gave some, go exactly as given.
+  await store.registerSession('sess_1', 'nell', '  the scheduler lease ');
+  const profile = seen.filter((r) => r.path === '/api/users');
+  assert.equal(profile.length, 1);
+  assert.deepEqual(JSON.parse(profile[0].body), { username: 'nell', building: 'the scheduler lease' });
+});
+

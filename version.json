@@ -1,9 +1,10 @@
 {
   "version": "0.9.5",
   "updated": "2026-11-13",
-  "changelog": "A privacy fix. Until now, every 30 seconds an open session sent /vibe the full path of the folder you were working in and the folder's name, and the folder name was readable by anyone signed in. That has stopped: nothing about your folders, files or branch leaves your machine. If you use Vibe Buddy's list of your own sessions, it needs the path, so turn that on yourself: add \"VIBE_SESSION_BEACON\": \"1\" to the env of the vibe server in your coding agent's MCP config (for Claude Code, the \"vibe\" entry under mcpServers in ~/.claude.json), then restart your sessions. With it on, the path goes only to your own session list, kept for an hour, readable only by you.",
+  "changelog": "A privacy fix. Until now, every 30 seconds an open session sent /vibe the full path of the folder you were working in and the folder's name, and the folder name was readable by anyone signed in. That has stopped: nothing about your folders, files or branch leaves your machine. One more thing stopped with it: when a session opened for someone who had not said what they were working on, /vibe sent the words \"something cool\" in their name. Now it says nothing for you unless you said it. If you use Vibe Buddy's list of your own sessions, it needs the path, so turn that on yourself: add \"VIBE_SESSION_BEACON\": \"1\" to the env of the vibe server in your coding agent's MCP config (for Claude Code, the \"vibe\" entry under mcpServers in ~/.claude.json), then restart your sessions. With it on, the path goes only to your own session list, kept for an hour, readable only by you.",
   "features": [
     "The heartbeat no longer sends your working folder's path or name. Nothing is taken from your repository",
+    "No more invented line: a session no longer sends \"something cool\" as what you are building. Only the line you set yourself is ever sent",
     "Buddy users: to keep the list of your own sessions, set VIBE_SESSION_BEACON=1 in the vibe server's env (~/.claude.json → mcpServers → vibe → env) and restart your sessions",
     "With that on, the folder path goes only to your own session list (one hour, only you can read it). The folder name is never published",
     "Not fixed by this update: folder names the service already stored from earlier versions. Clearing those is a server-side change"

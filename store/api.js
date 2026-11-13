@@ -253,19 +253,22 @@ async function registerSession(sessionId, handle, building = null, publicKey = n
       console.error(`[vibe] Registered @${handle} (legacy mode)`);
     }
 
-    // Also register user in users DB (for @seth welcome tracking)
-    // AIRC: Include public key for identity
-    try {
-      const userData = {
-        username: handle,
-        building: building || 'something cool'
-      };
-      if (publicKey) {
-        userData.publicKey = publicKey;
+    // The person's own line, to their profile, ONLY when they set one.
+    //
+    // This used to post `building: 'something cool'` whenever no line was given,
+    // which is every time a session opens: an invented sentence about a real
+    // person, sent in their name. Nothing is said for someone who said nothing.
+    const said = typeof building === 'string' ? building.trim() : '';
+    if (said) {
+      try {
+        const userData = { username: handle, building: said };
+        if (publicKey) {
+          userData.publicKey = publicKey;
+        }
+        await request('POST', '/api/users', userData, { auth: false });
+      } catch (e) {
+        // Non-fatal if the profile update fails
       }
-      await request('POST', '/api/users', userData, { auth: false });  // User registration doesn't need auth
-    } catch (e) {
-      // Non-fatal if user registration fails
     }
 
     return result;
