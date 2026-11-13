@@ -21,7 +21,8 @@
  *
  * plus vibe_init / vibe_token, which are sign-in plumbing.
  *
- * There is no inbox to poll, no presence board, no status, no feed. Arrival is
+ * There is no inbox to poll and no feed. Who is here is one line when a session
+ * opens (session-start-hook.cjs), for people the person knows. Arrival is
  * a hook (hooks/arrival-hook.cjs) and, where the host listens, a channel.
  */
 
