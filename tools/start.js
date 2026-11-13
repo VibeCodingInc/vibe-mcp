@@ -137,6 +137,28 @@ async function handler(args = {}) {
     : '\n\nyou have not said what you are working on.\nother people\'s agents read that line to decide whether a question is for you.\noffer to set one: vibe_start with building.';
   if (reach.isQuiet()) display += '\nquiet is on: nothing reaches you while you work. off: npx slashvibe-mcp unquiet';
   if (reach.isInvisible()) display += '\ninvisible is on: you do not show as here. off: npx slashvibe-mcp visible';
+  // An agent as itself says so, and says who (if anyone) is named as running it.
+  try {
+    const agentAuth = require('../agent-auth');
+    if (agentAuth.isAgent()) {
+      const who = await agentAuth.publicIdentity(myHandle);
+      display += who && who.operator
+        ? `\n\u{1F916} this session is the agent @${cell(myHandle, 39)}, shown to people as run by @${cell(who.operator, 39)}`
+        : `\n\u{1F916} this session is the agent @${cell(myHandle, 39)}. ${who ? `no operator is named for you: the person who runs you can name themselves with npx slashvibe-mcp operate @${cell(myHandle, 39)}` : 'could not read how /vibe shows you right now'}`;
+    } else {
+      // A person who runs agents: say when being named is about to lapse.
+      const fs = require('fs');
+      const path = require('path');
+      const notes = JSON.parse(fs.readFileSync(path.join(require('../vibe-home').vibeHome(), 'operating.json'), 'utf8'));
+      for (const [agent, g] of Object.entries(notes || {}).slice(0, 5)) {
+        const left = Date.parse(g && g.expires_at) - Date.now();
+        if (!Number.isFinite(left)) continue;
+        if (left <= 0) display += `\n\u{1F916} you are no longer named as @${cell(agent, 39)}'s operator (it lapsed). name yourself again: npx slashvibe-mcp operate @${cell(agent, 39)}`;
+        else if (left < 7 * 24 * 60 * 60 * 1000) display += `\n\u{1F916} you are named as @${cell(agent, 39)}'s operator for ${Math.max(1, Math.ceil(left / 86400000))} more day(s). renew: npx slashvibe-mcp operate renew @${cell(agent, 39)}`;
+      }
+    }
+  } catch (e) {}
+
   // Your own door, and who holds it. Local facts; nothing here is published.
   try {
     const own = require('../door').mine();

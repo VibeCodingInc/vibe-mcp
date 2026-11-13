@@ -34,6 +34,7 @@ const store = require('./store');
 const authStore = require('./auth-store');
 const actorSession = require('./actor-session');
 const arrival = require('./arrival');
+const agentAuth = require('./agent-auth');
 const pkg = require('./package.json');
 
 // ─── MCP protocol identity (spec 2026-07-28, dual-era) ──────────────────
@@ -111,6 +112,12 @@ const isAuthed = () => authStore.isAuthenticated();
 class VibeMCPServer {
   constructor() {
     authStore.hydrate();
+
+    // An agent as itself (agent-auth.js): its session comes from its own
+    // credential, not a browser. Started here, awaited by the first tool call.
+    this.agentReady = agentAuth.isAgent()
+      ? agentAuth.ensureSession().catch(() => ({ ok: false, message: 'This agent could not be signed in.' }))
+      : null;
 
     // Refresh the delivery credential once at startup so a dead token family
     // becomes one truthful re-sign-in state, not a failure at send time.
@@ -218,6 +225,20 @@ class VibeMCPServer {
         const tool = tools[params?.name];
         if (!tool) return fail(-32601, `Unknown tool: ${params?.name}`);
         const action = params.name.replace('vibe_', '');
+
+        // An agent signs in with its own credential and nothing else. The two
+        // sign-in tools belong to people: a browser the agent cannot use, and a
+        // pasted token that would let any message swap this agent's identity.
+        if (this.agentReady) {
+          const state = await this.agentReady;
+          const who = agentAuth.configured();
+          if (['vibe_init', 'vibe_token'].includes(params.name)) {
+            return ok({ content: [{ type: 'text', text: `This session is the agent @${who.handle}. It signs in with its agent credential; there is nothing to do here.${state && state.ok ? '' : ` ${agentAuth.scrub(state && state.message)}`}` }] });
+          }
+          if (!isAuthed()) {
+            return ok({ content: [{ type: 'text', text: `@${who.handle} is not signed in to /vibe. ${agentAuth.scrub((state && state.message) || '')}\nNothing was done. This is fixed by whoever runs this agent, not from inside the session.` }] });
+          }
+        }
 
         // The sign-in gate. The gated tool's arguments describe ITS job, not
         // the person signing in (a recipient is not an identity), so nothing

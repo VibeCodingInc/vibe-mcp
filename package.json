@@ -81,6 +81,7 @@
     "vibe-home.js",
     "door.js",
     "tools/visit.js",
-    "tools/bump.js"
+    "tools/bump.js",
+    "agent-auth.js"
   ]
 }

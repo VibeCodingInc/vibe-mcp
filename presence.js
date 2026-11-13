@@ -89,6 +89,10 @@ async function initSession() {
 
 async function register(sessionId, handle) {
   if (sessionInitialized) return;
+  // An agent's session is the one its credential minted (agent-auth.js).
+  // Registering here answers with a second token and saves it over the first,
+  // and that one carries no agent identity. The heartbeat alone says "here".
+  if (require('./agent-auth').isAgent()) { sessionInitialized = true; return; }
   const result = await store.registerSession(sessionId, handle);
   sessionInitialized = Boolean(result && result.success);
 }
