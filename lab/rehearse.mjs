@@ -49,7 +49,10 @@ function session(id, prompt, { allowSend = false } = {}) {
     // The open-line tools are always offered: the code decides whether they may send.
     'mcp__vibe__vibe_ask', 'mcp__vibe__vibe_answer'];
   if (allowSend) tools.push('mcp__vibe__vibe_send');
-  const child = spawn('claude', ['-p', prompt, '--mcp-config', id.mcp, '--strict-mcp-config', '--settings', id.settings,
+  const child = spawn('claude', ['-p', prompt, '--mcp-config', id.mcp, '--strict-mcp-config',
+    // Never load the operator's own user settings: their real /vibe arrival hook
+    // would run inside a lab session and claim a real message's one announcement.
+    '--setting-sources', 'project,local', '--settings', id.settings,
     '--allowedTools', ...tools, '--disallowedTools', 'Agent', 'WebSearch', '--output-format', 'stream-json', '--verbose'],
   { cwd: id.work, stdio: ['ignore', 'pipe', 'ignore'] });
   let out = '';

@@ -40,7 +40,7 @@ const API_BASE = 'https://www.slashvibe.dev';
 function printBanner() {
   console.log(`
 ${colors.green}  █░█ █ █▄▄ █▀▀${colors.reset}
-${colors.green}  ▀▄▀ █ █▄█ ██▄${colors.reset}   ${colors.dim}ask here · answer there${colors.reset}
+${colors.green}  ▀▄▀ █ █▄█ ██▄${colors.reset}   ${colors.dim}telepathic messaging, inside your coding agent${colors.reset}
   ──────────────────────────────────────────────────
 `);
 }
@@ -523,8 +523,6 @@ async function setup() {
     console.log(`${colors.dim}  1. Check your internet connection${colors.reset}`);
     console.log(`${colors.dim}  2. Try: ${colors.cyan}curl -s https://www.slashvibe.dev/api/health${colors.reset}`);
     console.log(`${colors.dim}  3. If that works, try setup again${colors.reset}`);
-    console.log('');
-    console.log(`${colors.dim}  Status page: ${colors.cyan}slashvibe.dev/status${colors.reset}`);
     process.exit(1);
   }
 
@@ -545,6 +543,10 @@ async function setup() {
     oauth = await beginOAuth({ actorAware: true });
     openBrowser(oauth.loginUrl);
     console.log(`${colors.dim}     → Waiting for authentication...${colors.reset}`);
+    // Always say where to go. The browser may have opened on a screen nobody is
+    // looking at (SSH), or not at all, and "waiting" with no link is a dead end.
+    console.log(`${colors.dim}     → If no browser opened, open this to sign in:${colors.reset}`);
+    console.log(`       ${colors.cyan}${oauth.loginUrl}${colors.reset}`);
 
     const authResult = await oauth.waitForCallback();
 
@@ -580,7 +582,8 @@ async function setup() {
 
     console.log(`${colors.bold}  Quick start:${colors.reset}`);
     console.log(`${colors.dim}  1. Restart your coding agent${detected.length > 1 ? `s (${detected.join(', ')})` : ''}${colors.reset}`);
-    console.log(`${colors.dim}  2. Say: "message @their-handle — ..." to someone you already know${colors.reset}`);
+    console.log(`${colors.dim}  2. Say: "what's waiting on /vibe" to see who has written to you${colors.reset}`);
+    console.log(`${colors.dim}     or: "message @their-handle: ..." to someone you already know${colors.reset}`);
     // Receiving is the product: a reply has to reach you while you work, not
     // when you remember to ask. So the hooks are installed here, by default,
     // for Claude Code — stated plainly, with the one command that removes them.
@@ -644,7 +647,7 @@ async function setup() {
     }
     if (oauth && err.message !== 'AUTH_TIMEOUT') await oauth.cancel();
     console.log('');
-    console.log(`${colors.dim}  Need help? slashvibe.dev/help${colors.reset}`);
+    console.log(`${colors.dim}  Need help? https://github.com/VibeCodingInc/vibe-mcp/issues${colors.reset}`);
     // On timeout the shared listener remains live during its grace window so a
     // late browser callback gets the explanatory page instead of a refusal.
     process.exitCode = 1;

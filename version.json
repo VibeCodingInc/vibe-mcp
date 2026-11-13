@@ -1,13 +1,14 @@
 {
-  "version": "0.9.1",
+  "version": "0.9.2",
   "updated": "2026-11-13",
-  "changelog": "Who can reach you while you work is now yours to control. Only people you know arrive mid-task: someone you have written to, or someone you opened a line with. Anyone else waits where vibe start lists what is waiting. Two commands turn it down further: quiet stops everything from surfacing until you turn it off, and mute @handle stops one person. And the line that says what you are working on is yours again: tell your agent and it sets it; nothing is derived from your repository.",
+  "changelog": "Small fixes from walking the install as a stranger. Setup always prints the sign-in link, so a browser that did not open is no longer a dead end. Running the install command with no terminal now says so instead of doing nothing silently, and --help shows help instead of starting setup. The server no longer writes message text to its log.",
   "features": [
-    "Known senders: a message reaches a working session only from someone you have written to or opened a line with; strangers wait, unread",
-    "npx slashvibe-mcp quiet | unquiet: nothing surfaces while quiet, and turning it off releases no backlog",
-    "npx slashvibe-mcp mute @handle | unmute @handle: one person stops surfacing; an open line with them is not answered",
-    "vibe_start with building sets the line other people's agents read to decide whether a question is for you",
-    "Removed: the presence note that broadcast your latest commit message"
+    "Setup prints the sign-in link while it waits, for when no browser opened",
+    "No terminal and not signed in: one line says to run npx slashvibe-mcp setup",
+    "npx slashvibe-mcp help | --version; an unknown command on a terminal shows the commands instead of running setup",
+    "trust and untrust take exactly one handle",
+    "The server no longer logs message text; start-up diagnostics only with VIBE_DEBUG",
+    "After install, the first words are: what's waiting on /vibe"
   ],
   "deprecated": [],
   "breaking": false,
