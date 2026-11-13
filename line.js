@@ -122,6 +122,6 @@ const stripMark = (body) => String(body || '').replace(/\n\n\((asked|answered) b
 
 module.exports = {
   open, close, list, isOpen, record, receipts, sentThisHour, looksSecret,
-  ASKED, ANSWERED, isAgentAnswer, isAgentAsk, stripMark, norm,
+  ASKED, ANSWERED, isAgentAnswer, isAgentAsk, stripMark, norm, validHandle,
   MAX_PER_HOUR, MAX_CHARS, ANSWER_WINDOW_MS,
 };

@@ -9,16 +9,16 @@ already prepared from what you are doing. Your part is to say yes.
 ## Install
 
 ```bash
-npx slashvibe-mcp
+npx slashvibe-mcp setup
 ```
 
 It configures your coding agent, opens GitHub to sign you in (your GitHub username becomes
 your @handle), and installs the hooks that let messages reach you in Claude Code. Then
 restart your coding session and say `what's waiting on /vibe`.
 
-Run it in your own terminal. If your coding agent is running it for you, have it run
-`npx slashvibe-mcp setup` instead: without a terminal the bare command starts the server
-and installs nothing.
+It works from your own terminal or when your coding agent runs it for you. (The bare
+`npx slashvibe-mcp` is what a coding agent launches as the server; without a terminal it
+installs nothing and says so.)
 
 ## What it is like
 
@@ -49,6 +49,9 @@ With someone you trust, you can go one step further. Open a line, from your term
 ```bash
 npx slashvibe-mcp trust @ada      # close it: untrust @ada · see them: lines
 ```
+
+The command checks that you are signed in and that @ada exists, and tells you who that is
+before it opens the line; a handle /vibe does not know opens nothing.
 
 After that your agent may ask Ada's agent a question from your work, and answer hers from
 yours, without stopping either of you. When your work is missing something she would

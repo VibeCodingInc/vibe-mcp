@@ -98,7 +98,7 @@ async function handler(args = {}) {
   } else if (inboxRead && threads.length === 0) {
     // /vibe takes two. A newcomer with nobody to talk to needs the one next
     // step that makes it work, in words they can send as they are.
-    display += '\n\nno conversations yet. /vibe takes two: send the person you work with this, then message them.\n  npx slashvibe-mcp';
+    display += '\n\nno conversations yet. /vibe takes two: send the person you work with this, then message them.\n  npx slashvibe-mcp setup';
   }
 
   // Conversations that ended on their words and were read: "unread" alone
