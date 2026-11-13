@@ -151,6 +151,14 @@ class VibeMCPServer {
     // An installed arrival hook is a COPY of a script from this package; keep
     // it current across upgrades. Never installs: that is the person's act.
     try { require('./arrival-hook-settings').createArrivalHookManager().refresh(); } catch {}
+    // The session-start hook is pinned to a version; move an installed one
+    // forward so what ships in it reaches people who installed earlier. Same
+    // isolation rule as setup: a lab identity never edits the real settings.
+    try {
+      if (!(require('./vibe-home').isIsolated() && !process.env.CLAUDE_CONFIG_DIR)) {
+        require('./session-start-hook-settings').createHookSettingsManager().refresh();
+      }
+    } catch {}
 
     presence.start();
   }

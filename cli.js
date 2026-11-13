@@ -18,6 +18,7 @@ const COMMANDS = ['setup', 'hook', 'trust', 'untrust', 'lines', 'quiet', 'unquie
 const USAGE = `slashvibe-mcp: telepathic messaging, inside your coding agent
 
   npx slashvibe-mcp setup              install: configure your coding agent and sign in with GitHub
+  npx slashvibe-mcp setup --from @them same, and the person who invited you is known from the start
   npx slashvibe-mcp hook status        are the Claude Code hooks installed (also: install, uninstall)
   npx slashvibe-mcp trust @handle      open a line with someone you trust (close: untrust @handle)
   npx slashvibe-mcp lines              who you have an open line with
