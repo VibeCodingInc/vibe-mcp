@@ -1,11 +1,12 @@
 {
-  "version": "0.9.11",
+  "version": "0.9.12",
   "updated": "2026-11-13",
-  "changelog": "When your agent answers someone over an open line, you are now shown exactly what it said, by /vibe itself, the moment it answers. Before, that was left to the agent to mention, and in rehearsals it forgot most of the time.",
+  "changelog": "The bump is dependable. When you say you are stuck, your agent now reliably checks whether someone you know is here working on the same thing. Before, if you pasted the problem straight into the prompt, it usually just answered and never looked.",
   "features": [
-    "After an open-line answer you see one line: /vibe · your agent answered @them over your open line: \"...\"",
-    "It is shown once, to you only, and cannot itself be answered",
-    "Nothing else about the open line changes: both people still have to open it, and it still refuses credentials"
+    "Say you are stuck (\"I'm stuck\", \"going in circles\") and the agent is quietly reminded, once per session, that it can look for someone near",
+    "You still get help with the problem first",
+    "It only ever names people you know, nothing is sent, and nothing leaves your machine to make this work",
+    "Quiet turns it off with everything else"
   ],
   "deprecated": [],
   "breaking": false,

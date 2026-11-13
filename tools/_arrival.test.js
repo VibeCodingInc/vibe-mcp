@@ -207,3 +207,63 @@ test('channel push is off unless the person says their sessions listen', () => {
   assert.deepEqual(on.capabilities.experimental, { 'claude/channel': {} });
   assert.match(on.instructions, /<channel source="vibe"/);
 });
+
+// ── the bump, made dependable (stuckNudge in the hook) ──────────────────────
+
+function promptHook(dir, prompt, session = 'sess_a', event = 'UserPromptSubmit') {
+  const out = spawnSync(process.execPath, [HOOK], {
+    input: JSON.stringify({ hook_event_name: event, session_id: session, prompt }),
+    env: { PATH: process.env.PATH, VIBE_ARRIVALS_DIR: dir }, encoding: 'utf8',
+  });
+  return JSON.parse(out.stdout);
+}
+
+test('when the person says they are stuck, the agent is reminded of the bump: once per session, and never to the person', () => {
+  const dir = path.join(home(), 'arrivals');
+  const first = promptHook(dir, 'I have been stuck on the backoff question all morning and I keep going in circles.');
+  assert.match(first.hookSpecificOutput.additionalContext, /said, in their own words, that they are stuck/);
+  assert.match(first.hookSpecificOutput.additionalContext, /call vibe_bump once/);
+  assert.match(first.hookSpecificOutput.additionalContext, /Help with the problem first/);
+  assert.equal(first.systemMessage, undefined, 'the reminder is for the agent; nothing is shown to the person');
+  assert.equal(first.suppressOutput, true);
+  // Their words are not copied into the note, and no person is named in it.
+  assert.ok(!/backoff|morning|@/.test(first.hookSpecificOutput.additionalContext));
+  // Once per session.
+  assert.deepEqual(promptHook(dir, 'still stuck'), { suppressOutput: true });
+  // Another session gets its own.
+  assert.match(promptHook(dir, "I'm blocked on the migration", 'sess_b').hookSpecificOutput.additionalContext, /vibe_bump/);
+});
+
+test('ordinary prompts, tool calls, quiet, and odd input get no reminder', () => {
+  const root = home();
+  const dir = path.join(root, 'arrivals');
+  // Said plainly, in the first person, in several ways: each one counts.
+  ["I'm stuck", 'i have been stuck on this for hours', 'stuck on the lease length, any ideas?', 'we are stuck', 'I keep going round in circles', "I can't figure this out", 'still stuck'].forEach((said, n) => {
+    assert.match(promptHook(dir, said, `yes_${n}`).hookSpecificOutput?.additionalContext || '', /vibe_bump/, said);
+  });
+  for (const said of ['add a test for the parser', 'the stuck-detection regex needs a unit', 'why does the queue get stuck?', '', 'unstuck now, thanks', 'x'.repeat(5000) + " I'm stuck"]) {
+    assert.deepEqual(promptHook(dir, said, `s_${said.length}`), { suppressOutput: true }, JSON.stringify(said.slice(0, 30)));
+  }
+  assert.deepEqual(promptHook(dir, 'I am stuck', 'tool', 'PostToolUse'), { suppressOutput: true });
+  assert.deepEqual(promptHook(dir, 'I am stuck', ''), { suppressOutput: true }, 'no session id, no once-per-session, so no reminder');
+  // A hostile session id cannot name a path: only its safe characters are used, and
+  // the one file written lands inside the spool.
+  promptHook(dir, 'I am stuck', '../../etc/x');
+  assert.ok(fs.existsSync(path.join(dir, 'stuck-etcx.shown')));
+  assert.deepEqual(fs.readdirSync(root).sort(), ['arrivals'], 'something was written outside the spool');
+  // Quiet turns it off with everything else.
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(root, 'reach.json'), JSON.stringify({ quiet: true }));
+  assert.deepEqual(promptHook(dir, 'I am stuck on this', 'quiet_one'), { suppressOutput: true });
+});
+
+test('a reminder rides along with an arrival instead of replacing it', () => {
+  const env = { ...process.env, VIBE_HOME: home() };
+  const arrival = require('../arrival');
+  const rows = arrival.record([thread()], 'seth', { since: now - 60_000, env });
+  assert.equal(rows.length, 1);
+  const out = promptHook(arrival.spoolDir(env), 'I am stuck on the lease length', 'both');
+  assert.match(out.systemMessage, /wrote you/);
+  assert.match(out.hookSpecificOutput.additionalContext, /just wrote to the person/);
+  assert.match(out.hookSpecificOutput.additionalContext, /vibe_bump/);
+});
