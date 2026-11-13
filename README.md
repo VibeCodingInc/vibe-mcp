@@ -42,6 +42,33 @@ was marked read, until you chose.
 session, picks the person it is for, writes it, and shows you the exact message. Send,
 Edit or Cancel. Or just say it: `message @sam: ship it`.
 
+## A door
+
+Not everything is a message. If you are building something people can open, leave a door:
+
+```bash
+npx slashvibe-mcp door https://your-project.dev "Retry Lab: drag the slider"
+npx slashvibe-mcp door share       # leave it with the people you know · take it down: door close
+```
+
+Now the people you left it with see it beside your name, and any of them can say
+`visit @you`:
+
+```
+🚪 Visiting @sam: "Retry Lab: drag the slider, watch 10,000 webhooks back off"
+   sam-retries.vercel.app · opened in your browser
+   @sam is here now, working on: "retry queue for webhook delivery"
+
+You are a visitor. Nothing was sent, and @sam was not told.
+Say something to @sam · or just look around
+```
+
+- A door is not published. It goes, as one message each, only to people you have already
+  written to or opened a line with. Anyone else has nothing to see.
+- Only you can set or share your door, from your terminal. No tool can.
+- Public https links only. A visit opens the link in the visitor's own browser; /vibe never
+  fetches it, and you are not told who came.
+
 ## An open line
 
 With someone you trust, you can go one step further. Open a line, from your terminal:
@@ -90,7 +117,7 @@ the scheduler lease") and it sets it; nothing is taken from your repository.
 
 ## The whole surface
 
-Eight tools, for the agent (plus `vibe_init` and `vibe_token`, which only handle sign-in):
+Nine tools, for the agent (plus `vibe_init` and `vibe_token`, which only handle sign-in):
 
 | tool | what it does |
 |---|---|
@@ -102,6 +129,7 @@ Eight tools, for the agent (plus `vibe_init` and `vibe_token`, which only handle
 | `vibe_discard` | cancel a draft |
 | `vibe_ask` | ask a person's agent, over an open line, and wait for the answer |
 | `vibe_answer` | answer a person's agent, over an open line |
+| `vibe_visit` | walk through a door someone left you: opens what they are building |
 
 There is no inbox to check, no buddy list, no status, no feed.
 

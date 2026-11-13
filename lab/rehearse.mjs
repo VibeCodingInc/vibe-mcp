@@ -41,13 +41,29 @@ function identity(root, handle, says, stubUrl, trusts = [], knows = []) {
   const settings = path.join(root, handle, 'settings.json');
   const { createArrivalHookManager } = require(path.join(REPO, 'arrival-hook-settings.js'));
   createArrivalHookManager({ env: { ...process.env, VIBE_HOME: home }, settingsPath: settings }).install();
-  return { handle, home, work, mcp, settings, token: jwt(handle) };
+  return { handle, home, work, mcp, settings, token: jwt(handle), api: stubUrl };
+}
+
+// A person typing a /vibe command in their terminal, as this identity. Async:
+// the stub lives in this process and a synchronous child would starve it.
+function cli(id, args) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [path.join(REPO, 'cli.js'), ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { PATH: process.env.PATH, HOME: path.dirname(id.home), VIBE_HOME: id.home, VIBE_API_URL: id.api, CI: '1', VIBE_SETUP_NO_AUTORUN: '1' },
+    });
+    let out = ''; let err = '';
+    child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { err += d; });
+    child.on('close', (code) => resolve({ code, out, err, typed: `npx slashvibe-mcp ${args.join(' ')}` }));
+  });
 }
 
 function session(id, prompt, { allowSend = false } = {}) {
   const tools = ['Read', 'Edit', 'Write', 'Bash(sleep:*)', 'mcp__vibe__vibe_people', 'mcp__vibe__vibe_thread', 'mcp__vibe__vibe_prepare', 'mcp__vibe__vibe_discard', 'mcp__vibe__vibe_start',
     // The open-line tools are always offered: the code decides whether they may send.
-    'mcp__vibe__vibe_ask', 'mcp__vibe__vibe_answer'];
+    'mcp__vibe__vibe_ask', 'mcp__vibe__vibe_answer',
+    // Visiting a door opens nothing here (CI=1) and sends nothing.
+    'mcp__vibe__vibe_visit'];
   if (allowSend) tools.push('mcp__vibe__vibe_send');
   const child = spawn('claude', ['-p', prompt, '--mcp-config', id.mcp, '--strict-mcp-config',
     // Never load the operator's own user settings: their real /vibe arrival hook
@@ -58,13 +74,19 @@ function session(id, prompt, { allowSend = false } = {}) {
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
   const done = new Promise((resolve) => child.on('close', () => {
-    const t = { shown: [], tools: [], final: '', texts: [] };
+    const t = { shown: [], tools: [], final: '', texts: [], returned: [] };
     for (const line of out.split('\n')) {
       let e; try { e = JSON.parse(line); } catch { continue; }
       if (e.type === 'system' && e.subtype === 'informational' && String(e.content).includes('/vibe')) t.shown.push(String(e.content));
       if (e.type === 'assistant') for (const c of e.message.content || []) {
         if (c.type === 'tool_use' && c.name.includes('vibe')) t.tools.push({ name: c.name.replace('mcp__vibe__', ''), input: c.input });
         if (c.type === 'text') t.texts.push(c.text);
+      }
+      // What the /vibe tools printed back: the terminal a person would see.
+      if (e.type === 'user') for (const c of e.message?.content || []) {
+        if (c.type !== 'tool_result') continue;
+        const x = Array.isArray(c.content) ? c.content.map((y) => y.text || '').join('\n') : String(c.content || '');
+        if (/\/vibe|@[a-z]|door/i.test(x) && !/^total \d/.test(x)) t.returned.push(x);
       }
       if (e.type === 'result') t.final = e.result || '';
     }
@@ -83,7 +105,7 @@ async function run(name) {
     ids[h] = identity(root, h, p.says, stub.url, p.trusts || [], p.knows || []);
     for (const [file, text] of Object.entries(p.files || {})) fs.writeFileSync(path.join(ids[h].work, file), text);
   }
-  const lab = { stub, ids, sleep, session: (h, prompt, o) => session(ids[h], prompt, o), read: (h, f) => fs.readFileSync(path.join(ids[h].work, f), 'utf8') };
+  const lab = { stub, ids, sleep, cli: (h, args) => cli(ids[h], args), session: (h, prompt, o) => session(ids[h], prompt, o), read: (h, f) => fs.readFileSync(path.join(ids[h].work, f), 'utf8') };
   const started = Date.now();
   let result; let failed = [];
   try {
@@ -91,10 +113,12 @@ async function run(name) {
     failed = (sc.checks(result, lab) || []).filter((c) => !c.ok);
     const sends = stub.effects.filter((e) => e.effect === 'SEND');
     console.log(`\n# ${name}: ${sc.title}\n`);
+    for (const c of result.terminal || []) console.log(`$ ${c.typed}\n${(c.out + c.err).trimEnd()}\n[exit ${c.code}]\n`);
     for (const [who, t] of Object.entries(result.sessions || {})) {
       console.log(`## @${who}'s session`);
       for (const s of t.shown) console.log(`shown to the person: ${s}`);
       for (const c of t.tools) console.log(`tool: ${c.name} ${JSON.stringify(c.input).slice(0, 700)}`);
+      for (const r of t.returned) console.log(`\n/vibe printed:\n${r}`);
       console.log(`\nfinal message:\n${t.final}\n`);
     }
     console.log('## the wire');

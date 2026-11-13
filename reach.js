@@ -69,4 +69,7 @@ function know(h, env = process.env) {
   try { update((s) => { s.known[n] = Date.now(); }, env); } catch {}
 }
 
-module.exports = { isQuiet, setQuiet, isMuted, mute, unmute, muted, isKnown, know, norm };
+/** Everyone you have written to from this machine. */
+const known = (env = process.env) => Object.keys(read(env).known).filter(validHandle).sort();
+
+module.exports = { isQuiet, setQuiet, isMuted, mute, unmute, muted, isKnown, know, known, norm };
