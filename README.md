@@ -27,6 +27,10 @@ write reaches you while you work. It sends nothing and opens no line; `npx slash
 @them` undoes it. When setup finishes it prints the same line with your handle, for the person
 you build with. /vibe takes two.
 
+Upgrading moves your /vibe session-start line in `~/.claude/settings.json` to the new
+version, so fixes reach you without running setup again. Nothing else in your settings
+changes, and if you removed the line it is not put back.
+
 Your sign-in lasts 30 days. From a week before it ends, the first line of a new session says
 so, with the one command that renews it (the same `setup`; your people and lines are kept).
 
