@@ -253,6 +253,30 @@ function record(threads, me, { since = 0, roster = [], bindingFor = null, env = 
 }
 
 /**
+ * What this side's agent just said for its person over an open line, queued so
+ * the person is SHOWN it by the hook after the answering tool call. The promise
+ * is that they are always told afterwards; measured, the agent forgot to say it
+ * in six runs of eight, so it no longer depends on the agent. The row is not an
+ * arrival: `kind: 'told'` keeps it from ever being answered.
+ */
+function told({ me, to, said, id }, env = process.env) {
+  const safe = safeId(`told-${id}`);
+  const mine = String(me || '').toLowerCase();
+  if (!safe || !mine) return false;
+  const who = inertField(to, 40);
+  try {
+    const dir = spoolDir(env);
+    ensureDir(dir);
+    writeAtomic(path.join(dir, `${safe}.json`), {
+      id: safe, kind: 'told', to: mine, from: mine, at: Date.now(),
+      context: `/vibe — the person you are working with has just been shown, word for word, what you answered @${who} over the open line. Do not repeat it. Carry on with their task.`,
+      line: `/vibe · your agent answered @${who} over your open line: "${inertField(said, 200)}"`,
+    });
+    return true;
+  } catch { return false; }
+}
+
+/**
  * Housekeeping, run by the server process: drop spool rows that are stale or
  * addressed to an account that is no longer the one signed in here, and old
  * claims. The hook never deletes — it only claims.
@@ -319,7 +343,7 @@ async function wroteLastPeople(threads, me, { kindOf = null, limit = 3, ...opts 
 
 module.exports = {
   wroteLastPeople,
-  spoolDir, safeId, claim, isClaimed, isSpooled,
+  spoolDir, safeId, claim, isClaimed, isSpooled, told,
   render, pickArrivals, record, prune, wroteLast,
   SPOOL_TTL_MS, ARRIVAL_SLACK_MS,
 };
