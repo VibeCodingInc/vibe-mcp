@@ -1,12 +1,14 @@
 {
   "version": "0.9.14",
   "updated": "2026-11-13",
-  "changelog": "When you say you are stuck, you are shown who you know is here, whether or not your agent thinks to look. 0.9.12 reminded the agent; this is the part that does not depend on it. If the agent has not looked within about a minute, /vibe itself shows you one line.",
+  "changelog": "Two things, because 0.9.13 was never published on its own. The first minute: the person who invited you is known from the start, setup ends with one line to send to the person you build with, and your sign-in no longer ends silently. And when you say you are stuck, you are shown who you know is here, whether or not your agent thinks to look.",
   "features": [
-    "Say you are stuck and, if someone you know is in a session, you see: /vibe · you said you were stuck · someone you know is here now: @them (what they are working on)",
-    "Shown once, only in the session where you said it, and only people you know: never a stranger, an agent, or someone you muted",
-    "If your agent already looked for someone, nothing extra is shown",
-    "One read of who is here, only when you said you were stuck. What you are stuck on is never read or sent. Quiet turns it off"
+    "npx slashvibe-mcp setup --from @them: your inviter is known from the start. Nothing is sent, no line is opened, and mute undoes it",
+    "Setup's last screen prints that line with your handle, for the person you build with",
+    "Your sign-in lasts 30 days: from 7 days out, a new session says how long is left and how to renew; if it has ended, it says that instead of going quiet",
+    "Say you are stuck and, if someone you know is in a session, you see one line naming them. Shown once, only where you said it, only people you know. If your agent already looked, nothing extra is shown",
+    "Upgrading moves your /vibe session-start line in ~/.claude/settings.json to the new version, so fixes reach people who installed earlier. Nothing else in your settings changes. It only moves forward, and it never adds the line back if you removed it",
+    "One read of who is here, only when you said you were stuck. What you are stuck on is never read or sent. Quiet turns all of it off"
   ],
   "deprecated": [],
   "breaking": false,
