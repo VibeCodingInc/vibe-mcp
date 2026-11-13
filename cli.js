@@ -27,6 +27,54 @@ const USAGE = `slashvibe-mcp: telepathic messaging, inside your coding agent
 With no command it sets up on first run in a terminal; a coding agent starts it as an MCP server.
 https://github.com/VibeCodingInc/vibe-mcp#readme`;
 
+/**
+ * `trust @handle`: open a line, but only with a person who is really there.
+ *
+ * Refuses, in order and before anything is written: a malformed handle; a
+ * person who is not signed in (a line is between two identities); their own
+ * handle; a handle /vibe does not know; and any failure to find out (fail
+ * closed: "could not check" never opens a line). Then says who it is, in
+ * words built here from allow-listed fields, never the server's raw text.
+ */
+async function trust(typed, line, say) {
+  const h = line.norm(typed);
+  if (!line.validHandle(h)) throw new Error(`"${typed}" is not a handle. A handle looks like @sam: letters, digits, - and _.`);
+
+  const config = require('./config');
+  const authStore = require('./auth-store');
+  const cred = authStore.inspectToken(config.getAuthToken());
+  if (!cred.ok) throw new Error('Sign in first: npx slashvibe-mcp setup');
+  if (String(cred.handle || '').toLowerCase() === h) throw new Error(`@${h} is you.`);
+
+  const base = String(config.getApiUrl ? config.getApiUrl() : (process.env.VIBE_API_URL || 'https://www.slashvibe.dev')).replace(/\/+$/, '');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  let status; let who = null;
+  try {
+    const response = await fetch(`${base}/api/identity/${encodeURIComponent(h)}`, { signal: controller.signal, headers: { Accept: 'application/json' } });
+    status = response.status;
+    if (response.ok) who = await response.json().catch(() => null);
+  } catch {
+    throw new Error(`Could not reach /vibe to check that @${h} exists. Try again in a moment.`);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (status === 404) throw new Error(`There is no @${h} on /vibe. Check the spelling with the person.`);
+  if (status !== 200 || !who || String(who.handle || '').toLowerCase() !== h) {
+    throw new Error(`Could not confirm that @${h} exists (the check did not answer clearly). Try again in a moment.`);
+  }
+
+  const since = Number.isFinite(Date.parse(who.since)) ? new Date(who.since).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }) : null;
+  const operator = typeof who.operator === 'string' && line.validHandle(line.norm(who.operator)) ? line.norm(who.operator) : null;
+  const what = who.kind === 'agent' ? `an agent${operator ? ` run by @${operator}` : ''}` : who.kind === 'human' ? 'a person' : 'an account';
+  say(`@${h} is ${what} on /vibe${since ? `, since ${since}` : ''}.`);
+
+  line.open(h);
+  say(`Open line with @${h}.`);
+  say(`Your agent may now ask @${h}'s agent a question from your work, and answer theirs from yours, without stopping you. It is told to give information about the work only; the code caps it at ${line.MAX_PER_HOUR} messages an hour, refuses anything shaped like a credential, and marks each message as your agent's, unread by you. You are told what was said. It works both ways only if @${h} opens one with you.`);
+  say(`Close it: npx slashvibe-mcp untrust @${h}`);
+}
+
 if (['help', '--help', '-h'].includes(args[0])) {
   process.stdout.write(`${USAGE}\n`);
 } else if (['--version', '-v', 'version'].includes(args[0])) {
@@ -60,10 +108,12 @@ if (['help', '--help', '-h'].includes(args[0])) {
       // open a line with whoever the first word happens to name.
       throw new Error(`One handle at a time: npx slashvibe-mcp ${args[0]} @handle`);
     } else if (args[0] === 'trust' && args[1]) {
-      const h = line.open(args[1]);
-      say(`Open line with @${h}.`);
-      say(`Your agent may now ask @${h}'s agent a question from your work, and answer theirs from yours, without stopping you. It is told to give information about the work only; the code caps it at ${line.MAX_PER_HOUR} messages an hour, refuses anything shaped like a credential, and marks each message as your agent's, unread by you. You are told what was said. It works both ways only if @${h} opens one with you.`);
-      say(`Close it: npx slashvibe-mcp untrust @${h}`);
+      // Opening a line is a grant to a specific person, so it is checked like
+      // one: a typo must not hand the line to whoever owns the misspelling.
+      trust(args[1], line, say).catch((error) => {
+        process.stderr.write(`${error?.message || error}\nNo line was opened.\n`);
+        process.exitCode = 1;
+      });
     } else if (args[0] === 'untrust' && args[1]) {
       say(line.close(args[1]) ? `Closed the line with @${line.norm(args[1])}.` : `There was no open line with @${line.norm(args[1])}.`);
     } else {
