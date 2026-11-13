@@ -115,6 +115,20 @@ npx slashvibe-mcp mute @handle     # one person stops surfacing: unmute @handle
 The line that says what you are working on is yours. Tell your agent ("say I'm working on
 the scheduler lease") and it sets it; nothing is taken from your repository.
 
+That includes where you are working. While a session is open it tells /vibe that you are
+here, which coding agent you are in, and the line you set. It does not send your folder
+path, folder name, file names or branch. One exception you turn on yourself: if you use
+Vibe Buddy's list of your own sessions, set `VIBE_SESSION_BEACON=1` in the vibe server's
+`env`; your sessions then send their folder path, kept for an hour where only you can
+read it. For Claude Code that is `~/.claude.json`:
+
+```json
+"vibe": { "command": "npx", "args": ["-y", "slashvibe-mcp@latest"],
+          "env": { "VIBE_API_URL": "https://www.slashvibe.dev", "VIBE_SESSION_BEACON": "1" } }
+```
+
+Then restart your sessions.
+
 ## The whole surface
 
 Nine tools, for the agent (plus `vibe_init` and `vibe_token`, which only handle sign-in):

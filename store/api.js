@@ -253,19 +253,22 @@ async function registerSession(sessionId, handle, building = null, publicKey = n
       console.error(`[vibe] Registered @${handle} (legacy mode)`);
     }
 
-    // Also register user in users DB (for @seth welcome tracking)
-    // AIRC: Include public key for identity
-    try {
-      const userData = {
-        username: handle,
-        building: building || 'something cool'
-      };
-      if (publicKey) {
-        userData.publicKey = publicKey;
+    // The person's own line, to their profile, ONLY when they set one.
+    //
+    // This used to post `building: 'something cool'` whenever no line was given,
+    // which is every time a session opens: an invented sentence about a real
+    // person, sent in their name. Nothing is said for someone who said nothing.
+    const said = typeof building === 'string' ? building.trim() : '';
+    if (said) {
+      try {
+        const userData = { username: handle, building: said };
+        if (publicKey) {
+          userData.publicKey = publicKey;
+        }
+        await request('POST', '/api/users', userData, { auth: false });
+      } catch (e) {
+        // Non-fatal if the profile update fails
       }
-      await request('POST', '/api/users', userData, { auth: false });  // User registration doesn't need auth
-    } catch (e) {
-      // Non-fatal if user registration fails
     }
 
     return result;
@@ -279,11 +282,18 @@ async function heartbeat(handle, one_liner, context = null) {
   try {
     const endpoint = USE_V2_PRESENCE ? '/api/v2/presence' : '/api/presence';
 
-    // Always include cwd + sessionId so the server can record a per-session beacon
-    // for the "My Sessions" feature.  path.basename is CJS-safe here.
-    const cwd = process.cwd();
-    const project = require('path').basename(cwd);
+    // NOTHING FROM THE WORKING DIRECTORY LEAVES BY DEFAULT.
+    //
+    // Until 0.9.5 every heartbeat (one every 30 seconds) carried the full
+    // working directory path and its folder name. The platform kept the path
+    // for an hour where only its owner could read it (Buddy's "My Sessions"),
+    // and stored the folder name on the presence row, which it serves to
+    // every signed-in person. The README said nothing is taken from your
+    // repository. Now that is true: the folder name is never sent, and the
+    // path is sent only when the person asked for it, for their own session
+    // list (VIBE_SESSION_BEACON=1 in the server's env).
     const sessionId = config.getSessionId();
+    const sessionBeacon = ['1', 'true'].includes(String(process.env.VIBE_SESSION_BEACON || '').toLowerCase());
 
     // Which coding agent hosts this session (claude-code / codex / cursor / …)
     // — from the MCP initialize handshake, env fingerprint fallback. Persisted
@@ -298,10 +308,12 @@ async function heartbeat(handle, one_liner, context = null) {
       clientName: host.agent,
       ...(host.version ? { clientVersion: host.version } : {}),
       ttl_seconds: 120,
-      // Session beacon fields — always sent so server can track live sessions
-      cwd,
-      project,
       sessionId,
+      // The person's own session list, only when they turned it on. The
+      // platform derives the list's label from the path and keeps both where
+      // only the owner can read them; `project` is deliberately never sent,
+      // because that field is what lands on the presence row others can see.
+      ...(sessionBeacon ? { cwd: process.cwd() } : {}),
     };
 
     // Fallback: if no token, send username (legacy support)
@@ -314,15 +326,16 @@ async function heartbeat(handle, one_liner, context = null) {
       if (USE_V2_PRESENCE) {
         // v2: flat structure
         if (context.mood) payload.mood = context.mood;
-        if (context.file) payload.file = context.file;
-        if (context.project) payload.project = context.project || project;
+        // `file` and `project` used to ride here. Nothing derived from the
+        // working directory is sent as presence; see the note above.
         if (context.awayMessage) payload.awayMessage = context.awayMessage;
         if (context.sessionId) payload.sessionId = context.sessionId || sessionId;
         if (context.availableFor !== undefined) payload.availableFor = context.availableFor;
         if (context.model) payload.model = context.model;
       } else {
-        // v1: nested context
-        payload.context = context;
+        // v1: nested context, minus anything derived from the working directory
+        const { file: _file, project: _project, ...rest } = context;
+        payload.context = rest;
       }
     }
 
