@@ -1,11 +1,15 @@
 {
-  "version": "0.9.3",
+  "version": "0.9.4",
   "updated": "2026-11-13",
-  "changelog": "Opening a line is now checked like the grant it is. trust @handle needs you signed in, refuses a handle that is malformed or that /vibe does not know, and tells you who it is before the line opens, so a typo can no longer open a line with someone else. And the install line is npx slashvibe-mcp setup, which works from a terminal or when your agent runs it for you.",
+  "changelog": "Doors. Leave a link to the thing you are building with the people you know, and any of them can say \"visit @you\" and step in. It is the first thing in /vibe that is not a message: somewhere to go. A door is never published; it goes only to people you have already written to or opened a line with. Good to know: you are not told who visits (no visit count yet); door share with no name tells everyone you know; and Buddy and the iOS app show a door as a plain message for now.",
   "features": [
-    "trust @handle: requires sign-in, refuses a handle /vibe does not know, and names who it is (a person or an agent, and since when) before the line opens",
-    "trust opens nothing when the check cannot be made: no network, or an unclear answer",
-    "Install with npx slashvibe-mcp setup; it works with or without a terminal"
+    "npx slashvibe-mcp door https://your-project.dev \"what it is\": leave a door. Setting it tells nobody",
+    "door share: leaves it with everyone you know, up to 20 at a time. door share @handle: one person. It refuses anyone you have not written to",
+    "visit @handle: opens their door in your browser. Nothing is sent and they are not told",
+    "A door shows beside its owner in who's here, and one left for you mid-task is announced by name, never opened for you",
+    "door close: takes it down and tells the people who held it",
+    "Public https links only. Only you can set or share your door, from your terminal; no tool can",
+    "Not yet: a count of visits for the owner; doors in Buddy and iOS (they show the card as a plain message)"
   ],
   "deprecated": [],
   "breaking": false,
