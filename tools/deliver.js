@@ -51,9 +51,18 @@ async function deliver(m) {
     replyTo: m.replyTo || null,
     idempotencyKey: typeof m.idempotencyKey === 'string' && m.idempotencyKey ? m.idempotencyKey : undefined,
     approvedSha256: typeof m.approvedSha256 === 'string' && m.approvedSha256 ? m.approvedSha256 : undefined,
-    // 'composed': the person wrote it. 'context_move': their agent prepared it
-    // from the active session and the person chose Send.
-    origin: m.origin || 'composed',
+    // WHO DECIDED TO SEND, said truthfully. This is the one place every message
+    // passes, so it is the one place that decides:
+    //   'agent_self'    this session IS an agent, signed in as itself. No person
+    //                   chose Send, whichever tool path the message took.
+    //   'agent_line'    a person's agent sent it over an open line, unread by them
+    //                   (set by tools/line.js).
+    //   'context_move'  the agent prepared it and the person chose Send.
+    //   'composed'      the person's own words.
+    // Until the service accepts the two agent values it drops them to "unlabelled",
+    // which is still true. The old behaviour recorded them as 'composed', which the
+    // service defines as "a human wrote it".
+    origin: require('../agent-auth').isAgent() ? 'agent_self' : (m.origin || 'composed'),
   });
 
   // A falsy result is a failure too: nothing may read as delivery without a receipt.

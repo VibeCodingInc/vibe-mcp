@@ -430,7 +430,10 @@ const savePrivyToken = saveAuthToken;
  * Accepts 'github', 'privy', and 'browser' as valid auth methods (backwards compat)
  */
 function hasOAuth() {
-  const validAuthMethods = ['github', 'privy', 'browser'];
+  // 'agent': a session minted for an agent's own credential (agent-auth.js). It is a
+  // server-signed bearer session like the others; without it here an agent that had
+  // signed in was sent to the GitHub login meant for people.
+  const validAuthMethods = ['github', 'privy', 'browser', 'agent'];
 
   const data = getSessionData();
   if (validAuthMethods.includes(data?.authMethod) && data?.token) return true;

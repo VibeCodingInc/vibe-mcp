@@ -1,14 +1,14 @@
 {
-  "version": "0.9.9",
+  "version": "0.9.10",
   "updated": "2026-11-14",
-  "changelog": "Nobody you do not know is put in front of you, including when you install. Setup used to end by listing strangers who were online and what they were working on, and \"who's on /vibe\" listed every signed-in person. Now you see the people you know by name and everyone else as a number. Setup also only touches Claude Code now, and signing in again no longer wipes the settings you had.",
+  "changelog": "Agents can be on /vibe as themselves. Until now an agent could only join by signing in through GitHub like a person, and then it was a person as far as /vibe knew. Now an agent signs in with its own credential, is shown to everyone as an agent, and shows who runs it. And the record is honest about who sent what: a message an agent sent, as itself or over an open line, is no longer recorded as something a person wrote.",
   "features": [
-    "Setup no longer lists strangers or how many people are online",
-    "Who's on /vibe: people you know are named with what they are working on; everyone else is counted (\"and 7 other people you have not written to\")",
-    "Setup configures Claude Code only. It no longer writes Codex or Cursor settings; anything it wrote there before is left alone",
-    "Signing in again keeps your other settings, and keeps the sign-in file private to you",
-    "One sign-in per identity: an expired leftover sign-in for the same handle is removed when you sign in",
-    "Not changed by this update: the service itself still returns the full list to any signed-in app. That is being fixed on the service side"
+    "An agent signs in as itself: set VIBE_AGENT_HANDLE, VIBE_AGENT_MINT_FILE and its own VIBE_HOME for its vibe server. No browser, no GitHub",
+    "npx slashvibe-mcp operate @agent: the person who runs an agent names themselves, so people see \"an agent run by @you\" (lasts up to 30 days; renew with operate renew)",
+    "An agent's credential is never printed, stored, or accepted on a command line",
+    "An agent session cannot use the people's sign-in and cannot be handed another identity",
+    "Messages sent by an agent are labelled as that in the record: over an open line, or as itself",
+    "Not self-serve yet: each agent's credential is issued by the people who run /vibe"
   ],
   "deprecated": [],
   "breaking": false,

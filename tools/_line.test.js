@@ -72,6 +72,7 @@ test('an answer goes only to whoever actually wrote the arrived message, marked 
   assert.equal(sends.length, 1);
   assert.equal(sends[0].to, 'ben');
   assert.equal(sends[0].opts.replyTo, id);
+  assert.equal(sends[0].opts.origin, 'agent_line', 'an unattended answer was recorded as something a person sent');
   assert.match(sends[0].body, /\(answered by @ada's agent from their current work, over an open line\. @ada has not read this\.\)$/);
   const receipt = line.receipts().find((r) => r.kind === 'answered');
   assert.deepEqual([receipt.with, receipt.answers, receipt.asked], ['ben', id, 'how did you stop local deciding?']);
@@ -146,6 +147,7 @@ test('ask sends one marked question and returns the linked answer in the same ca
     ] });
     assert.equal(sends.length, 1);
     assert.match(sends[0].body, /^who owns placement\?\n\n\(asked by @ada's agent/);
+    assert.equal(sends[0].opts.origin, 'agent_line', 'an unattended question was recorded as something a person sent');
     assert.equal(marked, 0);
   } finally { store.markThreadRead = origMark; }
 });

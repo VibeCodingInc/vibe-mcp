@@ -27,15 +27,23 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const jwt = (h) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Math.floor(Date.now() / 1000) + 86400 })).toString('base64url')}.sig`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function identity(root, handle, says, stubUrl, trusts = [], knows = [], { muted = [], invisible = false, startHook = false } = {}) {
+function identity(root, handle, says, stubUrl, trusts = [], knows = [], { muted = [], invisible = false, startHook = false, agentMint = null } = {}) {
   const home = path.join(root, handle, '.vibe');
   const work = path.join(root, handle, 'work');
   fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(work, { recursive: true });
-  fs.writeFileSync(path.join(home, 'auth.json'), JSON.stringify({ handle, token: jwt(handle), provider: 'github', authenticated_at: new Date().toISOString() }));
-  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ handle, one_liner: says }));
+  // A person arrives signed in. An agent identity arrives with nothing but its
+  // credential in a file, and signs itself in (agent-auth.js).
+  const mintFile = path.join(root, handle, 'agent.mint');
+  if (agentMint) {
+    fs.writeFileSync(mintFile, agentMint, { mode: 0o600 });
+    fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ one_liner: says }));
+  } else {
+    fs.writeFileSync(path.join(home, 'auth.json'), JSON.stringify({ handle, token: jwt(handle), provider: 'github', authenticated_at: new Date().toISOString() }));
+    fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ handle, one_liner: says }));
+  }
   if (knows.length || muted.length || invisible) fs.writeFileSync(path.join(home, 'reach.json'), JSON.stringify({ quiet: false, invisible, muted: Object.fromEntries(muted.map((h) => [h, Date.now()])), known: Object.fromEntries(knows.map((h) => [h, Date.now()])) }));
   if (trusts.length) fs.writeFileSync(path.join(home, 'lines.json'), JSON.stringify(Object.fromEntries(trusts.map((h) => [h, { since: Date.now() }]))));
-  const env = { VIBE_HOME: home, VIBE_API_URL: stubUrl, VIBE_SETUP_NO_AUTORUN: '1', CI: '1' };
+  const env = { VIBE_HOME: home, VIBE_API_URL: stubUrl, VIBE_SETUP_NO_AUTORUN: '1', CI: '1', ...(agentMint ? { VIBE_AGENT_HANDLE: handle, VIBE_AGENT_MINT_FILE: mintFile } : {}) };
   const mcp = path.join(root, handle, 'mcp.json');
   fs.writeFileSync(mcp, JSON.stringify({ mcpServers: { vibe: { command: process.execPath, args: [path.join(REPO, 'index.js')], env } } }));
   const settings = path.join(root, handle, 'settings.json');
@@ -49,20 +57,20 @@ function identity(root, handle, says, stubUrl, trusts = [], knows = [], { muted 
     s.hooks.SessionStart = [{ matcher: 'startup|resume', hooks: [{ type: 'command', timeout: 8, command: `VIBE_HOME=${q(home)} VIBE_API_URL=${q(stubUrl)} CI=1 ${q(process.execPath)} ${q(path.join(REPO, 'cli.js'))} hook run` }] }];
     fs.writeFileSync(settings, JSON.stringify(s, null, 2));
   }
-  return { handle, home, work, mcp, settings, token: jwt(handle), api: stubUrl };
+  return { handle, home, work, mcp, settings, token: jwt(handle), api: stubUrl, mintFile: agentMint ? mintFile : null };
 }
 
 // A person typing a /vibe command in their terminal, as this identity. Async:
 // the stub lives in this process and a synchronous child would starve it.
-function cli(id, args) {
+function cli(id, args, extraEnv = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [path.join(REPO, 'cli.js'), ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { PATH: process.env.PATH, HOME: path.dirname(id.home), VIBE_HOME: id.home, VIBE_API_URL: id.api, CI: '1', VIBE_SETUP_NO_AUTORUN: '1' },
+      env: { PATH: process.env.PATH, HOME: path.dirname(id.home), VIBE_HOME: id.home, VIBE_API_URL: id.api, CI: '1', VIBE_SETUP_NO_AUTORUN: '1', ...extraEnv },
     });
     let out = ''; let err = '';
     child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { err += d; });
-    child.on('close', (code) => resolve({ code, out, err, typed: `npx slashvibe-mcp ${args.join(' ')}` }));
+    child.on('close', (code) => resolve({ code, out, err, typed: `${Object.keys(extraEnv).map((k) => `${k}=… `).join('')}npx slashvibe-mcp ${args.join(' ')}` }));
   });
 }
 
@@ -113,13 +121,15 @@ async function run(name) {
   const sc = scenarios[name];
   if (!sc) throw new Error(`no scenario "${name}"`);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `vibe-lab-${name}-`));
-  const stub = await startStub({ people: sc.people });
+  // Agent identities get a credential the stub knows, as the platform host would.
+  const agentMints = Object.fromEntries(Object.entries(sc.people).filter(([, p]) => p.agent).map(([h]) => [h, `lab-mint-${h}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`]));
+  const stub = await startStub({ people: sc.people, agentMints });
   const ids = {};
   for (const [h, p] of Object.entries(sc.people)) {
-    ids[h] = identity(root, h, p.says, stub.url, p.trusts || [], p.knows || [], { muted: p.muted || [], invisible: Boolean(p.invisible), startHook: Boolean(sc.startHook) });
+    ids[h] = identity(root, h, p.says, stub.url, p.trusts || [], p.knows || [], { muted: p.muted || [], invisible: Boolean(p.invisible), startHook: Boolean(sc.startHook), agentMint: agentMints[h] || null });
     for (const [file, text] of Object.entries(p.files || {})) fs.writeFileSync(path.join(ids[h].work, file), text);
   }
-  const lab = { stub, ids, sleep, cli: (h, args) => cli(ids[h], args), session: (h, prompt, o) => session(ids[h], prompt, o), read: (h, f) => fs.readFileSync(path.join(ids[h].work, f), 'utf8') };
+  const lab = { stub, ids, sleep, agentMints, cli: (h, args, extraEnv) => cli(ids[h], args, extraEnv), session: (h, prompt, o) => session(ids[h], prompt, o), read: (h, f) => fs.readFileSync(path.join(ids[h].work, f), 'utf8') };
   const started = Date.now();
   let result; let failed = [];
   try {

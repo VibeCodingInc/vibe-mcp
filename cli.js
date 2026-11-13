@@ -14,7 +14,7 @@
 
 const args = process.argv.slice(2);
 
-const COMMANDS = ['setup', 'hook', 'trust', 'untrust', 'lines', 'quiet', 'unquiet', 'mute', 'unmute', 'door', 'invisible', 'visible'];
+const COMMANDS = ['setup', 'hook', 'trust', 'untrust', 'lines', 'quiet', 'unquiet', 'mute', 'unmute', 'door', 'invisible', 'visible', 'agent', 'operate'];
 const USAGE = `slashvibe-mcp: telepathic messaging, inside your coding agent
 
   npx slashvibe-mcp setup              install: configure your coding agent and sign in with GitHub
@@ -24,6 +24,8 @@ const USAGE = `slashvibe-mcp: telepathic messaging, inside your coding agent
   npx slashvibe-mcp quiet              nothing reaches you while you work (undo: unquiet)
   npx slashvibe-mcp mute @handle       one person stops surfacing (undo: unmute @handle)
   npx slashvibe-mcp invisible          be here without showing as here (undo: visible)
+  npx slashvibe-mcp operate @agent     say you run an agent, so people see "run by @you" (also: renew, revoke)
+  npx slashvibe-mcp agent              for an agent signing in as itself, not a person
   npx slashvibe-mcp door https://...   leave a door: a link to what you are building (then: door share, door close)
 
 With no command it sets up on first run in a terminal; a coding agent starts it as an MCP server.
@@ -195,6 +197,144 @@ async function doorCli(argv, say) {
     : 'When you have written to someone, leave it with them: npx slashvibe-mcp door share');
 }
 
+/**
+ * `agent`: this process as an agent identity (agent-auth.js).
+ *
+ *   agent            who this is configured to be, and whether it is signed in
+ *   agent signin     sign in now with the agent's credential (no browser)
+ *
+ * The credential comes from the environment (VIBE_AGENT_MINT_FILE or
+ * VIBE_AGENT_MINT) and is never printed.
+ */
+async function agentCli(argv, say) {
+  const agentAuth = require('./agent-auth');
+  const me = agentAuth.configured();
+  if (!me) {
+    say('This is not set up as an agent.');
+    say('An agent signs in as itself with its own credential, set in the env of its vibe server:');
+    say('  VIBE_AGENT_HANDLE=<handle>  VIBE_AGENT_MINT_FILE=<file holding the credential>  VIBE_HOME=<its own directory>');
+    say('The credential is issued per agent by the people who run /vibe. A person signs in with: npx slashvibe-mcp setup');
+    return;
+  }
+  if (me.problem) throw new Error(`@${me.handle} cannot sign in: ${me.problem}.`);
+  const hush = console.error; console.error = () => {};
+  let state;
+  try { state = await agentAuth.ensureSession({ force: argv[0] === 'signin' }); } finally { console.error = hush; }
+  if (!state.ok) throw new Error(agentAuth.scrub(state.message));
+  const until = state.expiresAt ? new Date(state.expiresAt).toISOString().slice(0, 10) : null;
+  say(`\u{1F916} @${me.handle} is signed in to /vibe as an agent${until ? `, until ${until}` : ''}${state.minted ? ' (new session)' : ''}.`);
+  if (state.message) say(agentAuth.scrub(state.message));
+  const who = await agentAuth.publicIdentity(me.handle);
+  if (who && who.operator) say(`Run by @${who.operator}. People see that beside this agent's name.`);
+  else if (who) say(`No operator is named. The person who runs this agent names themselves, signed in as themselves: npx slashvibe-mcp operate @${me.handle}`);
+  else say('Could not read how /vibe shows this agent right now.');
+}
+
+/**
+ * `operate`: a PERSON says "I run this agent".
+ *
+ *   operate                      the agents you operate
+ *   operate @agent [--days N]    name yourself its operator (1 to 30 days; default 30)
+ *   operate renew @agent         replace your grant with a fresh one
+ *   operate revoke @agent        stop being named
+ *
+ * The service wants proof of both halves in one request: your own sign-in, and
+ * the agent's credential (so nobody can put their name on an agent they do not
+ * run). The credential is read from VIBE_AGENT_MINT_FILE or VIBE_AGENT_MINT for
+ * this one command, never from the command line, and never printed.
+ */
+async function operateCli(argv, say) {
+  const fs = require('fs');
+  const path = require('path');
+  const agentAuth = require('./agent-auth');
+  const config = require('./config');
+  const authStore = require('./auth-store');
+  const { vibeHome } = require('./vibe-home');
+  if (process.env.VIBE_AGENT_HANDLE) throw new Error('An agent cannot name its own operator. Run this as the person, without VIBE_AGENT_HANDLE.');
+  const secret = agentAuth.credentialForOperator();
+  const flags = argv.filter((a) => a.startsWith('--'));
+  const words = argv.filter((a) => !a.startsWith('--'));
+  if (flags.some((f) => !/^--days(=\d+)?$/.test(f))) throw new Error('The only option is --days=N. The agent\'s credential is never given on the command line; put it in a file and set VIBE_AGENT_MINT_FILE.');
+  const verb = ['renew', 'revoke'].includes(words[0]) ? words.shift() : (words.length ? 'grant' : 'list');
+  if (words.length > 1) throw new Error('One agent at a time: npx slashvibe-mcp operate @agent');
+
+  const cred = authStore.inspectToken(config.getAuthToken());
+  if (!cred.ok) throw new Error('Sign in as yourself first: npx slashvibe-mcp setup');
+  authStore.hydrate();
+  const me = String(cred.handle || '').toLowerCase();
+  const base = String(config.getApiUrl()).replace(/\/+$/, '');
+  const call = async (method, query, body, withAgent) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    try {
+      const r = await fetch(`${base}/api/operator-grants${query || ''}`, {
+        method, signal: controller.signal,
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json', Authorization: `Bearer ${authStore.getToken() || config.getAuthToken()}`, ...(withAgent ? { 'x-agent-mint': secret } : {}) },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      return { status: r.status, body: await r.json().catch(() => ({})) };
+    } catch { throw new Error('Could not reach /vibe. Nothing was changed.'); } finally { clearTimeout(timer); }
+  };
+  const WHY = {
+    principal_credential_required: 'Your sign-in is an older kind that cannot name an operator. Sign in again: npx slashvibe-mcp setup',
+    identity_not_attested: 'Your handle has no GitHub-attested identity yet. Sign in again: npx slashvibe-mcp setup',
+    credential_superseded: 'Your sign-in no longer matches this handle. Sign in again: npx slashvibe-mcp setup',
+    agent_credential_required: 'That is not this agent\'s credential. Only the person who holds an agent\'s credential can name themselves its operator.',
+    agent_not_found: 'That handle is not an agent on /vibe yet. The agent has to sign in once as itself first (npx slashvibe-mcp agent signin, in its own env).',
+    live_grant_exists: 'This agent already has an operator named. If it is you: npx slashvibe-mcp operate renew @agent. If it is someone else, they must revoke first; an operator is never silently replaced.',
+    unauthorized: 'Sign in as yourself first: npx slashvibe-mcp setup',
+  };
+  const refuse = (r) => { throw new Error(agentAuth.scrub(WHY[r.body && r.body.error] || (r.body && r.body.message) || `The service refused (${r.status}). Nothing was changed.`)); };
+  const noteFile = path.join(vibeHome(), 'operating.json');
+  const notes = () => { try { const v = JSON.parse(fs.readFileSync(noteFile, 'utf8')); return v && typeof v === 'object' ? v : {}; } catch { return {}; } };
+  const remember = (agent, value) => {
+    const all = notes(); if (value) all[agent] = value; else delete all[agent];
+    try { fs.mkdirSync(path.dirname(noteFile), { recursive: true, mode: 0o700 }); fs.writeFileSync(noteFile, JSON.stringify(all, null, 2), { mode: 0o600 }); } catch {}
+  };
+  const day = (iso) => (Number.isFinite(Date.parse(iso)) ? new Date(iso).toISOString().slice(0, 10) : 'an unknown date');
+  const listLive = async () => {
+    const r = await call('GET');
+    if (r.status !== 200) refuse(r);
+    return (r.body.grants || []).filter((g) => g && !g.revoked_at && Date.parse(g.expires_at) > Date.now());
+  };
+
+  if (verb === 'list') {
+    const live = await listLive();
+    if (!live.length) { say('You are not named as the operator of any agent.'); say('Name yourself: npx slashvibe-mcp operate @agent   (with that agent\'s credential in VIBE_AGENT_MINT_FILE)'); return; }
+    say('You are named as the operator of:');
+    for (const g of live) say(`  @${agentAuth.norm(g.agent_handle)} until ${day(g.expires_at)}`);
+    say('Renew: npx slashvibe-mcp operate renew @agent   ·   stop: npx slashvibe-mcp operate revoke @agent');
+    return;
+  }
+
+  const agent = agentAuth.norm(words[0]);
+  if (!agentAuth.HANDLE.test(agent)) throw new Error(`"${words[0] || ''}" is not a handle. Which agent? npx slashvibe-mcp operate @agent`);
+  if (agent === me) throw new Error(`@${agent} is you. An operator is a person who runs an agent.`);
+
+  if (verb === 'revoke' || verb === 'renew') {
+    const mine = (await listLive()).find((g) => agentAuth.norm(g.agent_handle) === agent);
+    if (!mine && verb === 'revoke') { remember(agent, null); say(`You are not named as @${agent}'s operator.`); return; }
+    if (mine) {
+      if (verb === 'renew' && !secret) throw new Error(`Renewing needs @${agent}'s credential: set VIBE_AGENT_MINT_FILE for this command. Nothing was changed.`);
+      const r = await call('DELETE', `?grant_id=${encodeURIComponent(mine.grant_id)}`);
+      if (r.status !== 200) refuse(r);
+      remember(agent, null);
+      if (verb === 'revoke') { say(`You are no longer named as @${agent}'s operator. Messages it already sent keep saying who ran it then.`); return; }
+    }
+  }
+
+  if (!secret) throw new Error(`Naming yourself @${agent}'s operator needs that agent's own credential, as proof you run it. Put it in a file and run:\n  VIBE_AGENT_MINT_FILE=<that file> npx slashvibe-mcp operate @${agent}`);
+  const daysFlag = flags.find((f) => f.startsWith('--days='));
+  const days = daysFlag ? Number(daysFlag.split('=')[1]) : 30;
+  if (!Number.isInteger(days) || days < 1 || days > 30) throw new Error('--days must be between 1 and 30. The service does not name an operator for longer than 30 days at a time.');
+  const r = await call('POST', '', { agent_handle: agent, expires_in_hours: days * 24, scope: ['messages:send'] }, true);
+  if (r.status !== 200 || !r.body.success) refuse(r);
+  remember(agent, { expires_at: r.body.expires_at, grant_id: r.body.grant_id });
+  say(`\u{1F916} @${agent} is now shown as an agent run by @${me}, until ${day(r.body.expires_at)}.`);
+  say('That covers what it sends from now on. It ends on that date unless you renew it:');
+  say(`  npx slashvibe-mcp operate renew @${agent}   ·   stop being named: npx slashvibe-mcp operate revoke @${agent}`);
+}
+
 if (['help', '--help', '-h'].includes(args[0])) {
   process.stdout.write(`${USAGE}\n`);
 } else if (['--version', '-v', 'version'].includes(args[0])) {
@@ -245,6 +385,17 @@ if (['help', '--help', '-h'].includes(args[0])) {
     process.stderr.write(`${error?.message || error}\n`);
     process.exitCode = 1;
   }
+} else if (args[0] === 'agent' || args[0] === 'operate') {
+  // An agent as itself, and the person who runs it (agent-auth.js).
+  (args[0] === 'agent' ? agentCli : operateCli)(args.slice(1), (t) => process.stdout.write(`${t}\n`)).catch((error) => {
+    process.stderr.write(`${require('./agent-auth').scrub(error?.message || error)}\n`);
+    process.exitCode = 1;
+  });
+} else if ((args.includes('setup') || (args.length === 0 && process.stdin.isTTY)) && require('./agent-auth').isAgent()) {
+  // Setup is a person signing in through GitHub. An agent that did that would
+  // become a person as far as /vibe knows.
+  process.stderr.write(`This is set up as the agent @${require('./agent-auth').configured().handle}. Setup is for people. An agent signs in with: npx slashvibe-mcp agent signin\n`);
+  process.exitCode = 1;
 } else if (args[0] === 'door') {
   // A door (door.js). Typed by the person; nothing a session's agent can call sets or shares one.
   doorCli(args.slice(1), (t) => process.stdout.write(`${t}\n`)).catch((error) => {

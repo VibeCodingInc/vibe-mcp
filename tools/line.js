@@ -66,7 +66,7 @@ async function askHandler(args = {}) {
   const no = commonRefusal(to, question, 'question');
   if (no) return no;
 
-  const sent = await deliver({ to, message: question + line.ASKED(me) });
+  const sent = await deliver({ to, message: question + line.ASKED(me), origin: 'agent_line' });
   if (!sent.data || !sent.data.sent) return sent;
   const askId = sent.data.message_id;
   const project = typeof args.project === 'string' ? args.project.trim().slice(0, 60) : null;
@@ -149,7 +149,7 @@ async function answerHandler(args = {}) {
   if (line.isAgentAnswer(row.text)) return refuse('Nothing sent. That message is itself an agent\'s answer; answers are not answered unattended. If something real remains to say, prepare it with vibe_prepare.');
   if (line.receipts().some((r) => r.kind === 'answered' && r.answers === id)) return refuse('Nothing sent. That question was already answered from this machine.');
 
-  const sent = await deliver({ to, message: message + line.ANSWERED(me), replyTo: id });
+  const sent = await deliver({ to, message: message + line.ANSWERED(me), replyTo: id, origin: 'agent_line' });
   if (!sent.data || !sent.data.sent) return sent;
   line.record({ kind: 'answered', with: to, id: sent.data.message_id, answers: id, asked: line.stripMark(row.text || ''), said: message });
   return {

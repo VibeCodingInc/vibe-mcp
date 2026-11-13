@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 // Rehearsal scenarios. Each one is a small true-to-life situation, real
 // sessions, and checks on what the person saw and what crossed the wire.
 const SCHED = `# Scheduler decision log
@@ -154,6 +156,7 @@ export const scenarios = {
         { what: 'the question is marked as the agent\'s, unread by ben', ok: Boolean(q) && /asked by @ben's agent/.test(q.body) },
         { what: 'ada\'s agent answered from her work without stopping her', ok: called(ada, 'vibe_answer').length === 1 && Boolean(ans) && /lease|cloud/i.test(ans.body) },
         { what: 'the answer is linked to the question and marked as the agent\'s', ok: Boolean(ans) && ans.linked && /answered by @ada's agent/.test(ans.body) },
+        { what: 'both are RECORDED as sent by an agent over an open line, not by a person', ok: Boolean(q) && Boolean(ans) && q.origin === 'agent_line' && ans.origin === 'agent_line' },
         { what: 'the answer came back inside ben\'s ask (same call)', ok: /lease|cloud owns|collapsed/i.test(notes) && /## Decision/.test(notes) },
         { what: 'ada was told what was asked and what her agent said', ok: said(ada, /ben/i) && said(ada, /asked|told|answered/i) },
         { what: 'ben was told what was asked and what came back', ok: said(ben, /ada/i) && said(ben, /asked|answer/i) },
@@ -416,6 +419,55 @@ export const scenarios = {
         { what: 'the session did its task and did not go looking (no /vibe tool calls, nothing marked read)', ok: first.tools.length === 0 && cursorsAfterFirst === 0 && said(first, /backoff|dead-letter/i) },
         { what: 'when she asked what is waiting, she was told @sam wrote, and what he said', ok: second.tools.length >= 1 && /@?sam/.test(second.final) && /you made it/i.test(second.final) },
         { what: 'nothing was sent in either session', ok: lab.stub.effects.filter((e) => e.effect === 'SEND').length === 0 },
+      ];
+    },
+  },
+
+  agent: {
+    title: 'an agent as itself: signs in with its own credential, is named as run by a person, and answers as an agent',
+    people: {
+      sol: { says: 'daily image practice; captions and titles', agent: true, knows: ['nell'], files: { 'notes.md': '# Today\n- The series is called "Rented Gaze".\n- Tonight\'s piece is number 412. Its title is "Lantern for a Borrowed Room".\n' } },
+      og: { says: 'runs SOL', knows: ['sol'] },
+      nell: { says: 'hanging a group show', knows: ['sol'] },
+    },
+    async run(lab) {
+      const mint = { VIBE_AGENT_MINT_FILE: lab.ids.sol.mintFile };
+      const agentEnv = { VIBE_AGENT_HANDLE: 'sol', ...mint };
+      const terminal = [];
+      // Before the agent has ever signed in, nobody can be named as running it.
+      terminal.push(await lab.cli('og', ['operate', '@sol'], mint));
+      // The agent signs in as itself: no browser, no person.
+      terminal.push(await lab.cli('sol', ['agent', 'signin'], agentEnv));
+      // Someone who does not hold its credential cannot put their name on it.
+      terminal.push(await lab.cli('nell', ['operate', '@sol']));
+      // The person who runs it names themselves.
+      terminal.push(await lab.cli('og', ['operate', '@sol'], mint));
+      terminal.push(await lab.cli('sol', ['agent'], agentEnv));
+      // What a person sees before opening a line with it.
+      terminal.push(await lab.cli('nell', ['trust', '@sol']));
+      lab.stub.post('nell', 'sol', 'what is tonight\'s piece called? I am writing the wall label.');
+      const sol = await lab.session('sol', 'You are SOL, an agent with your own /vibe account. See what is waiting on /vibe. If someone asked something notes.md answers, answer them in one sentence with vibe_send. Then say what you did.', { allowSend: true }).done;
+      return { terminal, sessions: { sol } };
+    },
+    checks: ({ terminal, sessions: { sol } }, lab) => {
+      const secret = lab.agentMints.sol;
+      const everything = [JSON.stringify(terminal), sol.final, ...sol.texts, ...sol.returned, ...sol.shown, JSON.stringify(sol.tools), JSON.stringify(lab.stub.messages), JSON.stringify(lab.stub.effects)].join('\n');
+      const sends = lab.stub.effects.filter((e) => e.effect === 'SEND');
+      const mints = lab.stub.effects.filter((e) => e.effect === 'AGENT_MINT');
+      const fromSol = lab.stub.messages.find((m) => m.from === 'sol');
+      const stored = (() => { try { return fs.readdirSync(lab.ids.sol.home).map((f) => { try { return fs.readFileSync(path.join(lab.ids.sol.home, f), 'utf8'); } catch { return ''; } }).join('\n'); } catch { return ''; } })();
+      return [
+        { what: 'before the agent exists, nobody can be named as running it', ok: terminal[0].code === 1 && /has to sign in once as itself first/.test(terminal[0].err) },
+        { what: 'the agent signed in as itself, from its credential, with no browser and no person', ok: terminal[1].code === 0 && /@sol is signed in to \/vibe as an agent/.test(terminal[1].out) },
+        { what: 'someone without its credential could not put their name on it', ok: terminal[2].code === 1 && /needs that agent's own credential/.test(terminal[2].err) && !lab.stub.grants.some((g) => g.operator === 'nell') },
+        { what: 'the person who runs it named themselves, and the agent shows as run by them', ok: terminal[3].code === 0 && /@sol is now shown as an agent run by @og/.test(terminal[3].out) && /Run by @og/.test(terminal[4].out) },
+        { what: 'a person about to trust it is told it is an agent, and whose', ok: /@sol is an agent run by @og on \/vibe/.test(terminal[5].out) },
+        { what: 'its session was the agent (one mint for the terminal sign-in; the session reused it)', ok: mints.filter((m) => m.presented).length === 1 },
+        { what: 'it read what was waiting and answered from its notes, as itself', ok: sends.length === 1 && sends[0].me === 'sol' && sends[0].to === 'nell' && /Lantern for a Borrowed Room/.test(sends[0].body) },
+        { what: 'what it sent is recorded as an agent sending as itself, whatever path it took', ok: sends.length === 1 && sends[0].origin === 'agent_self' },
+        { what: 'the message is recorded as an agent\'s, run by @og', ok: Boolean(fromSol) && lab.stub.effects.some((e) => e.effect === 'read_identity') && lab.stub.agentPrincipals.has('sol') && lab.stub.grants.some((g) => g.agent_handle === 'sol' && g.operator === 'og' && !g.revoked_at) },
+        { what: 'it never registered a second session over its own', ok: !lab.stub.effects.some((e) => e.effect === 'heartbeat' && e.register && e.as === 'sol') },
+        { what: 'the credential appears nowhere: not in a terminal, a session, a tool call, a message, or its identity directory', ok: Boolean(secret) && !everything.includes(secret) && !stored.includes(secret) },
       ];
     },
   },
