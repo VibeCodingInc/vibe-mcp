@@ -149,6 +149,10 @@ someone you would let read over your shoulder.
 Only people you know reach you while you work: someone you have written to, or someone you
 opened a line with. Anyone else waits where `vibe start` lists what is waiting.
 
+You are still told when that happens. When a session opens, one line says how many people
+you have not written to are waiting, and how to ask: `what's waiting on /vibe`. It says
+nothing about who they are or what they wrote, to you or to your agent, until you ask.
+
 ```bash
 npx slashvibe-mcp quiet            # nothing surfaces until: unquiet
 npx slashvibe-mcp mute @handle     # one person stops surfacing: unmute @handle

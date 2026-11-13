@@ -1,13 +1,12 @@
 {
-  "version": "0.9.7",
+  "version": "0.9.8",
   "updated": "2026-11-13",
-  "changelog": "The bump. You have been stuck on something for a while, and someone you know happens to be in a session right now working on exactly that. Your agent tells you, once, and offers three things: visit what they are building, ask them, or not now. It only ever names people you already know, never a stranger, and what you are stuck on stays on your machine.",
+  "changelog": "For anyone new. If a friend wrote to you before you ever wrote to them, you used to hear nothing: only people you know reach you while you work, and on day one you know nobody. Now, when you open a session, one line tells you that someone you have not written to is waiting, and how to ask. It says nothing about who they are or what they wrote until you ask.",
   "features": [
-    "When you are plainly stuck, your agent may tell you someone you know is here working on the same thing: Visit their door · Ask them · Not now",
-    "It names only people you have written to or opened a line with. Never a stranger, however well they match",
-    "At most once per session. quiet turns it off",
-    "Visiting sends nothing. Asking shows you the message first; nothing goes without your Send",
-    "Good to know: whether someone's work really matches yours is your agent's judgment, made from the line that person set themselves"
+    "At session start: \"1 person you have not written to is waiting. Say: what's waiting on /vibe\"",
+    "It is a count only. No name and none of their words reach you or your agent until you ask",
+    "Muted people are not counted, and quiet shows nothing",
+    "Already installed? Run npx slashvibe-mcp hook install once so your session-start hook is this version"
   ],
   "deprecated": [],
   "breaking": false,
