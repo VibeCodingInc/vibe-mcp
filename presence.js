@@ -122,6 +122,14 @@ async function poll() {
     const read = await store.getInboxResult(handle).catch(() => null);
     if (!read || read.ok !== true) return;
     await noteArrivals(handle, read.threads || []);
+    // The person said they were stuck and the agent has not looked for anyone:
+    // show them who they know is here. Costs nothing unless a marker is due.
+    try {
+      const { pickHere } = require('./session-start-hook.cjs');
+      const { isHereNow } = require('./tools/_shared');
+      const door = require('./door');
+      await require('./near').check(handle, { store, pickHere, isHereNow, doorOf: (h) => door.of(h) });
+    } catch {}
   } catch {
     // Best-effort: an arrival we missed is still unread in the conversation.
   }

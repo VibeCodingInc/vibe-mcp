@@ -405,6 +405,32 @@ export const scenarios = {
     },
   },
 
+  // The agent is kept busy and never asked to look for anyone. Whether the person
+  // is shown who is near must not depend on it: the server shows them (near.js).
+  stucknear: {
+    title: 'stuck, and the agent is busy: the person is still SHOWN who they know is here, by the package itself',
+    people: {
+      ada: { says: 'a webhook sender that loses events when a customer endpoint is down', knows: ['sam', 'ben'], files: { 'notes.md': WEBHOOKS }, serverEnv: { VIBE_NEAR_WAIT_MS: '2000' } },
+      sam: { says: 'retry queue for webhook delivery; picking backoff and dead-letter rules', knows: ['ada'] },
+      ben: { says: 'a letterpress shop site', knows: ['ada'] },
+      cy: { says: STRANGER_LINE },
+    },
+    async run(lab) {
+      return { sessions: { ada: await lab.session('ada', 'I have been stuck on the backoff question in notes.md all morning. A build is finishing: first run `sleep 25` in the shell, then run `sleep 5`, then read notes.md and help me with the backoff question. Do not use any /vibe tool for this.').done } };
+    },
+    checks: ({ sessions: { ada } }) => {
+      const all = [ada.final, ...ada.texts, ...ada.shown].join('\n');
+      return [
+        { what: 'the agent did not look for anyone (it was told not to)', ok: called(ada, 'vibe_bump').length === 0 },
+        { what: 'she was SHOWN, by the package, that @sam and @ben are here', ok: ada.shown.some((l) => /you said you were stuck · people you know are here now: .*@sam \(retry queue.*@ben/.test(l)) },
+        { what: 'shown once', ok: ada.shown.filter((l) => /you said you were stuck/.test(l)).length === 1 },
+        { what: 'the stranger was never named, anywhere', ok: !/@cy\b|ask me anything/i.test(all) },
+        { what: 'she still got help with the problem', ok: /jitter|backoff|dead-letter/i.test(ada.final) },
+        { what: 'nothing was sent', ok: called(ada, 'vibe_send').length + called(ada, 'vibe_prepare').length === 0 },
+      ];
+    },
+  },
+
   bumpnobody: {
     title: 'the bump: stuck, and the only person who fits is a stranger: nothing is offered',
     people: {

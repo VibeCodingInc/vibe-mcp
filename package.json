@@ -1,6 +1,6 @@
 {
   "name": "slashvibe-mcp",
-  "version": "0.9.13",
+  "version": "0.9.14",
   "mcpName": "io.github.vibecodinginc/vibe",
   "description": "Telepathic messaging between people, from inside Claude Code",
   "main": "index.js",
@@ -83,6 +83,7 @@
     "tools/visit.js",
     "tools/bump.js",
     "agent-auth.js",
-    "invite.js"
+    "invite.js",
+    "near.js"
   ]
 }

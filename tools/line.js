@@ -132,7 +132,8 @@ function arrived(id) {
   try {
     const row = JSON.parse(fs.readFileSync(path.join(arrival.spoolDir(), `${safe}.json`), 'utf8'));
     // Only something that ARRIVED. The note of what this side said is not one.
-    return row && row.kind !== 'told' ? row : null;
+    // (nor is any other note the package leaves for the hook: only a row with no kind arrived.)
+    return row && !row.kind ? row : null;
   } catch { return null; }
 }
 

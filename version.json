@@ -1,12 +1,12 @@
 {
-  "version": "0.9.13",
+  "version": "0.9.14",
   "updated": "2026-11-13",
-  "changelog": "The first minute. The person who invited you is known from the start, so their first message reaches you while you work instead of waiting behind \"1 person you have not written to\". Setup ends with one line to send to the person you build with. And your sign-in no longer ends silently: from a week out, a new session tells you, with the one command that renews it.",
+  "changelog": "When you say you are stuck, you are shown who you know is here, whether or not your agent thinks to look. 0.9.12 reminded the agent; this is the part that does not depend on it. If the agent has not looked within about a minute, /vibe itself shows you one line.",
   "features": [
-    "npx slashvibe-mcp setup --from @them: your inviter is known from the start. Nothing is sent, no line is opened, and mute undoes it",
-    "Setup's last screen prints that line with your handle, for the person you build with",
-    "Your sign-in lasts 30 days: from 7 days out, a new session says how long is left and how to renew; if it has ended, it says that instead of going quiet",
-    "An installed session-start hook now updates itself with the package, so fixes reach people who installed earlier (it only ever rewrites its own line, and never installs one you removed)"
+    "Say you are stuck and, if someone you know is in a session, you see: /vibe · you said you were stuck · someone you know is here now: @them (what they are working on)",
+    "Shown once, only in the session where you said it, and only people you know: never a stranger, an agent, or someone you muted",
+    "If your agent already looked for someone, nothing extra is shown",
+    "One read of who is here, only when you said you were stuck. What you are stuck on is never read or sent. Quiet turns it off"
   ],
   "deprecated": [],
   "breaking": false,
