@@ -193,7 +193,33 @@ function createHookSettingsManager(options = {}) {
     return { ...status(), changed: true, removed: next.removed };
   }
 
-  return { command, install, status, uninstall };
+  /**
+   * Keep an INSTALLED hook current across upgrades. The command is pinned to a
+   * version, so a person who installed on 0.9.9 kept running 0.9.9's session
+   * start forever while the server beside it updated itself: fixes that live in
+   * the hook (the sign-in warning) never reached them. Rewrites only our own
+   * handler, only when it names an OLDER version than this package, and never
+   * installs where the person has none: that stays their act.
+   */
+  function refresh() {
+    const current = readSettings(target, fileSystem);
+    validateHookShape(current.settings);
+    const pinned = [];
+    for (const group of current.settings.hooks?.SessionStart || []) {
+      for (const handler of Array.isArray(group?.hooks) ? group.hooks : []) {
+        if (handler && handler.type === 'command' && typeof handler.command === 'string' && VERSIONED_HOOK_COMMAND.test(handler.command)) {
+          pinned.push(handler.command.match(/@([0-9]+\.[0-9]+\.[0-9]+)/)[1]);
+        }
+      }
+    }
+    const mine = (command.match(/@([0-9]+\.[0-9]+\.[0-9]+)/) || [])[1];
+    if (pinned.length === 0 || !mine) return { changed: false, reason: 'not_installed' };
+    const older = (a, b) => { const x = a.split('.').map(Number); const y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if (x[i] !== y[i]) return x[i] < y[i]; } return false; };
+    if (!pinned.some((v) => older(v, mine))) return { changed: false, reason: 'current' };
+    return { ...install(), from: pinned[0] };
+  }
+
+  return { command, install, status, uninstall, refresh };
 }
 
 module.exports = {

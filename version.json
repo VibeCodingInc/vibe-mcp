@@ -1,12 +1,12 @@
 {
-  "version": "0.9.12",
+  "version": "0.9.13",
   "updated": "2026-11-13",
-  "changelog": "The bump is dependable. When you say you are stuck, your agent now reliably checks whether someone you know is here working on the same thing. Before, if you pasted the problem straight into the prompt, it usually just answered and never looked.",
+  "changelog": "The first minute. The person who invited you is known from the start, so their first message reaches you while you work instead of waiting behind \"1 person you have not written to\". Setup ends with one line to send to the person you build with. And your sign-in no longer ends silently: from a week out, a new session tells you, with the one command that renews it.",
   "features": [
-    "Say you are stuck (\"I'm stuck\", \"going in circles\") and the agent is quietly reminded, once per session, that it can look for someone near",
-    "You still get help with the problem first",
-    "It only ever names people you know, nothing is sent, and nothing leaves your machine to make this work",
-    "Quiet turns it off with everything else"
+    "npx slashvibe-mcp setup --from @them: your inviter is known from the start. Nothing is sent, no line is opened, and mute undoes it",
+    "Setup's last screen prints that line with your handle, for the person you build with",
+    "Your sign-in lasts 30 days: from 7 days out, a new session says how long is left and how to renew; if it has ended, it says that instead of going quiet",
+    "An installed session-start hook now updates itself with the package, so fixes reach people who installed earlier (it only ever rewrites its own line, and never installs one you removed)"
   ],
   "deprecated": [],
   "breaking": false,

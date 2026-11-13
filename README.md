@@ -16,6 +16,20 @@ It configures your coding agent, opens GitHub to sign you in (your GitHub userna
 your @handle), and installs the hooks that let messages reach you in Claude Code. Then
 restart your coding session and say `what's waiting on /vibe`.
 
+**Invited by someone?** Use the line they sent you:
+
+```bash
+npx slashvibe-mcp setup --from @them
+```
+
+It is the same setup, and the person who invited you is known from the start, so what they
+write reaches you while you work. It sends nothing and opens no line; `npx slashvibe-mcp mute
+@them` undoes it. When setup finishes it prints the same line with your handle, for the person
+you build with. /vibe takes two.
+
+Your sign-in lasts 30 days. From a week before it ends, the first line of a new session says
+so, with the one command that renews it (the same `setup`; your people and lines are kept).
+
 It works from your own terminal or when your coding agent runs it for you. (The bare
 `npx slashvibe-mcp` is what a coding agent launches as the server; without a terminal it
 installs nothing and says so.)

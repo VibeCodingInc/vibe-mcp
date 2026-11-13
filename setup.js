@@ -481,7 +481,7 @@ async function setup() {
     console.log(`${colors.bold}  Quick start:${colors.reset}`);
     console.log(`${colors.dim}  1. Restart your Claude Code session${colors.reset}`);
     console.log(`${colors.dim}  2. Say: "what's waiting on /vibe" to see who has written to you${colors.reset}`);
-    console.log(`${colors.dim}     or: "message @their-handle: ..." to someone you already know${colors.reset}`);
+    console.log(`${colors.dim}     or: "message @their-handle: ..." to write to someone${colors.reset}`);
     // Receiving is the product: a reply has to reach you while you work, not
     // when you remember to ask. So the hooks are installed here, by default,
     // for Claude Code — stated plainly, with the one command that removes them.
@@ -505,6 +505,23 @@ async function setup() {
     console.log('');
     console.log(`${colors.cyan}  Welcome to /vibe, @${authResult.handle}.${colors.reset}`);
     console.log('');
+
+    // The inviter is known from the first minute; and the last thing a person
+    // sees is the one line that brings the person they build with.
+    const invite = require('./invite');
+    const from = invite.fromArg();
+    if (from) {
+      const got = await invite.accept(from, authResult.handle);
+      for (const l of got.lines) console.log(`${colors.dim}  ${l}${colors.reset}`);
+      if (got.lines.length) console.log('');
+    }
+    const bring = invite.line(authResult.handle);
+    if (bring) {
+      console.log(`${colors.bold}  /vibe takes two. Send this to the person you build with:${colors.reset}`);
+      console.log(`${colors.cyan}  ${bring.command}${colors.reset}`);
+      console.log(`${colors.dim}  or the page: ${bring.link}${colors.reset}`);
+      console.log('');
+    }
 
     // No analytics ping here (#9.3). SECURITY.md promises "/vibe does not
     // collect usage analytics", and this file was the one place that broke

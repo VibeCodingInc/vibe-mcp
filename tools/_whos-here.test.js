@@ -16,7 +16,7 @@ const { spawn } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
 const CLI = path.join(ROOT, 'cli.js');
-const jwt = (h) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')}.sig`;
+const jwt = (h) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Math.floor(Date.now() / 1000) + 30 * 86400 })).toString('base64url')}.sig`;
 function homeFor(handle, reachState = null, lines = []) {
   const vh = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-here-')), '.vibe');
   fs.mkdirSync(vh, { recursive: true });

@@ -87,6 +87,64 @@ function hereLine(here) {
   return `here now: ${shown.join(' · ')}${more}`;
 }
 
+// ── the sign-in never ends silently ─────────────────────────────────────────
+// A sign-in lasts 30 days. It used to end without a word: the session simply
+// stopped hearing anything, which to the person looks like nobody writing.
+// From a week out the person is told, once a day, with the one line that fixes
+// it. Read from the token's own expiry on this machine: no network, so it
+// works when the sign-in is exactly the thing that is broken.
+const SIGNIN_WARN_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** null, or { state: 'ending', days } / { state: 'ended' }. Pure. */
+function signinState(expiresAt, now = Date.now()) {
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) return null;
+  if (expiresAt <= now) return { state: 'ended' };
+  const days = Math.ceil((expiresAt - now) / DAY_MS);
+  return days <= SIGNIN_WARN_DAYS ? { state: 'ending', days } : null;
+}
+
+function normalizeSignin(value) {
+  if (!value || typeof value !== 'object') return null;
+  if (value.state === 'ended') return { state: 'ended' };
+  if (value.state === 'ending' && Number.isInteger(value.days) && value.days >= 1 && value.days <= SIGNIN_WARN_DAYS) return { state: 'ending', days: value.days };
+  return null;
+}
+
+function signinLine(signin) {
+  if (!signin) return null;
+  const fix = 'run: npx slashvibe-mcp setup';
+  if (signin.state === 'ended') return `/vibe · your sign-in has ended, so nothing reaches you here · ${fix}`;
+  return `/vibe · your sign-in ends ${signin.days === 1 ? 'within a day' : `in ${signin.days} days`} · ${fix} (one minute, keeps your people and lines)`;
+}
+
+/** Once a day per machine, and never for an agent (its credential renews itself). */
+function readSignin() {
+  try {
+    if (require('./agent-auth').isAgent()) return null;
+    if (require('./reach').isQuiet()) return null;   // quiet shows nothing
+    const config = require('./config');
+    const authStore = require('./auth-store');
+    const token = config.getAuthToken();
+    if (!token) return null;
+    const state = signinState(authStore.inspectToken(token).expiresAt);
+    if (!state) return null;
+    const path = require('node:path');
+    const marker = path.join(require('./vibe-home').vibeHome(), 'signin-notice.json');
+    const today = new Date().toISOString().slice(0, 10);
+    try { if (JSON.parse(fs.readFileSync(marker, 'utf8')).day === today) return null; } catch {}
+    return state;
+  } catch { return null; }
+}
+
+/** Recorded only when the notice is actually handed over, so a slow start does not eat it. */
+function markSigninShown() {
+  try {
+    const path = require('node:path');
+    fs.writeFileSync(path.join(require('./vibe-home').vibeHome(), 'signin-notice.json'), JSON.stringify({ day: new Date().toISOString().slice(0, 10) }), { mode: 0o600 });
+  } catch {}
+}
+
 function live() {
   const deadline = boundedDeadline(process.env.VIBE_SESSION_START_DEADLINE_MS);
   try {
@@ -100,9 +158,9 @@ function live() {
     const parsed = JSON.parse(stdout);
     // Only a count ever crosses from the reader to the presenter.
     const strangers = Number.isInteger(parsed && parsed.strangers) && parsed.strangers > 0 ? parsed.strangers : 0;
-    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers };
+    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers, signin: normalizeSignin(parsed && parsed.signin) };
   } catch {
-    return { messages: [], here: [], doors: [], strangers: 0 };
+    return { messages: [], here: [], doors: [], strangers: 0, signin: null };
   }
 }
 
@@ -134,14 +192,20 @@ function normalizeDoors(value) {
  * Up to three things, each one line for the person and a short note for the
  * model: who is here, a door someone left, and messages that were waiting.
  */
-function hookOutput(messages, here = [], doors = [], strangers = 0) {
+function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null) {
   const waitingUnknown = Number.isInteger(strangers) && strangers > 0 ? Math.min(strangers, 99) : 0;
-  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0) {
+  const signinNotice = signinLine(normalizeSignin(signin));
+  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice) {
     emptyOutput();
     return;
   }
   const shown = [];
   const context = [];
+
+  if (signinNotice) {
+    shown.push(signinNotice);
+    context.push('/vibe: the person has been shown that their /vibe sign-in is ending or has ended, and the command that renews it. It is typed in a terminal by them; do not run it for them unless they ask.');
+  }
 
   // Who's here. A fact for the model to hold, not something to act on.
   if (here.length > 0) {
@@ -288,8 +352,12 @@ async function fetchHere(store, me, reach, line) {
 
 async function main() {
   if (process.argv.includes('--fetch-live')) {
+    // Read before anything touches the network: it must survive the service
+    // being unreachable, which is exactly when a person needs to be told.
+    const signin = readSignin();
     const found = await fetchLive().catch(() => ({ messages: [], here: [], doors: [], strangers: 0 }));
-    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers }));
+    if (signin) markSigninShown();
+    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, signin }));
     return;
   }
 
@@ -302,7 +370,7 @@ async function main() {
   const fixture = fixtureMessages(process.env.VIBE_SESSION_START_FIXTURE);
   if (fixture !== null) { hookOutput(fixture); return; }
   const now = live();
-  hookOutput(now.messages, now.here, now.doors, now.strangers);
+  hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin);
 }
 
 if (require.main === module) main().catch(emptyOutput);
@@ -318,4 +386,7 @@ module.exports = {
   normalizeDoors,
   main,
   normalizeMessages,
+  signinState,
+  signinLine,
+  normalizeSignin,
 };
