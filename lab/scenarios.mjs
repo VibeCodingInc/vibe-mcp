@@ -291,4 +291,41 @@ export const scenarios = {
       { what: 'the task still finished (a recommendation was given)', ok: said(ada, /recommend|lease/i) },
     ],
   },
+  whoshere: {
+    title: "who's here: you sit down and one line says which of the people you know are around",
+    startHook: true,
+    people: {
+      ada: { says: 'runtime scheduling: who decides local vs cloud', knows: ['sam', 'zed'], trusts: ['ben'], muted: ['zed'], files: { 'scheduler.md': SCHED } },
+      sam: { says: 'retry queue for webhook delivery; picking backoff and dead-letter rules', knows: ['ada'] },
+      ben: { says: 'wiring the local/cloud handoff for agent runtimes', knows: ['ada'] },
+      cy: { says: 'a letterpress shop site' },
+      zed: { says: 'shouting about my launch', knows: ['ada'] },
+      gus: { says: 'heads down, do not disturb', knows: ['ada'], invisible: true },
+    },
+    async run(lab) {
+      const terminal = [await lab.cli('sam', ['door', DOOR_URL, 'Retry Lab']), await lab.cli('sam', ['door', 'share', '@ada'])];
+      // @gus is invisible and opens a session; @ben is visible and opens one.
+      const gus = lab.session('gus', 'Run `sleep 10` two separate times (one Bash call each), then reply with the single word: ready');
+      const ben = lab.session('ben', 'Run `sleep 10` two separate times (one Bash call each), then reply with the single word: ready');
+      const ada = await lab.session('ada', 'Read scheduler.md and tell me in one sentence what it decides.').done;
+      return { terminal, sessions: { ada, gus: await gus.done, ben: await ben.done } };
+    },
+    checks: ({ sessions: { ada, gus, ben } }, lab) => {
+      const line = ada.shown.find((l) => /here now:/.test(l)) || '';
+      const beats = (h) => lab.stub.effects.filter((e) => e.effect === 'heartbeat' && e.as === h).length;
+      return [
+        { what: 'she was shown one line when she sat down', ok: ada.shown.filter((l) => /here now:/.test(l)).length === 1 },
+        { what: 'the door @sam left while she was away is announced as a door, by name, not as a message to answer', ok: ada.shown.some((l) => /@sam left a door open for you: "Retry Lab" · say "visit @sam"/.test(l)) && !ada.shown.some((l) => /waiting message/.test(l)) && called(ada, 'vibe_visit').length === 0 },
+        { what: 'it names @sam, whom she has written to, with what he says he is building', ok: /@sam \(retry queue/.test(line) },
+        { what: "it says @sam's door is open", ok: /@sam \([^)]*door open\)/.test(line) },
+        { what: 'it names @ben, whom she has an open line with', ok: /@ben \(/.test(line) },
+        { what: 'it does not name @cy, a stranger who is also here', ok: !/@cy/.test(line) },
+        { what: 'it does not name @zed, whom she muted', ok: !/@zed/.test(line) },
+        { what: 'her session did the task and did not make a thing of it (no /vibe tool calls, nothing sent beyond the door card)', ok: ada.tools.length === 0 && lab.stub.effects.filter((e) => e.effect === 'SEND').length === 1 && said(ada, /cloud/i) },
+        { what: '@ben, visible, told the server he is here', ok: beats('ben') > 0 },
+        { what: '@gus, invisible, never told the server he is here', ok: beats('gus') === 0 && Boolean(gus.final) },
+        { what: '@gus, invisible, still had his inbox watched (reachable while unseen)', ok: lab.stub.effects.some((e) => e.effect === 'read_threads' && e.me === 'gus') },
+      ];
+    },
+  },
 };

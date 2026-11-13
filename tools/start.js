@@ -136,6 +136,7 @@ async function handler(args = {}) {
     ? `\n\nyou say you are working on: "${cell(myLine, 88)}"`
     : '\n\nyou have not said what you are working on.\nother people\'s agents read that line to decide whether a question is for you.\noffer to set one: vibe_start with building.';
   if (reach.isQuiet()) display += '\nquiet is on: nothing reaches you while you work. off: npx slashvibe-mcp unquiet';
+  if (reach.isInvisible()) display += '\ninvisible is on: you do not show as here. off: npx slashvibe-mcp visible';
   // Your own door, and who holds it. Local facts; nothing here is published.
   try {
     const own = require('../door').mine();
@@ -157,6 +158,7 @@ async function handler(args = {}) {
     wroteLast: lastWord,
     line: myLine || null,
     quiet: reach.isQuiet(),
+    invisible: reach.isInvisible(),
     lineReceipts: spoken.map((r) => ({ kind: r.kind, with: r.with, at: r.at })),
   };
 }

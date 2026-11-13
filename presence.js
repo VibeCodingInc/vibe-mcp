@@ -80,17 +80,35 @@ async function initSession() {
   if (!handle) return;
   const sessionId = config.getSessionId();
   store.setSessionId(sessionId);
-  if (!sessionInitialized) {
-    const result = await store.registerSession(sessionId, handle);
-    sessionInitialized = result.success;
-  }
-  sendHeartbeat();
+  // Invisible (reach.js): nothing here may say "this person is in a session".
+  // Registering is such a statement, so it waits until they are visible.
+  if (reach.isInvisible()) return;
+  await register(sessionId, handle);
+  beat(handle);
+}
+
+async function register(sessionId, handle) {
+  if (sessionInitialized) return;
+  const result = await store.registerSession(sessionId, handle);
+  sessionInitialized = Boolean(result && result.success);
+}
+
+function beat(handle) {
+  store.heartbeat(handle, config.getOneLiner() || '');
 }
 
 async function sendHeartbeat() {
   if (!config.isInitialized()) return;
+  // Read on every beat, so `invisible` and `visible` take effect in open
+  // sessions without a restart. The inbox poll is separate and keeps running:
+  // being unseen must not make someone unreachable.
+  if (reach.isInvisible()) return;
   const handle = authStore.getHandle();
-  if (handle) store.heartbeat(handle, config.getOneLiner() || '');
+  if (!handle) return;
+  // Became visible in a session that started invisible: register once, then
+  // beat as always (a failed registration never stopped the heartbeat before).
+  if (!sessionInitialized) await register(config.getSessionId(), handle);
+  beat(handle);
 }
 
 async function poll() {
@@ -177,4 +195,5 @@ module.exports = {
   // test seams
   _pollDelayForTest: () => pollTimer?._idleTimeout ?? null,
   _setLastActivityForTest: (ts) => { lastActivityAt = ts; },
+  _sendHeartbeatForTest: sendHeartbeat,
 };

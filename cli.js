@@ -14,7 +14,7 @@
 
 const args = process.argv.slice(2);
 
-const COMMANDS = ['setup', 'hook', 'trust', 'untrust', 'lines', 'quiet', 'unquiet', 'mute', 'unmute', 'door'];
+const COMMANDS = ['setup', 'hook', 'trust', 'untrust', 'lines', 'quiet', 'unquiet', 'mute', 'unmute', 'door', 'invisible', 'visible'];
 const USAGE = `slashvibe-mcp: telepathic messaging, inside your coding agent
 
   npx slashvibe-mcp setup              install: configure your coding agent and sign in with GitHub
@@ -23,6 +23,7 @@ const USAGE = `slashvibe-mcp: telepathic messaging, inside your coding agent
   npx slashvibe-mcp lines              who you have an open line with
   npx slashvibe-mcp quiet              nothing reaches you while you work (undo: unquiet)
   npx slashvibe-mcp mute @handle       one person stops surfacing (undo: unmute @handle)
+  npx slashvibe-mcp invisible          be here without showing as here (undo: visible)
   npx slashvibe-mcp door https://...   leave a door: a link to what you are building (then: door share, door close)
 
 With no command it sets up on first run in a terminal; a coding agent starts it as an MCP server.
@@ -250,12 +251,14 @@ if (['help', '--help', '-h'].includes(args[0])) {
     process.stderr.write(`${error?.message || error}\n`);
     process.exitCode = 1;
   });
-} else if (['quiet', 'unquiet', 'mute', 'unmute'].includes(args[0])) {
+} else if (['quiet', 'unquiet', 'mute', 'unmute', 'invisible', 'visible'].includes(args[0])) {
   // Who may reach you while you work (reach.js). Local, and yours to type.
   const reach = require('./reach');
   const say = (t) => process.stdout.write(`${t}\n`);
   try {
-    if (args[0] === 'quiet') { reach.setQuiet(true); say('Quiet. Nothing will reach you while you work; messages wait until you ask what is waiting. Turn it off: npx slashvibe-mcp unquiet'); }
+    if (args[0] === 'invisible') { reach.setInvisible(true); say('Invisible. Your sessions stop saying you are here, so you drop off other people\'s lists within about ten minutes. You still see who is here, and messages still reach you. Turn it off: npx slashvibe-mcp visible'); }
+    else if (args[0] === 'visible') { reach.setInvisible(false); say('Visible. You show as here while you are in a session.'); }
+    else if (args[0] === 'quiet') { reach.setQuiet(true); say('Quiet. Nothing will reach you while you work; messages wait until you ask what is waiting. Turn it off: npx slashvibe-mcp unquiet'); }
     else if (args[0] === 'unquiet') { reach.setQuiet(false); say('Quiet is off. Messages from people you know reach you while you work again.'); }
     else if (args[0] === 'mute' && args[1]) { const h = reach.mute(args[1]); say(`Muted @${h}. Their messages will not surface in your sessions; they stay in the conversation. Undo: npx slashvibe-mcp unmute @${h}`); }
     else if (args[0] === 'unmute' && args[1]) { say(reach.unmute(args[1]) ? `Unmuted @${reach.norm(args[1])}.` : `@${reach.norm(args[1])} was not muted.`); }

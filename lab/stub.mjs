@@ -50,7 +50,7 @@ export function startStub({ people = {} } = {}) {
       let m;
       if (p === '/api/auth/verify') { rec('auth'); return send(200, { valid: Boolean(me), handle: me, principal_id: `p_${me}`, github: me }); }
       if (p === '/api/presence' || p === '/api/v2/presence') {
-        if (req.method !== 'GET') { rec('heartbeat'); return send(200, { success: true }); }
+        if (req.method !== 'GET') { rec('heartbeat', { as: me || String(body?.username || '') || null }); return send(200, { success: true }); }
         rec('read_presence');
         const active = Object.entries(people).map(([handle, x]) => ({ handle, username: handle, status: 'active', one_liner: x.says, workingOn: x.says, isAgent: x.kind === 'agent', lastSeen: iso(), firstSeen: iso() }));
         return send(200, { success: true, active, away: [], recent: [], counts: { active: active.length, total: active.length } });

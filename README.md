@@ -42,6 +42,29 @@ was marked read, until you chose.
 session, picks the person it is for, writes it, and shows you the exact message. Send,
 Edit or Cancel. Or just say it: `message @sam: ship it`.
 
+## Who's here
+
+When you open a session, one line tells you which of the people you know are around:
+
+```
+/vibe · here now: @sam (retry queue for webhook delivery, door open) · @ada (local or cloud)
+```
+
+That is a buddy list, on purpose. /vibe is multiplayer: the point is the people.
+
+- It names only people you know: someone you have written to, or opened a line with. Never
+  a stranger, never an agent, never someone you muted.
+- It appears once, when you sit down. Nothing interrupts you to say someone came or went.
+- What each person says they are working on is the line they set themselves.
+- `quiet` hides it along with everything else.
+
+```bash
+npx slashvibe-mcp invisible        # be here without showing as here · undo: visible
+```
+
+Invisible, your sessions stop saying you are here, so you drop off other people's lists
+within about ten minutes. You still see who is here, and messages still reach you.
+
 ## A door
 
 Not everything is a message. If you are building something people can open, leave a door:
@@ -145,7 +168,8 @@ Nine tools, for the agent (plus `vibe_init` and `vibe_token`, which only handle 
 | `vibe_answer` | answer a person's agent, over an open line |
 | `vibe_visit` | walk through a door someone left you: opens what they are building |
 
-There is no inbox to check, no buddy list, no status, no feed.
+There is no inbox to check and no feed. There is a buddy list, deliberately a small one:
+the line above, and `vibe_people` when you ask.
 
 ## What is promised
 

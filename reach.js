@@ -33,6 +33,7 @@ function read(env = process.env) {
   const o = v && typeof v === 'object' && !Array.isArray(v) ? v : {};
   return {
     quiet: o.quiet === true,
+    invisible: o.invisible === true,
     muted: o.muted && typeof o.muted === 'object' ? o.muted : {},
     known: o.known && typeof o.known === 'object' ? o.known : {},
   };
@@ -56,6 +57,10 @@ function handle(h) {
 const isQuiet = (env = process.env) => read(env).quiet;
 const setQuiet = (on, env = process.env) => update((s) => { s.quiet = Boolean(on); }, env);
 
+/** Invisible: this machine's sessions stop saying "I am here". Everything else works. */
+const isInvisible = (env = process.env) => read(env).invisible;
+const setInvisible = (on, env = process.env) => update((s) => { s.invisible = Boolean(on); }, env);
+
 const isMuted = (h, env = process.env) => Boolean(read(env).muted[norm(h)]);
 const mute = (h, env = process.env) => { const n = handle(h); update((s) => { s.muted[n] = Date.now(); }, env); return n; };
 const unmute = (h, env = process.env) => update((s) => { const n = norm(h); const had = Boolean(s.muted[n]); delete s.muted[n]; return had; }, env);
@@ -72,4 +77,4 @@ function know(h, env = process.env) {
 /** Everyone you have written to from this machine. */
 const known = (env = process.env) => Object.keys(read(env).known).filter(validHandle).sort();
 
-module.exports = { isQuiet, setQuiet, isMuted, mute, unmute, muted, isKnown, know, known, norm };
+module.exports = { isQuiet, setQuiet, isInvisible, setInvisible, isMuted, mute, unmute, muted, isKnown, know, known, norm };
