@@ -129,7 +129,11 @@ const answerDefinition = {
 function arrived(id) {
   const safe = arrival.safeId(String(id || '').replace(/^#/, ''));
   if (!safe) return null;
-  try { return JSON.parse(fs.readFileSync(path.join(arrival.spoolDir(), `${safe}.json`), 'utf8')); } catch { return null; }
+  try {
+    const row = JSON.parse(fs.readFileSync(path.join(arrival.spoolDir(), `${safe}.json`), 'utf8'));
+    // Only something that ARRIVED. The note of what this side said is not one.
+    return row && row.kind !== 'told' ? row : null;
+  } catch { return null; }
 }
 
 async function answerHandler(args = {}) {
@@ -152,6 +156,8 @@ async function answerHandler(args = {}) {
   const sent = await deliver({ to, message: message + line.ANSWERED(me), replyTo: id, origin: 'agent_line' });
   if (!sent.data || !sent.data.sent) return sent;
   line.record({ kind: 'answered', with: to, id: sent.data.message_id, answers: id, asked: line.stripMark(row.text || ''), said: message });
+  // The person is shown the answer by the hook, not by the agent's memory.
+  arrival.told({ me, to, said: message, id: sent.data.message_id });
   return {
     display: `Answered @${to} over the open line. Now tell the person here, in one line: @${to} asked "${inertField(line.stripMark(row.text || ''), 120)}" and you told them "${inertField(message, 160)}". Then carry on with their task.`,
     data: { sent: true, message_id: sent.data.message_id, to },

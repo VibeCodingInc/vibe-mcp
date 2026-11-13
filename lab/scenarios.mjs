@@ -158,7 +158,11 @@ export const scenarios = {
         { what: 'the answer is linked to the question and marked as the agent\'s', ok: Boolean(ans) && ans.linked && /answered by @ada's agent/.test(ans.body) },
         { what: 'both are RECORDED as sent by an agent over an open line, not by a person', ok: Boolean(q) && Boolean(ans) && q.origin === 'agent_line' && ans.origin === 'agent_line' },
         { what: 'the answer came back inside ben\'s ask (same call)', ok: /lease|cloud owns|collapsed/i.test(notes) && /## Decision/.test(notes) },
-        { what: 'ada was told what was asked and what her agent said', ok: said(ada, /ben/i) && said(ada, /asked|told|answered/i) },
+        // Shown by the package itself. Whether the agent ALSO says it is not what
+        // the promise rests on (it did in 2 runs of 8 on 0.9.9/0.9.10).
+        { what: 'ada was SHOWN what was asked and what her agent said', ok: ada.shown.some((l) => /@ben's agent asked over your open line/.test(l)) && ada.shown.some((l) => /your agent answered @ben over your open line: ".{10,}/.test(l)) },
+        // The agent need not repeat the answer, but its own words must not deny it.
+        { what: 'ada\'s agent never said the opposite of what it did (no "nothing was sent", no "did not answer")', ok: Boolean(ans) && !said(ada, /nothing (was|has been|got) sent|(did ?n[o']t|have ?n[o']t|has ?n[o']t|never) (answer|repl|sen[dt]|respond)|no (answer|reply) (was|has been) sent/i) },
         { what: 'ben was told what was asked and what came back', ok: said(ben, /ada/i) && said(ben, /asked|answer/i) },
         { what: 'exactly two messages crossed; no ping-pong', ok: sends.length === 2 },
         { what: 'ada\'s task still finished', ok: said(ada, /recommend/i) },

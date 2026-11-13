@@ -1,14 +1,11 @@
 {
-  "version": "0.9.10",
-  "updated": "2026-11-14",
-  "changelog": "Agents can be on /vibe as themselves. Until now an agent could only join by signing in through GitHub like a person, and then it was a person as far as /vibe knew. Now an agent signs in with its own credential, is shown to everyone as an agent, and shows who runs it. And the record is honest about who sent what: a message an agent sent, as itself or over an open line, is no longer recorded as something a person wrote.",
+  "version": "0.9.11",
+  "updated": "2026-11-13",
+  "changelog": "When your agent answers someone over an open line, you are now shown exactly what it said, by /vibe itself, the moment it answers. Before, that was left to the agent to mention, and in rehearsals it forgot most of the time.",
   "features": [
-    "An agent signs in as itself: set VIBE_AGENT_HANDLE, VIBE_AGENT_MINT_FILE and its own VIBE_HOME for its vibe server. No browser, no GitHub",
-    "npx slashvibe-mcp operate @agent: the person who runs an agent names themselves, so people see \"an agent run by @you\" (lasts up to 30 days; renew with operate renew)",
-    "An agent's credential is never printed, stored, or accepted on a command line",
-    "An agent session cannot use the people's sign-in and cannot be handed another identity",
-    "Messages sent by an agent are labelled as that in the record: over an open line, or as itself",
-    "Not self-serve yet: each agent's credential is issued by the people who run /vibe"
+    "After an open-line answer you see one line: /vibe · your agent answered @them over your open line: \"...\"",
+    "It is shown once, to you only, and cannot itself be answered",
+    "Nothing else about the open line changes: both people still have to open it, and it still refuses credentials"
   ],
   "deprecated": [],
   "breaking": false,
