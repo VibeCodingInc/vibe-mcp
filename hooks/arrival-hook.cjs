@@ -30,7 +30,7 @@ const EVENTS = new Set(['UserPromptSubmit', 'PostToolUse']);
 
 function quiet() { process.stdout.write(JSON.stringify({ suppressOutput: true })); }
 
-function take(dir, now) {
+function take(dir, now, session) {
   let names;
   try { names = fs.readdirSync(dir); } catch { return []; }
   const shown = new Set(names.filter((n) => n.endsWith('.shown')).map((n) => n.slice(0, -6)));
@@ -42,6 +42,9 @@ function take(dir, now) {
     let row;
     try { row = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')); } catch { continue; }
     if (!row || typeof row.context !== 'string' || !(now - row.at <= TTL_MS)) continue;
+    // A row made for one session (who is near, after THIS person said they
+    // were stuck) is shown there and nowhere else; it is left for that session.
+    if (typeof row.session === 'string' && row.session !== session) continue;
     try { fs.closeSync(fs.openSync(path.join(dir, `${id}.shown`), 'wx', 0o600)); } catch { continue; }
     rows.push(row);
   }
@@ -55,7 +58,12 @@ function main() {
   if (!EVENTS.has(event)) return quiet();
 
   const dir = process.env.VIBE_ARRIVALS_DIR || path.join(__dirname, '..', 'arrivals');
-  const rows = take(dir, Date.now());
+  const session = String(input.session_id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
+  // The agent looked for someone near by itself: the server need not show it too.
+  if (event === 'PostToolUse' && session && /(^|__)vibe_bump$/.test(String(input.tool_name || ''))) {
+    try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); fs.closeSync(fs.openSync(path.join(dir, `near-${session}.done`), 'wx', 0o600)); } catch {}
+  }
+  const rows = take(dir, Date.now(), session);
   const nudge = event === 'UserPromptSubmit' ? stuckNudge(input, dir) : '';
   if (rows.length === 0 && !nudge) return quiet();
 

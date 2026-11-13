@@ -294,7 +294,7 @@ function prune(me, { now = Date.now(), env = process.env } = {}) {
         let row = null;
         try { row = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
         if (age > SPOOL_TTL_MS || !row || (mine && row.to !== mine)) fs.unlinkSync(file);
-      } else if (name.endsWith('.shown') || name.endsWith('.tmp')) {
+      } else if (name.endsWith('.shown') || name.endsWith('.tmp') || name.endsWith('.claim') || name.endsWith('.done')) {
         if (age > CLAIM_TTL_MS) fs.unlinkSync(file);
       }
     } catch {}

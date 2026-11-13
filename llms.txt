@@ -121,6 +121,9 @@ way.
   someone they already know is in a session working on the same thing, and offer: visit
   their door, ask them, or not now. It names only people they know, never a stranger. What
   they are stuck on is not sent anywhere. If nobody fits, say nothing about it.
+  If you have not checked within about a minute of the person saying they are stuck, the
+  package itself shows them one line naming the people they know who are here. It has then
+  been shown: do not repeat it. Say which of them fits, if one does, or nothing.
 - **An open line.** When two people have each run `trust` for the other, their agents may ask
   and answer each other from the work without stopping either person. The code allows this
   only over a line, at most 6 messages an hour per person and 700 characters, never anything

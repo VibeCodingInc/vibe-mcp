@@ -27,7 +27,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const jwt = (h) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Math.floor(Date.now() / 1000) + 86400 })).toString('base64url')}.sig`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function identity(root, handle, says, stubUrl, trusts = [], knows = [], { muted = [], invisible = false, startHook = false, agentMint = null } = {}) {
+function identity(root, handle, says, stubUrl, trusts = [], knows = [], { muted = [], invisible = false, startHook = false, agentMint = null, serverEnv = {} } = {}) {
   const home = path.join(root, handle, '.vibe');
   const work = path.join(root, handle, 'work');
   fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(work, { recursive: true });
@@ -43,7 +43,7 @@ function identity(root, handle, says, stubUrl, trusts = [], knows = [], { muted 
   }
   if (knows.length || muted.length || invisible) fs.writeFileSync(path.join(home, 'reach.json'), JSON.stringify({ quiet: false, invisible, muted: Object.fromEntries(muted.map((h) => [h, Date.now()])), known: Object.fromEntries(knows.map((h) => [h, Date.now()])) }));
   if (trusts.length) fs.writeFileSync(path.join(home, 'lines.json'), JSON.stringify(Object.fromEntries(trusts.map((h) => [h, { since: Date.now() }]))));
-  const env = { VIBE_HOME: home, VIBE_API_URL: stubUrl, VIBE_SETUP_NO_AUTORUN: '1', CI: '1', ...(agentMint ? { VIBE_AGENT_HANDLE: handle, VIBE_AGENT_MINT_FILE: mintFile } : {}) };
+  const env = { VIBE_HOME: home, VIBE_API_URL: stubUrl, VIBE_SETUP_NO_AUTORUN: '1', CI: '1', ...serverEnv, ...(agentMint ? { VIBE_AGENT_HANDLE: handle, VIBE_AGENT_MINT_FILE: mintFile } : {}) };
   const mcp = path.join(root, handle, 'mcp.json');
   fs.writeFileSync(mcp, JSON.stringify({ mcpServers: { vibe: { command: process.execPath, args: [path.join(REPO, 'index.js')], env } } }));
   const settings = path.join(root, handle, 'settings.json');
@@ -126,7 +126,7 @@ async function run(name) {
   const stub = await startStub({ people: sc.people, agentMints });
   const ids = {};
   for (const [h, p] of Object.entries(sc.people)) {
-    ids[h] = identity(root, h, p.says, stub.url, p.trusts || [], p.knows || [], { muted: p.muted || [], invisible: Boolean(p.invisible), startHook: Boolean(sc.startHook), agentMint: agentMints[h] || null });
+    ids[h] = identity(root, h, p.says, stub.url, p.trusts || [], p.knows || [], { muted: p.muted || [], invisible: Boolean(p.invisible), startHook: Boolean(sc.startHook), agentMint: agentMints[h] || null, serverEnv: p.serverEnv || {} });
     for (const [file, text] of Object.entries(p.files || {})) fs.writeFileSync(path.join(ids[h].work, file), text);
   }
   const lab = { stub, ids, sleep, agentMints, cli: (h, args, extraEnv) => cli(ids[h], args, extraEnv), session: (h, prompt, o) => session(ids[h], prompt, o), read: (h, f) => fs.readFileSync(path.join(ids[h].work, f), 'utf8') };
