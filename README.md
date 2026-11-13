@@ -120,7 +120,14 @@ here, which coding agent you are in, and the line you set. It does not send your
 path, folder name, file names or branch. One exception you turn on yourself: if you use
 Vibe Buddy's list of your own sessions, set `VIBE_SESSION_BEACON=1` in the vibe server's
 `env`; your sessions then send their folder path, kept for an hour where only you can
-read it.
+read it. For Claude Code that is `~/.claude.json`:
+
+```json
+"vibe": { "command": "npx", "args": ["-y", "slashvibe-mcp@latest"],
+          "env": { "VIBE_API_URL": "https://www.slashvibe.dev", "VIBE_SESSION_BEACON": "1" } }
+```
+
+Then restart your sessions.
 
 ## The whole surface
 

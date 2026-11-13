@@ -1,15 +1,12 @@
 {
-  "version": "0.9.4",
+  "version": "0.9.5",
   "updated": "2026-11-13",
-  "changelog": "Doors. Leave a link to the thing you are building with the people you know, and any of them can say \"visit @you\" and step in. It is the first thing in /vibe that is not a message: somewhere to go. A door is never published; it goes only to people you have already written to or opened a line with. Good to know: you are not told who visits (no visit count yet); door share with no name tells everyone you know; and Buddy and the iOS app show a door as a plain message for now.",
+  "changelog": "A privacy fix. Until now, every 30 seconds an open session sent /vibe the full path of the folder you were working in and the folder's name, and the folder name was readable by anyone signed in. That has stopped: nothing about your folders, files or branch leaves your machine. If you use Vibe Buddy's list of your own sessions, it needs the path, so turn that on yourself: add \"VIBE_SESSION_BEACON\": \"1\" to the env of the vibe server in your coding agent's MCP config (for Claude Code, the \"vibe\" entry under mcpServers in ~/.claude.json), then restart your sessions. With it on, the path goes only to your own session list, kept for an hour, readable only by you.",
   "features": [
-    "npx slashvibe-mcp door https://your-project.dev \"what it is\": leave a door. Setting it tells nobody",
-    "door share: leaves it with everyone you know, up to 20 at a time. door share @handle: one person. It refuses anyone you have not written to",
-    "visit @handle: opens their door in your browser. Nothing is sent and they are not told",
-    "A door shows beside its owner in who's here, and one left for you mid-task is announced by name, never opened for you",
-    "door close: takes it down and tells the people who held it",
-    "Public https links only. Only you can set or share your door, from your terminal; no tool can",
-    "Not yet: a count of visits for the owner; doors in Buddy and iOS (they show the card as a plain message)"
+    "The heartbeat no longer sends your working folder's path or name. Nothing is taken from your repository",
+    "Buddy users: to keep the list of your own sessions, set VIBE_SESSION_BEACON=1 in the vibe server's env (~/.claude.json → mcpServers → vibe → env) and restart your sessions",
+    "With that on, the folder path goes only to your own session list (one hour, only you can read it). The folder name is never published",
+    "Not fixed by this update: folder names the service already stored from earlier versions. Clearing those is a server-side change"
   ],
   "deprecated": [],
   "breaking": false,
