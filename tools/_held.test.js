@@ -284,3 +284,11 @@ test("Platform's own digest agrees with ours, when the platform checkout is pres
   const thought = 're: kernel — the scheduler patch is in\nPR: https://github.com/x/y/pull/9';
   assert.equal(platformDigest(thought), mod.approvalSha256({ forEmail: '', subject: '', text: '', html: '', openNote: '', question: '', firstThought: thought }));
 });
+
+test('someone you already know is never looked up, so their preview costs no extra request', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, 'drafts.js'), 'utf8');
+  const i = src.indexOf("require('../reach').isKnown(to)");
+  const j = src.indexOf('await invite.lookup(to)).found === false');
+  assert.ok(i > 0 && j > i, 'the known check comes before the lookup');
+  assert.match(src.slice(i, j), /!known/);
+});

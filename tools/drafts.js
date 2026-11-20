@@ -324,7 +324,11 @@ async function draftHandler(args) {
   let absent = false;
   if (!wantId && args && args.handle && message) {
     const to = canonicalHandle(args.handle);
-    if (to && to !== me && to !== 'echo' && isGithubLogin(to)) {
+    // Someone you already know is on /vibe: no lookup, so the ordinary
+    // preview costs no extra request and cannot be slowed by this one.
+    let known = false;
+    try { known = require('../reach').isKnown(to); } catch { known = false; }
+    if (to && to !== me && to !== 'echo' && !known && isGithubLogin(to)) {
       try { absent = (await invite.lookup(to)).found === false; } catch { absent = false; }
     }
   }
