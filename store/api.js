@@ -907,6 +907,18 @@ async function markThreadRead(myHandle, theirHandle, lastMessageId = null, threa
 
 // ============ INVITES ============
 
+/**
+ * POST /api/invites — a held message for someone not on /vibe yet (a
+ * thought-bearing invitation named for one GitHub login). Sent ONCE, never
+ * retried here: the route has no idempotency key, so a transport retry after
+ * a lost response could mint a second invitation. The caller decides what an
+ * unanswered request means. `body.dry_run: true` is the platform's
+ * side-effect-free preview of the same request.
+ */
+async function createInvite(body) {
+  return request('POST', '/api/invites', body, { maxRetries: 0 });
+}
+
 // ============ AUTH ============
 
 /**
@@ -1020,6 +1032,9 @@ module.exports = {
 
   // Auth
   verifyAuthToken,
+
+  // Invites (a held message for someone not on /vibe yet)
+  createInvite,
 
   // Hermetic request-count tests for the named-thread fast path.
   _testing: { getThreadWithRequest, markThreadReadWithRequest },

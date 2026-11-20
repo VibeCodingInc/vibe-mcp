@@ -124,6 +124,11 @@ way.
   If you have not checked within about a minute of the person saying they are stuck, the
   package itself shows them one line naming the people they know who are here. It has then
   been shown: do not repeat it. Say which of them fits, if one does, or nothing.
+- **Someone not on /vibe yet.** If `vibe_prepare` finds that the handle does not exist on
+  `/vibe`, the preview says so and offers Keep instead of Send. Keep (still `vibe_send`, only on
+  the person's choice) holds the exact message for the GitHub account of that name for 30 days
+  and returns a join link and the person's setup line to pass on. The message arrives when
+  they sign in with that account. Never call a held message sent or delivered.
 - **An open line.** When two people have each run `trust` for the other, their agents may ask
   and answer each other from the work without stopping either person. The code allows this
   only over a line, at most 6 messages an hour per person and 700 characters, never anything

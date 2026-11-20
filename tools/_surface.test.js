@@ -37,7 +37,15 @@ async function withWire(fn, { reply = (m) => ({ id: `msg_${m.n}`, storedLength: 
   store.sendMessage = async (from, to, body, type, payload, opts) => { const m = { n: sends.length + 1, from, to, body, opts }; sends.push(m); return reply(m); };
   store.getActiveUsers = async () => users;
   store.getActiveUsersResult = async () => ({ ok: true, users });
-  try { await fn(sends); } finally { Object.assign(store, orig); }
+  // vibe_prepare asks /api/identity whether the recipient exists (held
+  // drafts). Everyone these tests write to is on /vibe: answer that here, so
+  // no test reads production.
+  const origFetch = global.fetch;
+  global.fetch = async (url) => {
+    const h = decodeURIComponent(String(url).split('/api/identity/')[1] || '');
+    return { ok: true, status: 200, json: async () => ({ handle: h, kind: 'human' }) };
+  };
+  try { await fn(sends); } finally { Object.assign(store, orig); global.fetch = origFetch; }
   return sends;
 }
 
