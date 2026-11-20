@@ -17,7 +17,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { exec, execSync } = require('child_process');
+const { execFile, execSync } = require('child_process');
 const { beginOAuth } = require('./oauth-callback');
 const actorSession = require('./actor-session');
 
@@ -290,18 +290,21 @@ function openBrowser(url) {
     console.log(`${colors.dim}  (browser suppressed for conformance run)${colors.reset}`);
     return;
   }
-  const platform = process.platform;
-  let command;
-
-  if (platform === 'darwin') {
-    command = `open "${url}"`;
-  } else if (platform === 'win32') {
-    command = `start "" "${url}"`;
+  // No shell: the URL is one argument to the opener, so nothing in it (a
+  // quote, an &, a $) can be read as a command.
+  let file;
+  let args;
+  if (process.platform === 'darwin') {
+    file = 'open'; args = [url];
+  } else if (process.platform === 'win32') {
+    // `cmd /c start` would hand the URL to cmd's parser, where & ends the
+    // command. The URL handler opens it in the default browser without one.
+    file = 'rundll32'; args = ['url.dll,FileProtocolHandler', url];
   } else {
-    command = `xdg-open "${url}"`;
+    file = 'xdg-open'; args = [url];
   }
 
-  exec(command, (err) => {
+  execFile(file, args, (err) => {
     if (err) {
       console.log(`${colors.yellow}  Could not open browser automatically.${colors.reset}`);
       console.log(`${colors.cyan}  Please open: ${url}${colors.reset}`);
@@ -593,4 +596,5 @@ module.exports = {
   saveAuthConfig,
   retireDeadCredential,
   installHostCommands,
+  openBrowser,
 };

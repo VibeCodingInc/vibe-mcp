@@ -220,13 +220,13 @@ test('not signed in, or a session without its principal, names sign-in as the fi
   try {
     const d = await moves.vibe_prepare.handler({ handle: 'nosign', message: 'hi' });
     const r = await moves.vibe_send.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
-    assert.match(r.display, /^Nothing was kept\. \/vibe does not see you signed in\. Run `vibe init`/);
+    assert.match(r.display, /^Nothing was kept\. \/vibe does not see you signed in\. Run `npx slashvibe-mcp setup`/);
   } finally { wire.restore(); }
   const w2 = stubWire(() => ({ status: 403, json: { success: false, code: 'principal_required', error: 'Sign in again…' } }));
   try {
     const d = await moves.vibe_prepare.handler({ handle: 'noprin', message: 'hi' });
     const r = await moves.vibe_send.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
-    assert.match(r.display, /needs a fresh sign-in on this machine\. Run `vibe init`/);
+    assert.match(r.display, /needs a fresh sign-in on this machine\. Run `npx slashvibe-mcp setup`/);
     assert.equal(w2.creates().length, 0);
   } finally { w2.restore(); }
 });

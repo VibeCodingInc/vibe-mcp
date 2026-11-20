@@ -4,13 +4,17 @@
  * This exists because the same defect has landed three times now: a padded/cased handle
  * normalized differently in different layers, so a self-DM passed the self-check AND
  * delivered. The most recent instance is instructive — `normalizeHandle` in
- * tools/_shared.js strips a leading `@` BEFORE trimming, so " @alice " becomes "@alice"
- * (the leading space defeats the ^@ match), which then fails to equal "alice" and lets a
- * padded self-target through. Order of operations, not intent.
+ * tools/_shared.js stripped a leading `@` BEFORE trimming, so " @alice " became "@alice"
+ * (the leading space defeated the ^@ match), which then failed to equal "alice" and let a
+ * padded self-target through. Order of operations, not intent. (Fixed: it trims first
+ * now, and tools/deliver.js uses canonicalHandle for the recipient and the self-check.)
  *
  * Rules, matching api/lib/handles.js so the platform and the protocol agree:
  *   strip zero-width characters → NFC normalize → trim → strip leading @s → trim again
- *   → lowercase → map '-' to '_' (the platform treats them as the same handle).
+ *   → lowercase. The dash is KEPT: a handle is a GitHub login and logins may contain
+ *   '-'. The platform's handles.js folds '-' to '_' when it first assigns a handle, so
+ *   'a-b' and 'a_b' can name the same account there; this form does not merge them
+ *   (see the note in canonicalHandle).
  *
  * NOT done: unicode folding of letters. Platform handles are ASCII [a-z0-9_], so a
  * non-ASCII handle is INVALID rather than something to fold — folding lookalikes would
@@ -25,7 +29,6 @@
 // Zero-width and bidi controls: invisible padding that makes two handles look identical.
 const INVISIBLE = /[​-‍⁠﻿؜‎‏‪-‮⁦-⁩]/g;
 
-/** Canonical comparison/storage form, or '' when there isn't one. */
 /**
  * The recipient exactly as the platform STORES it (message-service
  * storedRecipientHandle: lowercase, leading @ stripped, hyphens KEPT). The
@@ -36,6 +39,7 @@ function storedRecipientHandle(value) {
   return String(value || '').toLowerCase().replace(/^@/, '');
 }
 
+/** Canonical comparison/storage form, or '' when there isn't one. */
 function canonicalHandle(value) {
   if (typeof value !== 'string') return '';
   let h = value.replace(INVISIBLE, '');

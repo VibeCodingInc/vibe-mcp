@@ -22,6 +22,7 @@ const presence = require('../presence');
 
 authStore.isVerified = () => true;
 store.getActiveUsers = async () => [];
+store.getActiveUsersResult = async () => ({ ok: true, users: [] });
 let threadReads = 0; let conversations = {}; let marked = 0;
 store.getThread = async (me, them) => { threadReads++; return conversations[them] || []; };
 store.markThreadRead = async () => { marked++; return { success: true }; };
@@ -53,6 +54,43 @@ test('someone you wrote to from another device reaches you, and is remembered', 
   await presence.noteArrivals('ada', [m2]);
   assert.equal(threadReads, before, 'no second lookup for a known person');
   assert.equal(arrival.isSpooled(m2.lastMessageId), true);
+});
+
+test('a conversation that could not be read decides nothing: the message is asked about again next poll', async () => {
+  const orig = store.getThread;
+  // store.getThread reports failure by value: an empty list carrying readFailed.
+  let mode = 'failed';
+  store.getThread = async (me, them) => {
+    threadReads++;
+    if (mode === 'throw') throw new Error('network down');
+    if (mode === 'failed') { const t = []; Object.defineProperty(t, 'readFailed', { value: true }); return t; }
+    return [{ from: 'ada', body: 'from my phone' }, { from: them, body: 'got it' }];
+  };
+  try {
+    const m = msg('tess');
+    const before = threadReads;
+    await presence.noteArrivals('ada', [m]);
+    assert.equal(arrival.isSpooled(m.lastMessageId), false, 'unknown is not known');
+    mode = 'throw';
+    await presence.noteArrivals('ada', [m]);
+    assert.equal(threadReads, before + 2, 'the failed read was not remembered as "not known"');
+    assert.equal(arrival.isSpooled(m.lastMessageId), false);
+    mode = 'ok';
+    await presence.noteArrivals('ada', [m]);
+    assert.equal(threadReads, before + 3);
+    assert.equal(arrival.isSpooled(m.lastMessageId), true, 'once the read works, the message reaches you');
+    assert.equal(reach.isKnown('tess'), true);
+  } finally { store.getThread = orig; }
+});
+
+test('the store marks a failed or unreadable thread read, and only those', async () => {
+  const { getThreadWithRequest } = require('../store/api')._testing;
+  assert.equal((await getThreadWithRequest(async () => ({ raw: '<html>' }), 'ada', 'x')).readFailed, true, 'a non-JSON 200 is not an empty conversation');
+  const empty = await getThreadWithRequest(async () => ({ success: true, messages: [] }), 'ada', 'x');
+  assert.equal(empty.length, 0);
+  assert.notEqual(empty.readFailed, true, 'an empty conversation that was read is just empty');
+  await assert.rejects(getThreadWithRequest(async () => ({ success: false, error: 'HTTP 500' }), 'ada', 'x'));
+  assert.equal(Object.keys(await getThreadWithRequest(async () => ({ raw: '' }), 'ada', 'x')).length, 0, 'the marker is not enumerable: callers still see a plain empty list');
 });
 
 test('sending to someone is what lets their answer reach you', async () => {

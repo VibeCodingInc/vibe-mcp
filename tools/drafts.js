@@ -209,7 +209,7 @@ const sendKey = (d) => `draft-${d.id}-${textHash(d).slice(0, 10)}`;
  * The #392 approval digest over the EXACT snapshot the person approved:
  * SHA-256 of "<stored recipient>\n<body>", where the recipient is the form
  * the platform stores (lowercase, no @) and the body is the composed text
- * trimmed — exactly what vibe_dm sends. Computed once, at claim, from the
+ * trimmed — exactly what deliver() sends. Computed once, at claim, from the
  * snapshot; never recomputed after a change to the previewed content.
  */
 const approvedDigest = (to, message) => crypto.createHash('sha256').update(`${storedRecipientHandle(to)}\n${message}`, 'utf8').digest('hex');
@@ -343,7 +343,7 @@ async function draftHandler(args) {
       if (to === me) return { display: "You can't draft to yourself." };
       // @echo is the feedback line with its own path and no receipt shape;
       // it is not a person to draft to (codex P2).
-      if (to === 'echo') return { display: '@echo is the feedback line — send to it with vibe_dm directly. Nothing drafted.' };
+      if (to === 'echo') return { display: '@echo is the feedback line. To write to it, send the person\'s own words with vibe_send (handle + message). Nothing drafted.' };
       // An approval-bound send targets a durable conversation; the live
       // session route stores nothing and the platform refuses it (CB-007).
       if (to.endsWith('/claude')) return { display: `Drafts go to a person's durable conversation, not a live session — use @${to.replace(/\/claude$/, '')} instead. Nothing drafted.` };
@@ -567,8 +567,8 @@ async function sendHandler(args) {
 function heldRefusal(r) {
   const status = r && r.statusCode;
   const nothing = 'Nothing was kept.';
-  if (status === 401) return `${nothing} /vibe does not see you signed in. Run \`vibe init\` to sign in, then keep it again.`;
-  if (status === 403) return `${nothing} Holding a message for someone needs a fresh sign-in on this machine. Run \`vibe init\`, then keep it again.`;
+  if (status === 401) return `${nothing} /vibe does not see you signed in. Run \`npx slashvibe-mcp setup\` in a terminal to sign in, then keep it again.`;
+  if (status === 403) return `${nothing} Holding a message for someone needs a fresh sign-in on this machine. Run \`npx slashvibe-mcp setup\` in a terminal, then keep it again.`;
   if (status === 400 && r.error === 'No invite codes remaining') return `${nothing} You already have 3 unused invitations, the most /vibe allows at once. Pass on one of the links you already have; a slot opens when someone signs in with one or it expires after ${HELD_DAYS} days.`;
   if (status === 400 && typeof r.error === 'string' && /^first_thought is \d+ chars/.test(r.error)) return `${nothing} The message is over the 2000-char limit. Edit it shorter, then keep it again.`;
   if (status === 409 && r.error === 'approval_mismatch') return `${nothing} What /vibe would store is not what you approved. Open the draft again with vibe_prepare and approve what it shows now.`;

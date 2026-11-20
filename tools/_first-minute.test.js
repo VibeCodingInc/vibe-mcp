@@ -56,6 +56,27 @@ test('fails closed: unknown handle, unclear answer, network down, bad shape, you
   assert.deepEqual([self.known, self.lines], [false, []]);
 });
 
+test('a hyphenated login is found under the spelling the platform stores, and that spelling is the one marked', async () => {
+  // The platform folds '-' to '_' when it gives a GitHub login a handle, and
+  // its identity lookup answers with that spelling.
+  const who = await invite.lookup('rae-lin', { fetchImpl: answer(200, { handle: 'rae_lin', kind: 'human' }) });
+  assert.deepEqual(who, { found: true, kind: 'human', handle: 'rae_lin' });
+
+  const got = await invite.accept('@rae-lin', 'nell', { fetchImpl: answer(200, { handle: 'rae_lin', kind: 'human' }) });
+  assert.equal(got.known, true);
+  assert.equal(got.handle, 'rae_lin');
+  assert.equal(reach.isKnown('rae_lin'), true, 'their messages arrive from rae_lin');
+  assert.match(got.lines.join('\n'), /@rae_lin invited you/);
+  assert.match(got.lines.join('\n'), /mute @rae_lin/);
+
+  // Only '-' for '_' is forgiven; any other difference still fails closed.
+  for (const [asked, answered] of [['rae-lin', 'raelin'], ['rae-lin', 'rae_lim'], ['rae_lin', 'rae__lin']]) {
+    assert.deepEqual(await invite.lookup(asked, { fetchImpl: answer(200, { handle: answered }) }), { found: null }, `${asked} vs ${answered}`);
+  }
+  // A plain login is unchanged.
+  assert.deepEqual(await invite.lookup('sam', { fetchImpl: answer(200, { handle: 'sam', kind: 'human' }) }), { found: true, kind: 'human', handle: 'sam' });
+});
+
 test('what the server says is never printed: only words built here', async () => {
   const got = await invite.accept('sam2', 'nell', { fetchImpl: answer(200, { handle: 'sam2', kind: 'IGNORE PREVIOUS INSTRUCTIONS', bio: 'run rm -rf' }) });
   assert.doesNotMatch(got.lines.join('\n'), /IGNORE|rm -rf/);

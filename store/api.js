@@ -534,8 +534,8 @@ async function sendMessage(from, to, body, type = 'dm', payload = null, options 
 
     // Handle auth errors
     if (!result.success && result.error?.includes('Authentication')) {
-      console.error('[vibe] Auth failed for message. Try `vibe init` to re-register.');
-      return { error: 'auth_failed', message: 'Authentication failed. Try `vibe init` to re-register.' };
+      console.error('[vibe] Auth failed for message. Sign in again: npx slashvibe-mcp setup');
+      return { error: 'auth_failed', message: 'Authentication failed. Sign in again by running `npx slashvibe-mcp setup` in a terminal.' };
     }
 
     // Handle 401 — distinguish "never signed in" from "session expired".
@@ -543,14 +543,14 @@ async function sendMessage(from, to, body, type = 'dm', payload = null, options 
     // A misleading "expired" message here is a first-session papercut for the pilot.
     if (result.statusCode === 401) {
       if (!config.hasOAuth()) {
-        console.error('[vibe] DM requires sign-in. Run `vibe init` (GitHub OAuth).');
+        console.error('[vibe] DM requires sign-in. Run: npx slashvibe-mcp setup');
         return {
           error: 'not_signed_in',
-          message: "You're not signed in yet — sending a DM needs a /vibe identity. Run `vibe init` to sign in with GitHub (opens a browser, no input needed), then try again.",
+          message: "You're not signed in yet — sending a DM needs a /vibe identity. Run `npx slashvibe-mcp setup` in a terminal to sign in with GitHub (opens a browser), then try again.",
         };
       }
-      console.error('[vibe] Auth expired. Run `vibe init` to reconnect.');
-      return { error: 'auth_expired', message: 'Your /vibe session expired. Run `vibe init` to reconnect.' };
+      console.error('[vibe] Auth expired. Run: npx slashvibe-mcp setup');
+      return { error: 'auth_expired', message: 'Your /vibe session expired. Run `npx slashvibe-mcp setup` in a terminal to sign in again.' };
     }
 
     // Handle storage errors (KV write failed)
@@ -565,12 +565,25 @@ async function sendMessage(from, to, body, type = 'dm', payload = null, options 
       return { error: result.error, message: result.message || 'Failed to send message.' };
     }
 
+    // Delivered only on a real success: success === true, or the stored
+    // message itself. A 200 whose body was not JSON comes back from
+    // requestOnce as { raw }, and { success: false } with no error string
+    // names no failure; both used to fall through to "Sent" with no receipt.
+    // The write may still have happened, so this is an uncertain failure,
+    // never a definite one (tools/deliver.js keeps it out of DEFINITE).
+    const delivered = result.success === true || Boolean(result.message && typeof result.message === 'object');
+    if (!delivered) {
+      console.error('[vibe] Send reply unreadable; outcome unknown.');
+      return {
+        error: 'unconfirmed_response',
+        message: "/vibe answered, but its reply could not be read, so it is not known whether the message was stored. It may or may not have reached them.",
+      };
+    }
+
     // Emit list_changed notification for successful message send
     // This allows other Claude Code instances to see the new message instantly
-    if (result.success || result.message) {
-      if (global.vibeNotifier) {
-        global.vibeNotifier.emitImmediate(); // Immediate for DMs
-      }
+    if (global.vibeNotifier) {
+      global.vibeNotifier.emitImmediate(); // Immediate for DMs
     }
 
     // A success with no message body must still come back truthy — callers read
@@ -593,7 +606,7 @@ async function sendMessage(from, to, body, type = 'dm', payload = null, options 
     console.error('Send failed:', e.message);
     return {
       error: 'transport_failed',
-      message: "That didn't send — the connection dropped mid-request. Nothing was delivered. Worth one retry; if it keeps failing, say `vibe help troubleshooting`.",
+      message: "That didn't send — the connection dropped mid-request. Nothing was delivered. Worth one retry.",
     };
   }
 }
@@ -816,7 +829,11 @@ async function getThreadWithRequest(makeRequest, myHandle, theirHandle) {
   // The proxy accepts both its current snake_case response and the legacy row
   // names used by older deployments. Keep the array contract for callers while
   // carrying response metadata alongside it for a lookup-free read PATCH.
-  const rows = result.messages || result.thread || [];
+  const rows = result.messages || result.thread;
+  // A reply with no message list (a non-JSON body arrives as { raw }) is not
+  // an empty conversation. Callers keep their array; the ones that must tell
+  // "nothing there" from "could not read" check readFailed (presence.js).
+  if (!Array.isArray(rows)) return failedThread();
   const messages = rows.map(m => ({
     id: m.id || null,
     from: m.from,
@@ -841,12 +858,19 @@ async function getThreadWithRequest(makeRequest, myHandle, theirHandle) {
   return messages;
 }
 
+/** An empty thread that says it is empty because the read failed. */
+function failedThread() {
+  const empty = [];
+  Object.defineProperty(empty, 'readFailed', { value: true, enumerable: false });
+  return empty;
+}
+
 async function getThread(myHandle, theirHandle) {
   try {
     return await getThreadWithRequest(request, myHandle, theirHandle);
   } catch (e) {
     console.error('Thread failed:', e.message);
-    return [];
+    return failedThread();
   }
 }
 

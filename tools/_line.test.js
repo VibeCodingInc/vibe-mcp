@@ -28,9 +28,11 @@ function arrive(from, text, over = {}) {
 }
 async function wire(fn, { thread = async () => [] } = {}) {
   const sends = [];
-  const orig = { sendMessage: store.sendMessage, getActiveUsers: store.getActiveUsers, getThread: store.getThread };
+  const orig = { sendMessage: store.sendMessage, getActiveUsers: store.getActiveUsers, getActiveUsersResult: store.getActiveUsersResult, getThread: store.getThread };
   store.sendMessage = async (from, to, body, type, payload, opts) => { sends.push({ from, to, body, opts }); return { id: `msg_out${sends.length}`, storedLength: body.length }; };
   store.getActiveUsers = async () => [];
+  // deliver reads presence through the outcome-keeping call; stub it too, so no test reads production.
+  store.getActiveUsersResult = async () => ({ ok: true, users: [] });
   store.getThread = async (me, them) => thread(me, them, sends);
   try { await fn(sends); } finally { Object.assign(store, orig); }
   return sends;
@@ -108,6 +110,29 @@ test('an answer goes only to whoever actually wrote the arrived message, marked 
   assert.match(sends[0].body, /\(answered by @ada's agent from their current work, over an open line\. @ada has not read this\.\)$/);
   const receipt = line.receipts().find((r) => r.kind === 'answered');
   assert.deepEqual([receipt.with, receipt.answers, receipt.asked], ['ben', id, 'how did you stop local deciding?']);
+});
+
+test('two answers to one question in flight together carry one key, so the service stores at most one', async () => {
+  resetLines(); line.open('cy');
+  const id = arrive('cy', 'which region?' + line.ASKED('cy'));
+  const sends = await wire(async () => {
+    // Both start before either records a receipt: the local check cannot stop the second.
+    const [a, b] = await Promise.all([
+      vibe_answer.handler({ reply_to: id, message: 'us-east' }),
+      vibe_answer.handler({ reply_to: id, message: 'us-east, for now' }),
+    ]);
+    assert.equal(a.data.sent, true);
+    assert.equal(b.data.sent, true);
+  });
+  assert.equal(sends.length, 2, 'both reached the wire (the stub does not dedupe)');
+  const key = sends[0].opts.idempotencyKey;
+  assert.match(key, /^answer-[0-9a-f]{20}$/);
+  assert.equal(sends[1].opts.idempotencyKey, key, 'the same question from the same handle has one key');
+  assert.ok(key.length <= 200, 'inside the service\'s key limit');
+  const { answerKey } = require('./line');
+  assert.equal(answerKey('ada', id), key, 'derived from this handle and the question id, nothing else');
+  assert.notEqual(answerKey('ada', `${id}x`), key, 'another question has another key');
+  assert.notEqual(answerKey('bea', id), key, 'another handle has another key');
 });
 
 test('an id that never arrived here cannot be answered unattended', async () => {

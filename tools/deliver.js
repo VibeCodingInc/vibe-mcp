@@ -11,7 +11,8 @@
 
 const config = require('../config');
 const store = require('../store');
-const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
+const { requireInit, isHereNow } = require('./_shared');
+const { canonicalHandle } = require('../protocol/handle');
 
 const MAX_LENGTH = 2000;
 
@@ -22,8 +23,10 @@ const MAX_LENGTH = 2000;
 const DEFINITE = new Set(['not_signed_in', 'self_dm', 'message_too_long', 'approved_content_mismatch',
   'approved_sha256_malformed', 'approved_send_unsupported_route', 'private_composition_data', 'idempotency_conflict']);
 // Errors whose message already names the fix; they get no generic retry hint.
+// An unreadable reply is one of them: it may have been stored, and a typed
+// resend carries a fresh key, so "worth one retry" could deliver it twice.
 const REMEDY_CARRYING = new Set(['auth_expired', 'not_signed_in', 'auth_failed', 'handle_not_found',
-  'self_dm', 'storage_error', 'transport_failed']);
+  'self_dm', 'storage_error', 'transport_failed', 'unconfirmed_response']);
 
 /**
  * @param {{to: string, message: string, replyTo?: string|null, origin?: string,
@@ -33,10 +36,12 @@ async function deliver(m) {
   const initCheck = requireInit();
   if (initCheck) return { ...initCheck, data: { sent: false, definite: true } };
 
+  // Both sides in the one canonical form, so a padded or prefixed "@me" is
+  // still recognised as you (protocol/handle.js).
   const me = config.getHandle();
-  const them = normalizeHandle(m.to);
+  const them = canonicalHandle(typeof m.to === 'string' ? m.to : String(m.to || ''));
   if (!them) return { display: 'Nothing sent. Who is it for?', data: { sent: false, definite: true } };
-  if (them === me) return { display: "You can't message yourself.", data: { sent: false, definite: true } };
+  if (them === canonicalHandle(me || '')) return { display: "You can't message yourself.", data: { sent: false, definite: true } };
 
   const text = typeof m.message === 'string' ? m.message.trim() : '';
   if (!text) return { display: 'Nothing sent. The message is empty.', data: { sent: false, definite: true } };
@@ -91,9 +96,11 @@ async function deliver(m) {
 
   // Nobody has to be online. Say so once, when it applies; presence being
   // unreadable never turns a real send into noise.
+  // Only a presence read that succeeded can say they are not here; a failed
+  // one says nothing (getActiveUsers flattens a failure to an empty room).
   try {
-    const room = await store.getActiveUsers();
-    if (!isHereNow((room || []).find((u) => u.handle === them))) {
+    const room = await store.getActiveUsersResult();
+    if (room && room.ok === true && !isHereNow((room.users || []).find((u) => u && u.handle === them))) {
       display += `\n_@${them} is not in a session right now. It reaches them when they next are._`;
     }
   } catch (e) {}

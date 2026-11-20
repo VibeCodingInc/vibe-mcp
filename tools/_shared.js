@@ -24,7 +24,7 @@ const store = require('../store');
 function requireInit() {
   if (!config.isInitialized()) {
     return {
-      display: "You're not signed in yet. Run `vibe init` — GitHub opens in your browser and your username becomes your @handle.",
+      display: "You're not signed in yet. Run `npx slashvibe-mcp setup` in a terminal — GitHub opens in your browser and your username becomes your @handle.",
       error: 'not_initialized'
     };
   }
@@ -36,13 +36,17 @@ function requireInit() {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Normalize a handle string (remove @, lowercase, trim)
+ * Normalize a handle string (trim, remove leading @s, lowercase).
+ * Trim comes first: stripping the @ before trimming turned " @alice " into
+ * "@alice", which then failed to equal "alice" (protocol/handle.js has the
+ * history). For anything that decides who a message goes to, use
+ * canonicalHandle from protocol/handle.js.
  * @param {string} handle - Raw handle input
  * @returns {string} Normalized handle
  */
 function normalizeHandle(handle) {
   if (!handle) return '';
-  return handle.toString().replace(/^@/, '').toLowerCase().trim();
+  return handle.toString().trim().replace(/^@+/, '').trim().toLowerCase();
 }
 
 /**
