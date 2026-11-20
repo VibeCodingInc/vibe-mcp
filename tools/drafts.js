@@ -209,7 +209,7 @@ const sendKey = (d) => `draft-${d.id}-${textHash(d).slice(0, 10)}`;
  * The #392 approval digest over the EXACT snapshot the person approved:
  * SHA-256 of "<stored recipient>\n<body>", where the recipient is the form
  * the platform stores (lowercase, no @) and the body is the composed text
- * trimmed — exactly what vibe_dm sends. Computed once, at claim, from the
+ * trimmed — exactly what deliver() sends. Computed once, at claim, from the
  * snapshot; never recomputed after a change to the previewed content.
  */
 const approvedDigest = (to, message) => crypto.createHash('sha256').update(`${storedRecipientHandle(to)}\n${message}`, 'utf8').digest('hex');
@@ -321,14 +321,25 @@ async function draftHandler(args) {
   // Is the person on /vibe at all? Asked only for a NEW draft to a handle
   // shaped like a GitHub login. Only a definite "no such handle" (404) makes
   // the draft held; a lookup that could not confirm keeps today's behaviour.
+  //
+  // A handle with a '-' is also addressed by the platform's spelling of it
+  // (invite.resolveRecipient): the draft's `to`, its rev, its digest and the
+  // stored recipient all use what the lookup answered. That one lookup also
+  // serves the held check, so a prepare never asks twice.
   let absent = false;
+  let resolvedTo = null;
   if (!wantId && args && args.handle && message) {
     const to = canonicalHandle(args.handle);
     // Someone you already know is on /vibe: no lookup, so the ordinary
     // preview costs no extra request and cannot be slowed by this one.
     let known = false;
     try { known = require('../reach').isKnown(to); } catch { known = false; }
-    if (to && to !== me && to !== 'echo' && !known && isGithubLogin(to)) {
+    if (to && to !== me && to.includes('-') && !to.endsWith('/claude')) {
+      const r = await invite.resolveRecipient(to);
+      resolvedTo = r.handle;
+      // Absent means the login as typed: a held draft is for that GitHub account.
+      if (!known && isGithubLogin(to)) absent = Boolean(r.who && r.who.found === false);
+    } else if (to && to !== me && to !== 'echo' && !known && isGithubLogin(to)) {
       try { absent = (await invite.lookup(to)).found === false; } catch { absent = false; }
     }
   }
@@ -338,12 +349,12 @@ async function draftHandler(args) {
     if (wantId && !d) return { display: `No draft ${wantId} — it may have expired (drafts live 24h, locally). Prepare it again.` };
     if (!d) {
       if (!args || !args.handle || !message) return { display: 'To prepare a message: pass a handle and a message (or a draft id to edit). Nothing is sent by this step.' };
-      const to = canonicalHandle(args.handle);
+      const to = resolvedTo || canonicalHandle(args.handle);
       if (!to) return { display: 'To prepare a message: pass a handle and a message (or a draft id to edit). Nothing is sent by this step.' };
       if (to === me) return { display: "You can't draft to yourself." };
       // @echo is the feedback line with its own path and no receipt shape;
       // it is not a person to draft to (codex P2).
-      if (to === 'echo') return { display: '@echo is the feedback line — send to it with vibe_dm directly. Nothing drafted.' };
+      if (to === 'echo') return { display: '@echo is the feedback line. To write to it, send the person\'s own words with vibe_send (handle + message). Nothing drafted.' };
       // An approval-bound send targets a durable conversation; the live
       // session route stores nothing and the platform refuses it (CB-007).
       if (to.endsWith('/claude')) return { display: `Drafts go to a person's durable conversation, not a live session — use @${to.replace(/\/claude$/, '')} instead. Nothing drafted.` };
@@ -474,9 +485,17 @@ async function sendHandler(args) {
     if (!args || !args.handle || typeof args.message !== 'string' || !args.message.trim()) {
       return { display: 'Nothing sent. Pass a draft id and rev, or a handle and the exact message.' };
     }
-    const result = await deliver({ to: args.handle, message: args.message, replyTo: cleanId(args.reply_to) });
+    // Addressed by the platform's spelling when the handle has a '-'
+    // (invite.resolveRecipient). Done here, not in deliver: a draft's digest
+    // is computed over its `to` before deliver runs, so deliver must not
+    // change the recipient.
+    let to = canonicalHandle(args.handle);
+    if (to && to !== canonicalHandle(me || '') && !to.endsWith('/claude')) {
+      try { to = (await invite.resolveRecipient(to)).handle; } catch (e) {}
+    }
+    const result = await deliver({ to: to || args.handle, message: args.message, replyTo: cleanId(args.reply_to) });
     // The thread has moved on: what they say next answers THIS.
-    if (result.data && result.data.sent) { try { clearReturnBinding(args.handle); } catch (e) {} }
+    if (result.data && result.data.sent) { try { clearReturnBinding(to || args.handle); } catch (e) {} }
     return result;
   }
 
@@ -567,8 +586,8 @@ async function sendHandler(args) {
 function heldRefusal(r) {
   const status = r && r.statusCode;
   const nothing = 'Nothing was kept.';
-  if (status === 401) return `${nothing} /vibe does not see you signed in. Run \`vibe init\` to sign in, then keep it again.`;
-  if (status === 403) return `${nothing} Holding a message for someone needs a fresh sign-in on this machine. Run \`vibe init\`, then keep it again.`;
+  if (status === 401) return `${nothing} /vibe does not see you signed in. Run \`npx slashvibe-mcp setup\` in a terminal to sign in, then keep it again.`;
+  if (status === 403) return `${nothing} Holding a message for someone needs a fresh sign-in on this machine. Run \`npx slashvibe-mcp setup\` in a terminal, then keep it again.`;
   if (status === 400 && r.error === 'No invite codes remaining') return `${nothing} You already have 3 unused invitations, the most /vibe allows at once. Pass on one of the links you already have; a slot opens when someone signs in with one or it expires after ${HELD_DAYS} days.`;
   if (status === 400 && typeof r.error === 'string' && /^first_thought is \d+ chars/.test(r.error)) return `${nothing} The message is over the 2000-char limit. Edit it shorter, then keep it again.`;
   if (status === 409 && r.error === 'approval_mismatch') return `${nothing} What /vibe would store is not what you approved. Open the draft again with vibe_prepare and approve what it shows now.`;

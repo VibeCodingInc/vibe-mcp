@@ -17,6 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const config = require('../config');
 const store = require('../store');
 const line = require('../line');
@@ -137,6 +138,13 @@ function arrived(id) {
   } catch { return null; }
 }
 
+/**
+ * One idempotency key per (this handle, question). Same family and bounds as
+ * the draft keys (`draft-<id>-<hash>`): short, ASCII, well under the service's
+ * 200-character limit whatever the id looks like.
+ */
+const answerKey = (me, id) => `answer-${crypto.createHash('sha1').update(`${me}\n${id}`).digest('hex').slice(0, 20)}`;
+
 async function answerHandler(args = {}) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
@@ -154,7 +162,11 @@ async function answerHandler(args = {}) {
   if (line.isAgentAnswer(row.text)) return refuse('Nothing sent. That message is itself an agent\'s answer; answers are not answered unattended. If something real remains to say, prepare it with vibe_prepare.');
   if (line.receipts().some((r) => r.kind === 'answered' && r.answers === id)) return refuse('Nothing sent. That question was already answered from this machine.');
 
-  const sent = await deliver({ to, message: message + line.ANSWERED(me), replyTo: id, origin: 'agent_line' });
+  // The receipt check above is local and not atomic with the send: two answers
+  // to one question in flight together would both pass it. The key is the same
+  // for any answer from this handle to this question, so the service stores at
+  // most one (a second, different answer is refused as an idempotency conflict).
+  const sent = await deliver({ to, message: message + line.ANSWERED(me), replyTo: id, origin: 'agent_line', idempotencyKey: answerKey(me, id) });
   if (!sent.data || !sent.data.sent) return sent;
   line.record({ kind: 'answered', with: to, id: sent.data.message_id, answers: id, asked: line.stripMark(row.text || ''), said: message });
   // The person is shown the answer by the hook, not by the agent's memory.
@@ -168,4 +180,5 @@ async function answerHandler(args = {}) {
 module.exports = {
   vibe_ask: { definition: askDefinition, handler: askHandler },
   vibe_answer: { definition: answerDefinition, handler: answerHandler },
+  answerKey,
 };

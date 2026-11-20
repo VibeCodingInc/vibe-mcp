@@ -145,15 +145,20 @@ async function poll() {
  * Known = an open line, a send recorded on this machine, or (checked once and
  * then remembered) any message of yours in the conversation, so someone you
  * wrote to from another device still reaches you here. Reading the
- * conversation does not mark it read. A failed read is "not known yet".
+ * conversation does not mark it read.
+ *
+ * Three answers: true, false (the conversation was read and holds nothing of
+ * yours), or null (it could not be read, so this says nothing either way).
+ * store.getThread reports a failed read by value, an empty list carrying
+ * readFailed, rather than by throwing; a throw counts as could-not-tell too.
  */
 async function knows(me, them) {
   if (line.isOpen(them) || reach.isKnown(them)) return true;
-  try {
-    const thread = await store.getThread(me, them);
-    const mine = String(me).toLowerCase();
-    if ((thread || []).some((m) => String(m.from || '').toLowerCase() === mine)) { reach.know(them); return true; }
-  } catch {}
+  let thread;
+  try { thread = await store.getThread(me, them); } catch { return null; }
+  if (!Array.isArray(thread) || thread.readFailed) return null;
+  const mine = String(me).toLowerCase();
+  if (thread.some((m) => String((m && m.from) || '').toLowerCase() === mine)) { reach.know(them); return true; }
   return false;
 }
 
@@ -186,11 +191,15 @@ async function noteArrivals(handle, threads) {
     .filter((t) => !arrival.isClaimed(t.lastMessageId) && !arrival.isSpooled(t.lastMessageId));
   // Only someone you know reaches you mid-work (reach.js). A muted person, or
   // someone you have never written to, stays waiting: remembered here so the
-  // question is asked once per message, not once per poll.
+  // question is asked once per message, not once per poll. A conversation that
+  // could not be read decides nothing, so that message is asked about again
+  // on the next poll instead of being parked for the rest of the session.
   const candidates = [];
   for (const t of wanted) {
-    if (!reach.isMuted(t.lastFrom) && await knows(handle, t.lastFrom)) candidates.push(t);
-    else waitingAtStart.add(t.lastMessageId);
+    if (reach.isMuted(t.lastFrom)) { waitingAtStart.add(t.lastMessageId); continue; }
+    const known = await knows(handle, t.lastFrom);
+    if (known === true) candidates.push(t);
+    else if (known === false) waitingAtStart.add(t.lastMessageId);
   }
   if (candidates.length === 0) return;
   const allowed = new Set(candidates.map((t) => t.lastMessageId));
