@@ -60,6 +60,11 @@ was marked read, until you chose.
 session, picks the person it is for, writes it, and shows you the exact message. Send,
 Edit or Cancel. Or just say it: `message @sam: ship it`.
 
+**Someone who is not here yet.** If the person you are writing to has no /vibe account, the
+preview says so, and Keep holds your exact message for the GitHub account of that name for
+30 days. You get a join link and your setup line to pass on; when they sign in to /vibe with
+that account, it is your first message to them. Nothing reaches them before then.
+
 ## Who's here
 
 When you open a session, one line tells you which of the people you know are around:

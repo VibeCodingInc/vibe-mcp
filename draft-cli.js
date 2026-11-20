@@ -46,7 +46,10 @@ async function main() {
     // do that under the lock first, so an abandoned draft is listed as
     // 'unknown' (retry or discard) instead of hidden forever (codex r2).
     moves.transact((drafts) => { for (const d of drafts) moves.reconcileAbandoned(d); return drafts; });
-    const mine = moves.loadDrafts().filter((d) => String(d.from || '').toLowerCase() === me && (d.status === 'previewed' || d.status === 'unknown'));
+    // A held draft (for someone not on /vibe yet) is decided only where its
+    // preview says so: a companion that renders it as an ordinary Send would
+    // describe a different act than the one it performs.
+    const mine = moves.loadDrafts().filter((d) => String(d.from || '').toLowerCase() === me && (d.status === 'previewed' || d.status === 'unknown') && !d.held);
     // Exactly what the person would see in the terminal preview — and the rev
     // that binds a Send to those bytes. Nothing private: context stays out.
     const drafts = mine.map((d) => ({

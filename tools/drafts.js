@@ -23,6 +23,12 @@
  *
  * Draft states: previewed → sending → sent
  *                         ↘ cancelled   ↘ unknown (retry/cancel only)
+ *
+ * Held drafts: a draft to a handle /vibe says does not exist (a definite 404,
+ * never a lookup that merely failed) and that is a GitHub login is HELD: Send
+ * creates a thought-bearing invitation named for that GitHub account instead
+ * of a message, so the exact approved text becomes the sender's first message
+ * when that person signs in. previewed → sending → held. It is never "sent".
  */
 
 const fs = require('fs');
@@ -34,6 +40,7 @@ const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
 const { canonicalHandle, storedRecipientHandle } = require('../protocol/handle');
 const { inertField } = require('../incoming');
 const { deliver } = require('./deliver');
+const invite = require('../invite');
 
 const DRAFTS_FILE = path.join(config.VIBE_DIR, 'drafts.json');
 const BINDINGS_FILE = path.join(config.VIBE_DIR, 'return-bindings.json');
@@ -194,7 +201,9 @@ function reconcileAbandoned(d) {
 const newId = (prefix) => `${prefix}${crypto.randomBytes(4).toString('hex')}`;
 // The reply target is part of what the person approves: answering a
 // different message is a different act, so it changes the rev and the key.
-const textHash = (d) => crypto.createHash('sha1').update(compose(d) + (d.replyTo ? `\n\u21a9${d.replyTo}` : '')).digest('hex');
+// Holding a message for a newcomer is a different act from sending one, so
+// it is part of the rev too (a held draft never shares a rev with a send).
+const textHash = (d) => crypto.createHash('sha1').update(compose(d) + (d.replyTo ? `\n\u21a9${d.replyTo}` : '') + (d.held ? '\nheld-for-github' : '')).digest('hex');
 const sendKey = (d) => `draft-${d.id}-${textHash(d).slice(0, 10)}`;
 /**
  * The #392 approval digest over the EXACT snapshot the person approved:
@@ -206,6 +215,29 @@ const sendKey = (d) => `draft-${d.id}-${textHash(d).slice(0, 10)}`;
 const approvedDigest = (to, message) => crypto.createHash('sha256').update(`${storedRecipientHandle(to)}\n${message}`, 'utf8').digest('hex');
 /** The preview revision: what the person SAW. Send must name it (codex P1). */
 const revOf = (d) => textHash(d).slice(0, 8);
+
+// ── held: a message kept for someone not on /vibe yet ─────────────────────────
+// Platform contract: api/invites.js (POST /api/invites with first_thought +
+// for_github), api/lib/invitation-email.js (APPROVAL_RULE, approvalInput).
+
+const HELD_DAYS = 30;
+/** The platform's for_github shape (api/invites.js), applied to the canonical handle. */
+const GITHUB_LOGIN = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/;
+const isGithubLogin = (h) => GITHUB_LOGIN.test(String(h || ''));
+/** generateCode(): 'VIBE-' + 4 of an unambiguous alphabet + '-' + the inviter handle's first 4. */
+const INVITE_CODE = /^VIBE-[A-Z0-9]{4}-[A-Z0-9_-]{1,4}$/;
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+/**
+ * The platform's invitation approval digest (APPROVAL_RULE 'invitation-v1'):
+ * sha256 over [rule, for_email, subject, text, html, open_note, question,
+ * first_thought] joined by U+0000. A held draft carries only first_thought,
+ * so every other field is the empty string. Note: for_github is NOT covered
+ * by the platform digest; the recipient is bound here by the draft rev.
+ */
+const heldDigest = (firstThought) => crypto.createHash('sha256')
+  .update(['invitation-v1', '', '', '', '', '', '', firstThought].join('\u0000'), 'utf8').digest('hex');
+/** The handle the platform gives a GitHub login on first sign-in (handles.js normalizeHandle folds '-' to '_'). */
+const handleForLogin = (login) => String(login || '').replace(/-/g, '_');
 
 // Field ceilings keep a draft inside the 2000-char message limit. A field
 // over its ceiling is REPORTED, never silently cut: a draft that ends
@@ -235,7 +267,7 @@ function compose(d) { return `${d.body || ''}${refLines(d.refs)}`; }
 
 const draftDefinition = {
   name: 'vibe_prepare',
-  description: "Prepare a message to a person for review. Sends NOTHING. Use this whenever YOU wrote the words (from the work in this session, or as an answer to a message that arrived): pass handle + message, and reply_to when it answers a specific message. Returns the exact preview and the three choices: Send / Edit / Cancel. To edit, call again with the draft id and the new message.",
+  description: "Prepare a message to a person for review. Sends NOTHING. Use this whenever YOU wrote the words (from the work in this session, or as an answer to a message that arrived): pass handle + message, and reply_to when it answers a specific message. Returns the exact preview and the three choices: Send / Edit / Cancel. To edit, call again with the draft id and the new message. If the handle is not on /vibe yet, the preview says so and the message is held for that GitHub account instead.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -286,6 +318,21 @@ async function draftHandler(args) {
   const message = typeof (args && args.message) === 'string' ? args.message.trim() : '';
   const wantId = args && args.id;
 
+  // Is the person on /vibe at all? Asked only for a NEW draft to a handle
+  // shaped like a GitHub login. Only a definite "no such handle" (404) makes
+  // the draft held; a lookup that could not confirm keeps today's behaviour.
+  let absent = false;
+  if (!wantId && args && args.handle && message) {
+    const to = canonicalHandle(args.handle);
+    // Someone you already know is on /vibe: no lookup, so the ordinary
+    // preview costs no extra request and cannot be slowed by this one.
+    let known = false;
+    try { known = require('../reach').isKnown(to); } catch { known = false; }
+    if (to && to !== me && to !== 'echo' && !known && isGithubLogin(to)) {
+      try { absent = (await invite.lookup(to)).found === false; } catch { absent = false; }
+    }
+  }
+
   const out = transact(drafts => {
     let d = wantId ? drafts.find(x => x.id === wantId) : null;
     if (wantId && !d) return { display: `No draft ${wantId} — it may have expired (drafts live 24h, locally). Prepare it again.` };
@@ -302,12 +349,16 @@ async function draftHandler(args) {
       if (to.endsWith('/claude')) return { display: `Drafts go to a person's durable conversation, not a live session — use @${to.replace(/\/claude$/, '')} instead. Nothing drafted.` };
       const project = typeof args.project === 'string' && args.project.trim() ? args.project.trim().slice(0, 60) : null;
       d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), from: me, to, body: message, replyTo: cleanId(args.reply_to), refs: cleanContext({ refs: args.refs }).refs, context: { project } };
+      // Nothing to answer in a conversation that does not exist yet.
+      if (absent) { d.held = true; d.replyTo = null; }
       drafts.push(d);
     } else {
       // A finished draft stays finished; an unconfirmed one may only be
       // retried as-is or cancelled (its idempotency key names THIS text).
       if (d.from && d.from !== me) return { display: `Draft ${d.id} was prepared as @${d.from}; you are signed in as @${me}. Nothing sent — open a new draft as yourself.` };
       reconcileAbandoned(d);
+      if (d.status === 'held') return { display: heldAlready(d) };
+      if (d.held && d.status === 'unknown') return { display: heldUnknown(d) };
       if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — nothing changed. Open a new draft to say more.` };
       if (d.status === 'cancelled') return { display: d.unconfirmed
         ? `Draft ${d.id} was cancelled after a Send to @${d.to} that did not confirm — it may or may not have reached them. Open a new draft to say more.`
@@ -323,7 +374,7 @@ async function draftHandler(args) {
           d.edited = true;
         }
         if (args.refs) { d.refs = cleanContext({ refs: args.refs }).refs; }
-        if (args.reply_to !== undefined) d.replyTo = cleanId(args.reply_to);
+        if (args.reply_to !== undefined && !d.held) d.replyTo = cleanId(args.reply_to);
         d.status = 'previewed';
       }
     }
@@ -331,7 +382,29 @@ async function draftHandler(args) {
     return { draft: { ...d } };
   });
   if (out.display) return out;
+  if (out.draft.held) return heldPreview(out.draft);
   return preview(out.draft, await findPerson(out.draft.to));
+}
+
+function heldPreview(d) {
+  const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
+  const message = compose(d);
+  const rev = revOf(d);
+  return {
+    display: `**To:** @${d.to} (not on /vibe yet)\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n\n`
+      + `@${d.to} is not on /vibe yet. If you keep it, this exact message is held for the GitHub account ${d.to} for ${HELD_DAYS} days and arrives as your first message when they sign in to /vibe with that account. You get a link to pass on to them.\n\n`
+      + `Keep for @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_`,
+    data: {
+      draft: { id: d.id, to: d.to, body: d.body, message, refs: d.refs || [], status: d.status, rev, held: true, for_github: d.to },
+      actions: [{ label: `Keep for @${d.to}`, tool: 'vibe_send', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_prepare', args: { id: d.id, message: '<new body text — links are kept separately>' } }, { label: 'Cancel', tool: 'vibe_discard', args: { id: d.id } }],
+    },
+  };
+}
+function heldAlready(d) {
+  return `Draft ${d.id} is already held for @${d.to} — not creating a second invitation.${d.joinUrl ? ` Join link: ${d.joinUrl}` : ''}`;
+}
+function heldUnknown(d) {
+  return `Draft ${d.id}: the last Keep for @${d.to} did not confirm — the invitation may or may not have been created, and a second try could create two. Cancel it, then open a new draft if you still want to say it. Nothing more was done.`;
 }
 
 // ── vibe_discard ───────────────────────────────────────────────────────
@@ -349,12 +422,21 @@ async function discardHandler(args) {
     if (!d) return { display: `No draft ${id} to cancel — nothing was sent either way.` };
     reconcileAbandoned(d);
     if (d.status === 'sending') return { display: `Draft ${d.id} is being sent to @${d.to} right now — it can't be cancelled at this point.`, data: { draft: { id: d.id, status: d.status } } };
+    if (d.status === 'held') return { display: `Draft ${d.id} is already held for @${d.to} — a held message can't be taken back from here.`, data: { draft: { id: d.id, status: d.status } } };
     if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — a sent message can't be unsent.`, data: { draft: { id: d.id, status: d.status } } };
     if (d.status === 'cancelled') return { display: d.unconfirmed
       ? `Draft ${d.id} is already cancelled — and the earlier Send to @${d.to} did not confirm, so it may or may not have reached them.`
       : `Draft ${d.id} is already cancelled — nothing was sent.`, data: { draft: { id: d.id, status: d.status } } };
     const wasUnknown = d.status === 'unknown' || Boolean(d.unconfirmed);
     d.status = 'cancelled';
+    if (d.held) {
+      return {
+        display: wasUnknown
+          ? `Cancelled — nothing more will be done for @${d.to}. Note: the earlier Keep did not confirm, so an invitation may or may not have been created.`
+          : `Cancelled — nothing kept for @${d.to}. The draft stays on your machine.`,
+        data: { draft: { id: d.id, status: 'cancelled' } },
+      };
+    }
     return {
       display: wasUnknown
         ? `Cancelled — no further send to @${d.to}. Note: the earlier attempt did not confirm, so it may or may not have reached them.`
@@ -407,6 +489,7 @@ async function sendHandler(args) {
     // The approval was given as one account; it is not transferable to
     // whoever is signed in now (codex P1).
     if (d.from && d.from !== me) return { display: `Draft ${d.id} was prepared as @${d.from}; you are signed in as @${me}. Nothing sent — open a new draft as yourself.` };
+    if (d.status === 'held') return { display: heldAlready(d) };
     if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — not sending it twice.` };
     if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.` };
     if (!rev) return { display: `Send needs the rev shown in the preview of draft ${d.id} — open it with vibe_prepare and send with that rev. Nothing sent.` };
@@ -417,6 +500,9 @@ async function sendHandler(args) {
       // so a later definite refusal cannot erase it.
       if (!reconcileAbandoned(d)) return { display: `Draft ${d.id} is already being sent — not sending it twice.` };
     }
+    // POST /api/invites has no idempotency key: an unconfirmed Keep is never
+    // retried, because a retry could create a second invitation.
+    if (d.held && d.status === 'unknown') return { display: heldUnknown(d) };
     if (d.status === 'unknown' && !transportDedupes()) {
       // Without server-side deduplication a retry could deliver twice; the
       // honest options are to cancel (with the warning) or write anew.
@@ -425,11 +511,12 @@ async function sendHandler(args) {
     d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
     d.idempotencyKey = sendKey(d);
     const message = compose(d).trim();
-    d.approvedSha256 = approvedDigest(d.to, message);
-    return { snapshot: { id: d.id, to: d.to, body: d.body, refs: d.refs, context: d.context, replyTo: d.replyTo || null, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256 } };
+    d.approvedSha256 = d.held ? heldDigest(message) : approvedDigest(d.to, message);
+    return { snapshot: { id: d.id, to: d.to, body: d.body, refs: d.refs, context: d.context, replyTo: d.replyTo || null, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, held: Boolean(d.held) } };
   });
   if (claim.display) return claim;
   const s = claim.snapshot;
+  if (s.held) return keepHeld(s, me);
 
   // 2. Deliver, outside the lock.
   let result;
@@ -468,6 +555,115 @@ async function sendHandler(args) {
     result = { ...result, display: `${result.display}\n\n_Draft ${s.id} is kept as unconfirmed: Send again retries exactly this text (delivers once), or Cancel._` };
   }
   return result;
+}
+
+// ── Keep: create the invitation that holds the approved message ───────────────
+
+/**
+ * One fix per refusal, built from the status and the platform's stable error
+ * token only — server prose is never shown. Every refusal here is definite:
+ * it comes from a reply the platform sent before anything was minted.
+ */
+function heldRefusal(r) {
+  const status = r && r.statusCode;
+  const nothing = 'Nothing was kept.';
+  if (status === 401) return `${nothing} /vibe does not see you signed in. Run \`vibe init\` to sign in, then keep it again.`;
+  if (status === 403) return `${nothing} Holding a message for someone needs a fresh sign-in on this machine. Run \`vibe init\`, then keep it again.`;
+  if (status === 400 && r.error === 'No invite codes remaining') return `${nothing} You already have 3 unused invitations, the most /vibe allows at once. Pass on one of the links you already have; a slot opens when someone signs in with one or it expires after ${HELD_DAYS} days.`;
+  if (status === 400 && typeof r.error === 'string' && /^first_thought is \d+ chars/.test(r.error)) return `${nothing} The message is over the 2000-char limit. Edit it shorter, then keep it again.`;
+  if (status === 409 && r.error === 'approval_mismatch') return `${nothing} What /vibe would store is not what you approved. Open the draft again with vibe_prepare and approve what it shows now.`;
+  return `${nothing} /vibe refused the invitation${status ? ` (HTTP ${status})` : ''}. Try again in a moment.`;
+}
+
+async function keepHeld(s, me) {
+  let outcome; // { held: true, code, expiresAt } | { definite: bool, display, cancel? }
+  try {
+    outcome = await createHeld(s);
+  } catch (e) {
+    outcome = { definite: false, display: 'The invitation could not be confirmed — it may or may not have been created.' };
+  }
+
+  const at = Date.now();
+  const joinUrl = outcome.held ? `https://www.slashvibe.dev/join/${outcome.code}` : null;
+  transact(drafts => {
+    const cur = drafts.find(x => x.id === s.id);
+    if (!cur) return;
+    delete cur.claimedAt; delete cur.claimedBy;
+    if (outcome.held) { cur.status = 'held'; cur.heldAt = at; cur.joinUrl = joinUrl; cur.expiresAt = outcome.expiresAt || null; return; }
+    if (!outcome.definite) { cur.unconfirmed = true; cur.status = 'unknown'; return; }
+    cur.status = outcome.cancel ? 'cancelled' : (cur.unconfirmed ? 'unknown' : 'previewed');
+  });
+
+  if (!outcome.held) {
+    const tail = outcome.definite ? '' : `\n\n_Draft ${s.id} is kept as unconfirmed. Keeping it again could create a second invitation, so the only choice left is Cancel._`;
+    return { display: `${outcome.display}${tail}`, data: { sent: false, held: false, definite: Boolean(outcome.definite) } };
+  }
+
+  const until = outcome.expiresAt ? `, until ${outcome.expiresAt}` : '';
+  const pass = invite.line(me);
+  const lines = [
+    `Held for @${s.to}. /vibe created the invitation.`,
+    `**Join link:** ${joinUrl}`,
+  ];
+  if (pass) lines.push(`**Pass on with it:** ${pass.command}`);
+  lines.push(`Your message is kept for the GitHub account ${s.to} for ${HELD_DAYS} days${until}. It arrives as your first message when they sign in to /vibe with that account; nothing reaches them before then.`);
+
+  // Writing to someone is what lets their answer reach you mid-work. Their
+  // handle does not exist yet: it will be their GitHub login with '-' folded
+  // to '_' (the platform's first-sign-in rule), so that is the one marked.
+  try { require('../reach').know(handleForLogin(s.to)); } catch (e) {}
+
+  return {
+    display: lines.join('\n'),
+    data: { sent: false, held: true, definite: true, for_github: s.to, join_url: joinUrl, expires_at: outcome.expiresAt || null },
+  };
+}
+
+/**
+ * dry_run first (side-effect free: the platform checks sign-in, the unused-
+ * code cap and the thought before it answers), confirm its digest is the one
+ * computed from the approved snapshot, then create with approved_sha256 so
+ * the platform refuses anything other than what was previewed.
+ */
+async function createHeld(s) {
+  if (typeof store.createInvite !== 'function') return { definite: true, display: 'Nothing was kept. Holding a message for someone needs the /vibe service; this session is in local mode.' };
+  const thought = s.message;
+  if (thought.length > 2000) return { definite: true, display: `Nothing was kept. The message is ${thought.length} chars and the limit is 2000. Edit it shorter, then keep it again.` };
+  if (thought.includes('\u0000') || LONE_SURROGATE.test(thought)) return { definite: true, display: 'Nothing was kept. The message has a character /vibe cannot keep. Edit it, then keep it again.' };
+
+  // They may have joined since the preview: then this is a message, not an invitation.
+  const who = await invite.lookup(s.to).catch(() => ({ found: null }));
+  if (who.found === true) return { definite: true, cancel: true, display: `Nothing was kept. @${s.to} joined /vibe since you saw the preview, so this draft is cancelled. Prepare it again and it goes to them directly.` };
+
+  const body = { first_thought: thought, for_github: s.to };
+  const dry = await store.createInvite({ ...body, dry_run: true });
+  if (!dry || dry.success !== true) {
+    if (dry && dry.statusCode) return { definite: true, display: heldRefusal(dry) };
+    return { definite: true, display: 'Nothing was kept. /vibe could not be reached. Try again in a moment.' };
+  }
+  const serverSha = dry.approval && typeof dry.approval.sha256 === 'string' ? dry.approval.sha256 : null;
+  if (dry.dry_run !== true || dry.carries_thought !== true || dry.named_for !== s.to || serverSha !== s.approvedSha256) {
+    return { definite: true, display: heldRefusal({ statusCode: 409, error: 'approval_mismatch' }) };
+  }
+
+  const made = await store.createInvite({ ...body, approved_sha256: s.approvedSha256 });
+  if (made && made.success === true) {
+    // Created only on the served truth: a code of the platform's shape, named
+    // for this login, carrying the thought. Anything else may have minted
+    // something, so it is unconfirmed, never success.
+    const code = typeof made.code === 'string' ? made.code : '';
+    if (INVITE_CODE.test(code) && made.carries_thought === true && made.named_for === s.to) {
+      const t = Date.parse(made.expires_at);
+      return { held: true, code, expiresAt: Number.isFinite(t) ? new Date(t).toISOString().slice(0, 10) : null };
+    }
+    return { definite: false, display: '/vibe answered, but not with an invitation held for this account. It may or may not have been created.' };
+  }
+  // A reply with a 4xx status, or a 503 (both of its paths say nothing was
+  // saved), was decided before anything was minted. No reply, or a crash,
+  // leaves it open.
+  const st = made && made.statusCode;
+  if (st && (st < 500 || st === 503)) return { definite: true, display: heldRefusal(made) };
+  return { definite: false, display: 'The invitation could not be confirmed — it may or may not have been created.' };
 }
 
 module.exports = {
