@@ -1,14 +1,15 @@
 {
-  "version": "0.9.15",
+  "version": "0.9.16",
   "updated": "2026-11-20",
-  "changelog": "You can now write to someone who is not on /vibe yet. Your agent prepares the message as usual; the preview says they are not here, and if you keep it, that exact message is held for their GitHub account and arrives as your first message when they sign in.",
+  "changelog": "Fixes from an outside read of 0.9.15. A message to a GitHub name with a hyphen now reaches that person, and /vibe no longer says \"Sent\" or \"not in a session\" when it could not confirm it.",
   "features": [
-    "Message a GitHub username that is not on /vibe: the preview says so, and the choice is Keep, Edit or Cancel. Nothing is created until you choose",
-    "Keep holds that exact message for that one GitHub account for 30 days. You get a join link and your setup line to pass on. It is never called sent",
-    "When they sign in with that account, your message is the first thing in the conversation, and their answer reaches you while you work",
-    "You can hold up to 3 messages at a time. A slot opens when someone signs in or an invitation expires",
-    "A Keep that gets no answer from /vibe is never retried, so it cannot create two invitations. It is marked unconfirmed and can only be cancelled",
-    "People you already know are not looked up, so ordinary messages make no extra request"
+    "A message to a GitHub name with a hyphen goes to the handle as /vibe spells it, so it reaches the person. The preview shows the handle used",
+    "setup --from now recognises an inviter whose GitHub name has a hyphen",
+    "A reply from /vibe that cannot be read is no longer shown as Sent. It is marked unconfirmed, and a prepared message offers the same text again or Cancel",
+    "\"Not in a session right now\" is said only when presence was actually read",
+    "A message that could not be checked during a network blip is checked again, instead of waiting for the rest of the session",
+    "An answer over an open line cannot be sent twice",
+    "Messages that named commands which do not exist now name the real ones"
   ],
   "deprecated": [],
   "breaking": false,
