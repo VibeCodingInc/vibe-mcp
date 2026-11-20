@@ -1,14 +1,14 @@
 {
-  "version": "0.9.14",
-  "updated": "2026-11-13",
-  "changelog": "Two things, because 0.9.13 was never published on its own. The first minute: the person who invited you is known from the start, setup ends with one line to send to the person you build with, and your sign-in no longer ends silently. And when you say you are stuck, you are shown who you know is here, whether or not your agent thinks to look.",
+  "version": "0.9.15",
+  "updated": "2026-11-20",
+  "changelog": "You can now write to someone who is not on /vibe yet. Your agent prepares the message as usual; the preview says they are not here, and if you keep it, that exact message is held for their GitHub account and arrives as your first message when they sign in.",
   "features": [
-    "npx slashvibe-mcp setup --from @them: your inviter is known from the start. Nothing is sent, no line is opened, and mute undoes it",
-    "Setup's last screen prints that line with your handle, for the person you build with",
-    "Your sign-in lasts 30 days: from 7 days out, a new session says how long is left and how to renew; if it has ended, it says that instead of going quiet",
-    "Say you are stuck and, if someone you know is in a session, you see one line naming them. Shown once, only where you said it, only people you know. If your agent already looked, nothing extra is shown",
-    "Upgrading moves your /vibe session-start line in ~/.claude/settings.json to the new version, so fixes reach people who installed earlier. Nothing else in your settings changes. It only moves forward, and it never adds the line back if you removed it",
-    "One read of who is here, only when you said you were stuck. What you are stuck on is never read or sent. Quiet turns all of it off"
+    "Message a GitHub username that is not on /vibe: the preview says so, and the choice is Keep, Edit or Cancel. Nothing is created until you choose",
+    "Keep holds that exact message for that one GitHub account for 30 days. You get a join link and your setup line to pass on. It is never called sent",
+    "When they sign in with that account, your message is the first thing in the conversation, and their answer reaches you while you work",
+    "You can hold up to 3 messages at a time. A slot opens when someone signs in or an invitation expires",
+    "A Keep that gets no answer from /vibe is never retried, so it cannot create two invitations. It is marked unconfirmed and can only be cancelled",
+    "People you already know are not looked up, so ordinary messages make no extra request"
   ],
   "deprecated": [],
   "breaking": false,
