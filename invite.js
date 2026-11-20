@@ -60,6 +60,34 @@ async function lookup(h, { apiUrl, fetchImpl = fetch } = {}) {
 }
 
 /**
+ * The handle to address, for a recipient typed with a '-'.
+ *
+ * GitHub sign-in gives a login like "a-b" the handle "a_b" (the platform folds
+ * '-' to '_'), and its inbox is read under that spelling. A message addressed
+ * to "a-b" is accepted by the platform but stored under "a-b", where "a_b"
+ * never sees it. So the platform's own answer decides: when the identity
+ * lookup finds the account under a spelling that differs only by '-' for '_',
+ * that spelling is used. Some older accounts really are stored with the dash;
+ * then the lookup says so and the dash stays. Nothing is folded blindly.
+ *
+ * No '-', no request. Any answer other than a found account (absent, unclear,
+ * offline, a throw) leaves the handle exactly as typed.
+ *
+ * @returns {Promise<{ handle: string, who: object|null }>} who is the lookup
+ *   result when one was made (callers reuse it rather than asking twice).
+ */
+async function resolveRecipient(h, opts = {}) {
+  const typed = String(h || '');
+  if (!typed.includes('-')) return { handle: typed, who: null };
+  let who;
+  try { who = await lookup(typed, opts); } catch { who = { found: null }; }
+  if (!who || typeof who !== 'object') who = { found: null };
+  const theirs = who.found === true && typeof who.handle === 'string' ? who.handle : '';
+  const handle = theirs && theirs !== typed && sameAccount(typed, theirs) && validHandle(theirs) ? theirs : typed;
+  return { handle, who };
+}
+
+/**
  * Mark the inviter as known. Returns the lines to print; never throws, because
  * a setup that just succeeded must not end in an error over a courtesy.
  */
@@ -94,4 +122,4 @@ function line(me) {
   return { command: `npx slashvibe-mcp setup --from @${h}`, link: `https://www.slashvibe.dev/join?from=${h}` };
 }
 
-module.exports = { fromArg, accept, line, lookup };
+module.exports = { fromArg, accept, line, lookup, resolveRecipient };

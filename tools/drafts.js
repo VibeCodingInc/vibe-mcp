@@ -321,14 +321,25 @@ async function draftHandler(args) {
   // Is the person on /vibe at all? Asked only for a NEW draft to a handle
   // shaped like a GitHub login. Only a definite "no such handle" (404) makes
   // the draft held; a lookup that could not confirm keeps today's behaviour.
+  //
+  // A handle with a '-' is also addressed by the platform's spelling of it
+  // (invite.resolveRecipient): the draft's `to`, its rev, its digest and the
+  // stored recipient all use what the lookup answered. That one lookup also
+  // serves the held check, so a prepare never asks twice.
   let absent = false;
+  let resolvedTo = null;
   if (!wantId && args && args.handle && message) {
     const to = canonicalHandle(args.handle);
     // Someone you already know is on /vibe: no lookup, so the ordinary
     // preview costs no extra request and cannot be slowed by this one.
     let known = false;
     try { known = require('../reach').isKnown(to); } catch { known = false; }
-    if (to && to !== me && to !== 'echo' && !known && isGithubLogin(to)) {
+    if (to && to !== me && to.includes('-') && !to.endsWith('/claude')) {
+      const r = await invite.resolveRecipient(to);
+      resolvedTo = r.handle;
+      // Absent means the login as typed: a held draft is for that GitHub account.
+      if (!known && isGithubLogin(to)) absent = Boolean(r.who && r.who.found === false);
+    } else if (to && to !== me && to !== 'echo' && !known && isGithubLogin(to)) {
       try { absent = (await invite.lookup(to)).found === false; } catch { absent = false; }
     }
   }
@@ -338,7 +349,7 @@ async function draftHandler(args) {
     if (wantId && !d) return { display: `No draft ${wantId} — it may have expired (drafts live 24h, locally). Prepare it again.` };
     if (!d) {
       if (!args || !args.handle || !message) return { display: 'To prepare a message: pass a handle and a message (or a draft id to edit). Nothing is sent by this step.' };
-      const to = canonicalHandle(args.handle);
+      const to = resolvedTo || canonicalHandle(args.handle);
       if (!to) return { display: 'To prepare a message: pass a handle and a message (or a draft id to edit). Nothing is sent by this step.' };
       if (to === me) return { display: "You can't draft to yourself." };
       // @echo is the feedback line with its own path and no receipt shape;
@@ -474,9 +485,17 @@ async function sendHandler(args) {
     if (!args || !args.handle || typeof args.message !== 'string' || !args.message.trim()) {
       return { display: 'Nothing sent. Pass a draft id and rev, or a handle and the exact message.' };
     }
-    const result = await deliver({ to: args.handle, message: args.message, replyTo: cleanId(args.reply_to) });
+    // Addressed by the platform's spelling when the handle has a '-'
+    // (invite.resolveRecipient). Done here, not in deliver: a draft's digest
+    // is computed over its `to` before deliver runs, so deliver must not
+    // change the recipient.
+    let to = canonicalHandle(args.handle);
+    if (to && to !== canonicalHandle(me || '') && !to.endsWith('/claude')) {
+      try { to = (await invite.resolveRecipient(to)).handle; } catch (e) {}
+    }
+    const result = await deliver({ to: to || args.handle, message: args.message, replyTo: cleanId(args.reply_to) });
     // The thread has moved on: what they say next answers THIS.
-    if (result.data && result.data.sent) { try { clearReturnBinding(args.handle); } catch (e) {} }
+    if (result.data && result.data.sent) { try { clearReturnBinding(to || args.handle); } catch (e) {} }
     return result;
   }
 
