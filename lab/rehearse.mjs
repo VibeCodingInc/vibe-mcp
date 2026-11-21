@@ -13,109 +13,12 @@
 //   node lab/rehearse.mjs all
 //
 // It costs real model tokens and takes a minute or two per scenario.
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import { startStub } from './stub.mjs';
 import { scenarios } from './scenarios.mjs';
-
-const require = createRequire(import.meta.url);
-const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const jwt = (h) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Math.floor(Date.now() / 1000) + 86400 })).toString('base64url')}.sig`;
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function identity(root, handle, says, stubUrl, trusts = [], knows = [], { muted = [], invisible = false, startHook = false, agentMint = null, serverEnv = {} } = {}) {
-  const home = path.join(root, handle, '.vibe');
-  const work = path.join(root, handle, 'work');
-  fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(work, { recursive: true });
-  // A person arrives signed in. An agent identity arrives with nothing but its
-  // credential in a file, and signs itself in (agent-auth.js).
-  const mintFile = path.join(root, handle, 'agent.mint');
-  if (agentMint) {
-    fs.writeFileSync(mintFile, agentMint, { mode: 0o600 });
-    fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ one_liner: says }));
-  } else {
-    fs.writeFileSync(path.join(home, 'auth.json'), JSON.stringify({ handle, token: jwt(handle), provider: 'github', authenticated_at: new Date().toISOString() }));
-    fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ handle, one_liner: says }));
-  }
-  if (knows.length || muted.length || invisible) fs.writeFileSync(path.join(home, 'reach.json'), JSON.stringify({ quiet: false, invisible, muted: Object.fromEntries(muted.map((h) => [h, Date.now()])), known: Object.fromEntries(knows.map((h) => [h, Date.now()])) }));
-  if (trusts.length) fs.writeFileSync(path.join(home, 'lines.json'), JSON.stringify(Object.fromEntries(trusts.map((h) => [h, { since: Date.now() }]))));
-  const env = { VIBE_HOME: home, VIBE_API_URL: stubUrl, VIBE_SETUP_NO_AUTORUN: '1', CI: '1', ...serverEnv, ...(agentMint ? { VIBE_AGENT_HANDLE: handle, VIBE_AGENT_MINT_FILE: mintFile } : {}) };
-  const mcp = path.join(root, handle, 'mcp.json');
-  fs.writeFileSync(mcp, JSON.stringify({ mcpServers: { vibe: { command: process.execPath, args: [path.join(REPO, 'index.js')], env } } }));
-  const settings = path.join(root, handle, 'settings.json');
-  const { createArrivalHookManager } = require(path.join(REPO, 'arrival-hook-settings.js'));
-  createArrivalHookManager({ env: { ...process.env, VIBE_HOME: home }, settingsPath: settings }).install();
-  if (startHook) {
-    // The SessionStart hook from THIS checkout, as this identity, against the
-    // stub. (The installer writes an npx launch of the published package.)
-    const s = JSON.parse(fs.readFileSync(settings, 'utf8'));
-    const q = (v) => `'${String(v).replace(/'/g, `'\\''`)}'`;
-    s.hooks.SessionStart = [{ matcher: 'startup|resume', hooks: [{ type: 'command', timeout: 8, command: `VIBE_HOME=${q(home)} VIBE_API_URL=${q(stubUrl)} CI=1 ${q(process.execPath)} ${q(path.join(REPO, 'cli.js'))} hook run` }] }];
-    fs.writeFileSync(settings, JSON.stringify(s, null, 2));
-  }
-  return { handle, home, work, mcp, settings, token: jwt(handle), api: stubUrl, mintFile: agentMint ? mintFile : null };
-}
-
-// A person typing a /vibe command in their terminal, as this identity. Async:
-// the stub lives in this process and a synchronous child would starve it.
-function cli(id, args, extraEnv = {}) {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [path.join(REPO, 'cli.js'), ...args], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { PATH: process.env.PATH, HOME: path.dirname(id.home), VIBE_HOME: id.home, VIBE_API_URL: id.api, CI: '1', VIBE_SETUP_NO_AUTORUN: '1', ...extraEnv },
-    });
-    let out = ''; let err = '';
-    child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { err += d; });
-    child.on('close', (code) => resolve({ code, out, err, typed: `${Object.keys(extraEnv).map((k) => `${k}=… `).join('')}npx slashvibe-mcp ${args.join(' ')}` }));
-  });
-}
-
-function session(id, prompt, { allowSend = false } = {}) {
-  const tools = ['Read', 'Edit', 'Write', 'Bash(sleep:*)', 'mcp__vibe__vibe_people', 'mcp__vibe__vibe_thread', 'mcp__vibe__vibe_prepare', 'mcp__vibe__vibe_discard', 'mcp__vibe__vibe_start',
-    // The open-line tools are always offered: the code decides whether they may send.
-    'mcp__vibe__vibe_ask', 'mcp__vibe__vibe_answer',
-    // Visiting a door opens nothing here (CI=1) and sends nothing.
-    'mcp__vibe__vibe_visit',
-    // The bump names only people the person knows; it sends nothing.
-    'mcp__vibe__vibe_bump'];
-  if (allowSend) tools.push('mcp__vibe__vibe_send');
-  const child = spawn('claude', ['-p', prompt, '--mcp-config', id.mcp, '--strict-mcp-config',
-    // Never load the operator's own user settings: their real /vibe arrival hook
-    // would run inside a lab session and claim a real message's one announcement.
-    '--setting-sources', 'project,local', '--settings', id.settings,
-    '--allowedTools', ...tools, '--disallowedTools', 'Agent', 'WebSearch', '--output-format', 'stream-json', '--verbose'],
-  { cwd: id.work, stdio: ['ignore', 'pipe', 'ignore'] });
-  let out = '';
-  child.stdout.on('data', (d) => { out += d; });
-  const done = new Promise((resolve) => child.on('close', () => {
-    const t = { shown: [], tools: [], final: '', texts: [], returned: [] };
-    for (const line of out.split('\n')) {
-      let e; try { e = JSON.parse(line); } catch { continue; }
-      if (e.type === 'system' && e.subtype === 'informational' && String(e.content).includes('/vibe')) t.shown.push(String(e.content));
-      // A SessionStart hook's line for the person arrives as the hook's own output.
-      if (e.type === 'system' && e.subtype === 'hook_response') {
-        try { const o = JSON.parse(e.output ?? e.stdout ?? ''); if (o && typeof o.systemMessage === 'string' && o.systemMessage.includes('/vibe')) t.shown.push(o.systemMessage); } catch {}
-      }
-      if (e.type === 'assistant') for (const c of e.message.content || []) {
-        if (c.type === 'tool_use' && c.name.includes('vibe')) t.tools.push({ name: c.name.replace('mcp__vibe__', ''), input: c.input });
-        if (c.type === 'text') t.texts.push(c.text);
-      }
-      // What the /vibe tools printed back: the terminal a person would see.
-      if (e.type === 'user') for (const c of e.message?.content || []) {
-        if (c.type !== 'tool_result') continue;
-        const x = Array.isArray(c.content) ? c.content.map((y) => y.text || '').join('\n') : String(c.content || '');
-        if (/\/vibe|@[a-z]|door/i.test(x) && !/^total \d/.test(x)) t.returned.push(x);
-      }
-      if (e.type === 'result') t.final = e.result || '';
-    }
-    resolve(t);
-  }));
-  return { done, kill: () => child.kill('SIGKILL') };
-}
+import { identity, cli, session, sleep } from './harness.mjs';
 
 async function run(name) {
   const sc = scenarios[name];
