@@ -1,11 +1,11 @@
 {
-  "version": "0.9.17",
+  "version": "0.9.18",
   "updated": "2026-11-20",
-  "changelog": "Nothing an agent writes leaves without a preview you approved, and the line you send a friend to bring them in now names you.",
+  "changelog": "The first exchange between two new people now works both ways, and /vibe starts to notice when you trust someone.",
   "features": [
-    "Every message an agent sends for you goes through a preview first. A request to send without one opens the preview and sends nothing",
-    "The line /vibe gives you to bring someone in now carries your handle, so your first message reaches them while they work instead of waiting for their next session",
-    "Before sign-in, asking to message someone leads to sign-in and then a preview"
+    "A message from someone new is no longer stuck waiting once you write back to them, accept their invite or open a line: it reaches you while you work",
+    "A message you have just answered is never announced afterwards as newly arrived",
+    "After you have sent the same person several messages without changing a word and they have answered, /vibe points once at the command that lets your agents ask each other directly. It keeps counts only, on your machine: npx slashvibe-mcp rapport shows them, rapport forget erases them"
   ],
   "deprecated": [],
   "breaking": false,
