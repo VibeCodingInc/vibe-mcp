@@ -84,6 +84,50 @@ function record(dir, at = Date.now(), env = process.env) {
   return true;
 }
 
+// ── a new session is a new screen ───────────────────────────────────────────
+// A draft shown in an earlier session was not seen in this one: a reminder
+// (unsent.js) can hand its id to a new agent, and that agent must not be able
+// to send it without showing it here first. The session-start hook records
+// when a session started for the project, under
+// <turns dir>/<hash of the project directory>.start.json = {"at": T}, on the
+// SessionStart sources startup, resume and clear; never on compact (after a
+// compaction the person did see the text in this session).
+
+function startFile(dir, env = process.env) {
+  const k = key(dir);
+  return k ? path.join(turnsDir(env), `${k}.start.json`) : null;
+}
+
+/** Record a session start for a project directory (the session-start hook's job). */
+function recordSessionStart(dir, at = Date.now(), env = process.env) {
+  const file = startFile(dir, env);
+  if (!file) return false;
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.${crypto.randomBytes(3).toString('hex')}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify({ at }), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+  return true;
+}
+
+/**
+ * The last session start recorded for a project:
+ *   null                 none recorded (no session-start hook here yet)
+ *   { at }               when
+ *   { unreadable: true } a record exists and nothing can be read of it
+ * A record whose contents cannot be parsed is dated by its file time.
+ */
+function lastSessionStart(dir, env = process.env) {
+  const file = startFile(dir, env);
+  if (!file) return null;
+  let st;
+  try { st = fs.statSync(file); } catch (e) { return e && e.code === 'ENOENT' ? null : { unreadable: true }; }
+  try {
+    const at = JSON.parse(fs.readFileSync(file, 'utf8')).at;
+    if (Number.isFinite(at)) return { at };
+  } catch {}
+  return Number.isFinite(st.mtimeMs) ? { at: st.mtimeMs } : { unreadable: true };
+}
+
 /**
  * May a revision prepared at `revAt` be sent now?
  *   { check: 'passed' }       a turn for this project came strictly after it
@@ -96,9 +140,16 @@ function judge(revAt, { env = process.env, cwd = process.cwd, host } = {}) {
   const agent = host || (() => { try { return require('./host').getHost().agent; } catch { return null; } })();
   if (agent !== 'claude-code') return { check: 'unavailable', why: 'host_without_turn_hook' };
   if (!anyRecorded(env)) return { check: 'unavailable', why: 'no_turn_recorded' };
-  const at = lastTurn(projectDir(env, cwd), env);
+  const dir = projectDir(env, cwd);
+  // Shown before this session started: it must be shown again here. Only
+  // where the turn check itself applies (above), so a host without the hook
+  // is never made unable to send.
+  const started = lastSessionStart(dir, env);
+  if (started && started.unreadable) return { check: 'needs_turn', why: 'session_start_unreadable' };
+  if (started && !(Number.isFinite(revAt) && revAt >= started.at)) return { check: 'needs_turn', why: 'shown_in_earlier_session' };
+  const at = lastTurn(dir, env);
   if (at !== null && Number.isFinite(revAt) && at > revAt) return { check: 'passed' };
-  return { check: 'needs_turn' };
+  return { check: 'needs_turn', why: 'no_turn_since_shown' };
 }
 
-module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge };
+module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge, recordSessionStart, lastSessionStart };

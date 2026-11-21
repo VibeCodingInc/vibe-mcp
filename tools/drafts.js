@@ -590,7 +590,7 @@ async function send(args, { byPerson }) {
     return { snapshot: { id: d.id, to: d.to, body: d.body, refs: d.refs, context: d.context, replyTo: d.replyTo || null, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, held: Boolean(d.held), unchanged } };
   });
   if (claim.display) return claim;
-  if (claim.unseen) return unseenRefusal(claim.unseen);
+  if (claim.unseen) return unseenRefusal(claim.unseen, claim.why);
   const s = claim.snapshot;
   if (s.held) return withTurn(await keepHeld(s, me), turn);
 
@@ -657,17 +657,28 @@ function withTurn(result, turn) {
  * not seen it. Normal, not an error: the preview is shown again, and the next
  * Send after their answer goes. Nothing reached the network on this path.
  */
-async function unseenRefusal(d) {
+async function unseenRefusal(d, why = null) {
   const changed = typeof d.firstRev === 'string' && d.firstRev !== revOf(d);
   const p = d.held ? heldPreview(d) : preview(d, await findPerson(d.to));
-  const lead = changed
-    ? 'Not sent yet: the text changed, and the person has not seen this version. A changed draft must be shown again before it can be sent.'
-    : 'Not sent yet: the person has not seen this draft. A draft must be shown before it can be sent.';
+  let lead; let reason;
+  if (why === 'shown_in_earlier_session') {
+    lead = 'Not sent yet: this draft was last shown in an earlier session, so the person has not seen it in this one. It can go after their next message.';
+    reason = 'shown_in_earlier_session';
+  } else if (why === 'session_start_unreadable') {
+    lead = 'Not sent yet: this session\'s start could not be read on this machine, so it cannot be told whether the person has seen this draft here.';
+    reason = 'session_start_unreadable';
+  } else if (changed) {
+    lead = 'Not sent yet: the text changed, and the person has not seen this version. A changed draft must be shown again before it can be sent.';
+    reason = 'changed_since_seen';
+  } else {
+    lead = 'Not sent yet: the person has not seen this draft. A draft must be shown before it can be sent.';
+    reason = 'not_yet_seen';
+  }
   const ask = `Show them the preview below exactly as it is and wait for their choice. If they choose ${d.held ? 'Keep' : 'Send'}, call vibe_send again with this id and rev.`;
   return {
     ...p,
     display: `${lead} ${ask}\n\n${p.display}`,
-    data: { ...(p.data || {}), sent: false, definite: true, reason: changed ? 'changed_since_seen' : 'not_yet_seen', turn_check: 'needs_turn' },
+    data: { ...(p.data || {}), sent: false, definite: true, reason, turn_check: 'needs_turn' },
   };
 }
 

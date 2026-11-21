@@ -544,6 +544,7 @@ async function main() {
   }
 
   const input = hookInput();
+  noteSessionStart(input);
   if (input.hook_event_name !== 'SessionStart' || !['startup', 'resume'].includes(input.source)) {
     emptyOutput();
     return;
@@ -565,6 +566,25 @@ async function main() {
 /** Taken only after the line was handed over, like claimShown. */
 function markTold(rows, session) {
   try { const unsent = require('./unsent'); for (const r of rows || []) unsent.markTold(r.id, session); } catch {}
+}
+
+/**
+ * A new session is a new screen (turns.js): a draft shown before it must be
+ * shown again before vibe_send will send it. Recorded first, before anything
+ * that could time out, for the project directory (CLAUDE_PROJECT_DIR, and the
+ * input cwd when it differs), on startup, resume and clear. Never on compact:
+ * the person did see the text in this session. An input without a source
+ * records nothing, because a compact cannot be told apart from a start.
+ */
+const NEW_SCREEN = new Set(['startup', 'resume', 'clear']);
+function noteSessionStart(input, env = process.env) {
+  try {
+    if (!input || input.hook_event_name !== 'SessionStart' || !NEW_SCREEN.has(input.source)) return;
+    const turns = require('./turns');
+    const dirs = new Set([env.CLAUDE_PROJECT_DIR, input.cwd].filter((d) => typeof d === 'string' && d.trim()));
+    const at = Date.now();
+    for (const d of dirs) turns.recordSessionStart(d, at, env);
+  } catch {}
 }
 
 /**
@@ -606,6 +626,7 @@ module.exports = {
   sinceWhen,
   waitingCount,
   normalizeUnsent,
+  noteSessionStart,
   fetchUnsent,
   within,
 };

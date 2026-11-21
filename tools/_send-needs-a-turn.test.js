@@ -330,3 +330,85 @@ test('the agent is told, in the tool descriptions and the server instructions', 
   assert.ok(drafts.vibe_prepare.definition.description.includes(line));
   assert.ok(fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8').includes(line));
 });
+
+// ── a new session is a new screen (turns.js recordSessionStart) ─────────────
+// Review 2026-11-21: the send must not depend on the agent choosing to show
+// the draft again. A draft whose last showing came before the latest session
+// start for the project is refused, whatever rev the agent holds.
+const SESSION_HOOK = path.join(__dirname, '..', 'session-start-hook.cjs');
+function sessionStart(source, { projectDir = PROJECT } = {}) {
+  const t = Date.now(); while (Date.now() === t) { /* next ms */ }
+  const env = { PATH: process.env.PATH, HOME, VIBE_HOME: HOME, VIBE_API_URL: 'http://127.0.0.1:9', VIBE_SESSION_START_DEADLINE_MS: '300', NODE_OPTIONS: process.env.NODE_OPTIONS || '', CLAUDE_PROJECT_DIR: projectDir };
+  const r = spawnSync(process.execPath, [SESSION_HOOK], { input: JSON.stringify({ hook_event_name: 'SessionStart', source, session_id: `s-${source}`, cwd: projectDir }), env, encoding: 'utf8', timeout: 20_000 });
+  assert.equal(r.status, 0, r.stderr);
+  return r;
+}
+
+test('a draft shown in an earlier session: the new session refuses it with the right rev; shown again, the next prompt sends it', async () => {
+  await withWire(async (sends) => {
+    const p = await prepare({ message: 'shown yesterday' });
+    personTurn({ prompt: 'not now' });
+    sessionStart('startup');
+    assert.ok(turns.lastSessionStart(PROJECT).at > drafts.loadDrafts().find((d) => d.id === p.data.draft.id).revAt);
+    personTurn({ prompt: 'send it' });
+    // The correct rev, however the agent came by it (the old preview, the file on disk).
+    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+    assert.equal(sends.length, 0, 'not sent: never shown in this session');
+    assert.equal(r.data.sent, false);
+    assert.equal(r.data.reason, 'shown_in_earlier_session');
+    assert.match(r.display, /^Not sent yet: this draft was last shown in an earlier session, so the person has not seen it in this one\./);
+    // Shown again with vibe_prepare; a send in that same turn still waits.
+    const shown = await drafts.vibe_prepare.handler({ id: p.data.draft.id });
+    assert.equal((await drafts.vibe_send.handler({ id: p.data.draft.id, rev: shown.data.draft.rev })).data.sent, false);
+    personTurn({ prompt: 'yes, send it' });
+    const ok = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: shown.data.draft.rev });
+    assert.equal(ok.data.sent, true);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('resume and clear are new screens too', async () => {
+  for (const source of ['resume', 'clear']) {
+    await withWire(async (sends) => {
+      const p = await prepare({ message: `before ${source}` });
+      personTurn();
+      sessionStart(source);
+      personTurn({ prompt: 'send it' });
+      const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+      assert.equal(r.data.reason, 'shown_in_earlier_session', source);
+      assert.equal(sends.length, 0);
+    });
+  }
+});
+
+test('a compact in between does not force a re-show', async () => {
+  await withWire(async (sends) => {
+    const before = turns.lastSessionStart(PROJECT);
+    const p = await prepare({ message: 'before compact' });
+    sessionStart('compact');
+    assert.deepEqual(turns.lastSessionStart(PROJECT), before, 'compact records nothing');
+    personTurn({ prompt: 'send it' });
+    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+    assert.equal(r.data.sent, true);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('a session start in another project does not touch this one; a host without the hook is unaffected', async () => {
+  await withWire(async (sends) => {
+    const p = await prepare({ message: 'other project start' });
+    sessionStart('startup', { projectDir: OTHER });
+    personTurn();
+    assert.equal((await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev })).data.sent, true);
+    assert.equal(sends.length, 1);
+  });
+  sessionStart('startup');
+  assert.deepEqual(turns.judge(0, { host: 'codex' }), { check: 'unavailable', why: 'host_without_turn_hook' });
+});
+
+test('a session-start record that cannot be parsed is dated by its file time', () => {
+  const f = path.join(TURNS, `${turns.key(PROJECT)}.start.json`);
+  fs.writeFileSync(f, 'not json');
+  const st = turns.lastSessionStart(PROJECT);
+  assert.ok(Number.isFinite(st.at) && Math.abs(st.at - fs.statSync(f).mtimeMs) < 1);
+});
