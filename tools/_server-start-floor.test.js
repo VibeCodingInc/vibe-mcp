@@ -52,7 +52,7 @@ test.after(() => { for (const d of [HOME, PROJECT]) fs.rmSync(d, { recursive: tr
 
 test('no session-start record, draft shown before this server started: refused until shown again', async () => {
   await withWire(async (sends) => {
-    const rev = seed('wf100aaaa', turns.PROCESS_STARTED_AT - 60_000, 'shown before the server started');
+    const rev = seed('wf100aaaa', turns.serverStart() - 60_000, 'shown before the server started');
     tick(); turns.record(PROJECT, Date.now());   // the person typed, in this session
     assert.ok(!fs.existsSync(startFile()), 'no record from the hook');
     const r = await drafts.vibe_send.handler({ id: 'wf100aaaa', rev });
@@ -77,8 +77,8 @@ test('no session-start record, draft shown after this server started: normal', a
 });
 
 test('judge: the server start is a floor only where the turn check applies', () => {
-  const before = turns.PROCESS_STARTED_AT - 1000;
-  assert.equal(turns.judge(before, { processStart: turns.PROCESS_STARTED_AT }).why, 'shown_in_earlier_session');
+  const before = turns.serverStart() - 1000;
+  assert.equal(turns.judge(before, { processStart: turns.serverStart() }).why, 'shown_in_earlier_session');
   assert.deepEqual(turns.judge(before, { host: 'codex' }), { check: 'unavailable', why: 'host_without_turn_hook' });
   const empty = { VIBE_TURNS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-floor-none-')), CLAUDE_PROJECT_DIR: PROJECT };
   assert.deepEqual(turns.judge(before, { env: empty }), { check: 'unavailable', why: 'no_turn_recorded' }, 'no hook-recorded turns: unchanged');
@@ -91,7 +91,7 @@ test('a session-start record dated more than 5 seconds ahead is ignored; the ser
     const p = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'not stranded' });
     tick(); turns.record(PROJECT, Date.now());
     assert.equal((await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev })).data.sent, true, 'a future record does not strand it');
-    const rev = seed('wf200aaaa', turns.PROCESS_STARTED_AT - 60_000, 'still before the server started');
+    const rev = seed('wf200aaaa', turns.serverStart() - 60_000, 'still before the server started');
     tick(); turns.record(PROJECT, Date.now());
     assert.equal((await drafts.vibe_send.handler({ id: 'wf200aaaa', rev })).data.reason, 'shown_in_earlier_session');
     assert.equal(sends.length, 1);
@@ -111,4 +111,26 @@ test('a server start more than 5 seconds ahead (the clock was set back) is ignor
   // Within the slack it still counts.
   const near = Date.now() + 3000;
   assert.equal(turns.sessionFloor(PROJECT, process.env, { processStart: near }), near);
+});
+
+test('the server start is taken at startup: a process that loads turns.js late still gets its own start', () => {
+  const { spawnSync } = require('node:child_process');
+  const script = `const t0 = Date.now() - Math.round(process.uptime() * 1000);
+    setTimeout(() => { const turns = require(${JSON.stringify(path.join(__dirname, '..', 'turns.js'))});
+      process.stdout.write(JSON.stringify({ t0, got: turns.serverStart(), loadedAt: Date.now() })); }, 400);`;
+  const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', env: { PATH: process.env.PATH, NODE_OPTIONS: process.env.NODE_OPTIONS || '', VIBE_HOME: HOME } });
+  const { t0, got, loadedAt } = JSON.parse(r.stdout);
+  assert.ok(Math.abs(got - t0) < 50, `start ${got} vs ${t0}`);
+  assert.ok(loadedAt - got >= 350, 'not the time it was loaded');
+});
+
+test('the server entry point sets it first, before anything else is loaded, and only once', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
+  const set = src.indexOf("require('./turns').setServerStart(SERVER_STARTED_AT)");
+  assert.ok(set > 0, 'index.js sets the server start');
+  const firstOther = src.search(/require\('\.\/(?!turns')/);
+  assert.ok(set < firstOther, 'before any other module of the server is required');
+  const fresh = require('../turns');
+  const kept = fresh.setServerStart(123);
+  assert.equal(fresh.setServerStart(456), kept, 'set once');
 });

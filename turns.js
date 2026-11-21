@@ -135,8 +135,20 @@ function lastSessionStart(dir, env = process.env) {
 }
 
 const FUTURE_SLACK_MS = 5000;
-/** When this process (the MCP server) started: a session start no hook can fail to record. */
-const PROCESS_STARTED_AT = Date.now() - Math.round(process.uptime() * 1000);
+/**
+ * When this process (the MCP server) started: a session start no hook can fail
+ * to record. Set once by the server entry point at startup (index.js); until
+ * then, and in a process that is not the server, the process's own start
+ * from its uptime, which does not move with when this file was loaded.
+ */
+let serverStartedAt = null;
+function setServerStart(at) {
+  if (serverStartedAt === null && Number.isFinite(at)) serverStartedAt = at;
+  return serverStartedAt;
+}
+function serverStart() {
+  return serverStartedAt !== null ? serverStartedAt : Date.now() - Math.round(process.uptime() * 1000);
+}
 
 // ── a Send chosen in the question menu (hooks/arrival-hook.cjs menuApproval) ─
 // One draft, one rev: the hook writes <hash>.menu.json = {id, rev, at} only
@@ -164,7 +176,7 @@ function menuApproved(id, rev, { env = process.env, cwd = process.cwd } = {}) {
  * The earliest a showing may be and still count in this session: the latest
  * recorded session start for the project. null = cannot be told (unreadable).
  */
-function sessionFloor(dir, env = process.env, { processStart = PROCESS_STARTED_AT } = {}) {
+function sessionFloor(dir, env = process.env, { processStart = serverStart() } = {}) {
   const started = lastSessionStart(dir, env);
   if (started && started.unreadable) return null;
   // The server starts with its session (and again on a reconnect), so its own
@@ -183,7 +195,7 @@ function sessionFloor(dir, env = process.env, { processStart = PROCESS_STARTED_A
  *                             host is not Claude Code: today's behaviour
  * A turn in the same millisecond as the rev does not count as after it.
  */
-function judge(revAt, { env = process.env, cwd = process.cwd, host, processStart = PROCESS_STARTED_AT } = {}) {
+function judge(revAt, { env = process.env, cwd = process.cwd, host, processStart = serverStart() } = {}) {
   const agent = host || (() => { try { return require('./host').getHost().agent; } catch { return null; } })();
   if (agent !== 'claude-code') return { check: 'unavailable', why: 'host_without_turn_hook' };
   if (!anyRecorded(env)) return { check: 'unavailable', why: 'no_turn_recorded' };
@@ -199,4 +211,4 @@ function judge(revAt, { env = process.env, cwd = process.cwd, host, processStart
   return { check: 'needs_turn', why: 'no_turn_since_shown' };
 }
 
-module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge, recordSessionStart, lastSessionStart, lastMenuApproval, menuApproved, sessionFloor, PROCESS_STARTED_AT };
+module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge, recordSessionStart, lastSessionStart, lastMenuApproval, menuApproved, sessionFloor, setServerStart, serverStart };
