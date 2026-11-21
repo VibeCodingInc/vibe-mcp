@@ -1,10 +1,11 @@
 {
-  "version": "0.9.20",
+  "version": "0.9.21",
   "updated": "2026-11-21",
-  "changelog": "Someone who joins with your invitation reaches you straight away.",
+  "changelog": "Tell /vibe who someone is to you, and your agent knows who to ask.",
   "features": [
-    "Your invite line now carries a code. When the person you invited signs in with it and writes to you, their message reaches you while you work, marked \"you invited them\", not held as someone you have never written to",
-    "Sign-in from the package now passes the invitation on, so an invitation is actually redeemed"
+    "npx slashvibe-mcp who @handle \"my dad; runs the business\" keeps one private line about a person on this machine. Your agent sees it, so when the work needs \"the owner\" or \"design\" it can offer to ask the right person",
+    "The line is never sent by the package. An unattended answer over an open line refuses to carry it, and a draft that includes it says so before you choose Send",
+    "npx slashvibe-mcp who lists your notes; who @handle --clear removes one"
   ],
   "deprecated": [],
   "breaking": false,
