@@ -121,12 +121,18 @@ function lastSessionStart(dir, env = process.env) {
   if (!file) return null;
   let st;
   try { st = fs.statSync(file); } catch (e) { return e && e.code === 'ENOENT' ? null : { unreadable: true }; }
+  let at = null;
   try {
-    const at = JSON.parse(fs.readFileSync(file, 'utf8')).at;
-    if (Number.isFinite(at)) return { at };
+    const v = JSON.parse(fs.readFileSync(file, 'utf8')).at;
+    if (Number.isFinite(v)) at = v;
   } catch {}
-  return Number.isFinite(st.mtimeMs) ? { at: st.mtimeMs } : { unreadable: true };
+  if (at === null) at = Number.isFinite(st.mtimeMs) ? st.mtimeMs : null;
+  if (at === null) return { unreadable: true };
+  return { at };
 }
+
+/** When this process (the MCP server) started: a session start no hook can fail to record. */
+const PROCESS_STARTED_AT = Date.now() - Math.round(process.uptime() * 1000);
 
 // ── a Send chosen in the question menu (hooks/arrival-hook.cjs menuApproval) ─
 // One draft, one rev: the hook writes <hash>.menu.json = {id, rev, at} only
@@ -154,10 +160,12 @@ function menuApproved(id, rev, { env = process.env, cwd = process.cwd } = {}) {
  * The earliest a showing may be and still count in this session: the latest
  * recorded session start for the project. null = cannot be told (unreadable).
  */
-function sessionFloor(dir, env = process.env) {
+function sessionFloor(dir, env = process.env, { processStart = PROCESS_STARTED_AT } = {}) {
   const started = lastSessionStart(dir, env);
   if (started && started.unreadable) return null;
-  return started ? started.at : 0;
+  // The server starts with its session (and again on a reconnect), so its own
+  // start is a floor even where the session-start hook recorded nothing.
+  return Math.max(started ? started.at : 0, Number.isFinite(processStart) ? processStart : 0);
 }
 
 /**
@@ -168,7 +176,7 @@ function sessionFloor(dir, env = process.env) {
  *                             host is not Claude Code: today's behaviour
  * A turn in the same millisecond as the rev does not count as after it.
  */
-function judge(revAt, { env = process.env, cwd = process.cwd, host } = {}) {
+function judge(revAt, { env = process.env, cwd = process.cwd, host, processStart = PROCESS_STARTED_AT } = {}) {
   const agent = host || (() => { try { return require('./host').getHost().agent; } catch { return null; } })();
   if (agent !== 'claude-code') return { check: 'unavailable', why: 'host_without_turn_hook' };
   if (!anyRecorded(env)) return { check: 'unavailable', why: 'no_turn_recorded' };
@@ -176,12 +184,12 @@ function judge(revAt, { env = process.env, cwd = process.cwd, host } = {}) {
   // Shown before this session started: it must be shown again here. Only
   // where the turn check itself applies (above), so a host without the hook
   // is never made unable to send.
-  const started = lastSessionStart(dir, env);
-  if (started && started.unreadable) return { check: 'needs_turn', why: 'session_start_unreadable' };
-  if (started && !(Number.isFinite(revAt) && revAt >= started.at)) return { check: 'needs_turn', why: 'shown_in_earlier_session' };
+  const floor = sessionFloor(dir, env, { processStart });
+  if (floor === null) return { check: 'needs_turn', why: 'session_start_unreadable' };
+  if (!(Number.isFinite(revAt) && revAt >= floor)) return { check: 'needs_turn', why: 'shown_in_earlier_session' };
   const at = lastTurn(dir, env);
   if (at !== null && Number.isFinite(revAt) && at > revAt) return { check: 'passed' };
   return { check: 'needs_turn', why: 'no_turn_since_shown' };
 }
 
-module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge, recordSessionStart, lastSessionStart, lastMenuApproval, menuApproved, sessionFloor };
+module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge, recordSessionStart, lastSessionStart, lastMenuApproval, menuApproved, sessionFloor, PROCESS_STARTED_AT };
