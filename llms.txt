@@ -58,7 +58,7 @@ message @sam: ship it
 
 Even dictated words go through `vibe_prepare` first: the person sees exactly those words and
 chooses Send. `vibe_send` sends only a draft they approved. A changed draft must be shown
-again before it can be sent: a draft prepared after the person's last message is not sent
+again before it can be sent: a draft shown after the person's last message is not sent
 until they have had a turn to see it, so "send it, and add one line" ends with the new
 preview, and the next Send sends it.
 

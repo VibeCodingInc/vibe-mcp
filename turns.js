@@ -18,7 +18,9 @@
  *   strictly AFTER that rev was last shown.
  *
  * What is stored: a timestamp, in a file named by a hash of the directory.
- * No prompt text, no path in clear, no session id. Mode 0600.
+ * No prompt text, no path in clear. The session-start record beside it
+ * (<hash>.start.json, below) also holds Claude Code's session id, reduced to
+ * letters, digits, '_' and '-' (at most 80). Mode 0600.
  *
  * The project is Claude Code's CLAUDE_PROJECT_DIR, which both the hook and the
  * MCP server receive (checked in a live session: it stays the project root
