@@ -62,6 +62,7 @@
     "oauth-callback.js",
     "presence.js",
     "protocol/handle.js",
+    "rapport.js",
     "reach.js",
     "session-start-hook-settings.js",
     "session-start-hook.cjs",

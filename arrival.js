@@ -36,6 +36,7 @@ const { vibeHome } = require('./vibe-home');
 const { renderIncoming, inertField } = require('./incoming');
 const line = require('./line');
 const door = require('./door');
+const rapport = require('./rapport');
 
 const SPOOL_TTL_MS = 24 * 60 * 60 * 1000;   // an arrival older than a day is just mail
 const CLAIM_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -248,8 +249,26 @@ function record(threads, me, { since = 0, roster = [], bindingFor = null, env = 
     } catch {
       // Best-effort: an arrival we could not spool is still unread in the inbox.
     }
+    countReply(item, env);
   }
   return out;
+}
+
+/**
+ * A reply, for rapport.js: a person's own message (not an agent, not over an
+ * open line, not a door card). Counted once per message id on this machine,
+ * whichever process or session records it first: the `.counted` file is
+ * claimed with `wx`, like `.shown`. rapport.json itself holds no ids.
+ */
+function countReply(item, env = process.env) {
+  try {
+    if (item.line || item.kind === 'agent' || door.parseCard(item.text)) return;
+    if (require('./agent-auth').isAgent()) return;
+    const safe = safeId(item.id);
+    if (!safe) return;
+    fs.closeSync(fs.openSync(path.join(spoolDir(env), `${safe}.counted`), 'wx', 0o600));
+    rapport.noteReply(item.from, { env });
+  } catch {}
 }
 
 /**
@@ -294,7 +313,7 @@ function prune(me, { now = Date.now(), env = process.env } = {}) {
         let row = null;
         try { row = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
         if (age > SPOOL_TTL_MS || !row || (mine && row.to !== mine)) fs.unlinkSync(file);
-      } else if (name.endsWith('.shown') || name.endsWith('.tmp') || name.endsWith('.claim') || name.endsWith('.done')) {
+      } else if (name.endsWith('.shown') || name.endsWith('.tmp') || name.endsWith('.claim') || name.endsWith('.done') || name.endsWith('.counted')) {
         if (age > CLAIM_TTL_MS) fs.unlinkSync(file);
       }
     } catch {}
@@ -344,6 +363,6 @@ async function wroteLastPeople(threads, me, { kindOf = null, limit = 3, ...opts 
 module.exports = {
   wroteLastPeople,
   spoolDir, safeId, claim, isClaimed, isSpooled, told,
-  render, pickArrivals, record, prune, wroteLast,
+  render, pickArrivals, record, prune, wroteLast, countReply,
   SPOOL_TTL_MS, ARRIVAL_SLACK_MS,
 };

@@ -14,7 +14,7 @@
 
 const args = process.argv.slice(2);
 
-const COMMANDS = ['setup', 'hook', 'trust', 'untrust', 'lines', 'quiet', 'unquiet', 'mute', 'unmute', 'door', 'invisible', 'visible', 'agent', 'operate'];
+const COMMANDS = ['setup', 'hook', 'trust', 'untrust', 'lines', 'quiet', 'unquiet', 'mute', 'unmute', 'door', 'invisible', 'visible', 'agent', 'operate', 'rapport'];
 const USAGE = `slashvibe-mcp: telepathic messaging, inside your coding agent
 
   npx slashvibe-mcp setup              install: configure your coding agent and sign in with GitHub
@@ -25,6 +25,7 @@ const USAGE = `slashvibe-mcp: telepathic messaging, inside your coding agent
   npx slashvibe-mcp quiet              nothing reaches you while you work (undo: unquiet)
   npx slashvibe-mcp mute @handle       one person stops surfacing (undo: unmute @handle)
   npx slashvibe-mcp invisible          be here without showing as here (undo: visible)
+  npx slashvibe-mcp rapport            what this machine counts per teammate (also: forget [@handle], decline @handle)
   npx slashvibe-mcp operate @agent     say you run an agent, so people see "run by @you" (also: renew, revoke)
   npx slashvibe-mcp agent              for an agent signing in as itself, not a person
   npx slashvibe-mcp door https://...   leave a door: a link to what you are building (then: door share, door close)
@@ -415,6 +416,29 @@ if (['help', '--help', '-h'].includes(args[0])) {
     else if (args[0] === 'mute' && args[1]) { const h = reach.mute(args[1]); say(`Muted @${h}. Their messages will not surface in your sessions; they stay in the conversation. Undo: npx slashvibe-mcp unmute @${h}`); }
     else if (args[0] === 'unmute' && args[1]) { say(reach.unmute(args[1]) ? `Unmuted @${reach.norm(args[1])}.` : `@${reach.norm(args[1])} was not muted.`); }
     else { const m = reach.muted(); say(`${reach.isQuiet() ? 'Quiet is on.' : 'Quiet is off.'} ${m.length ? `Muted: ${m.map((h) => `@${h}`).join(', ')}` : 'Nobody is muted.'}`); say('npx slashvibe-mcp quiet | unquiet | mute @handle | unmute @handle'); }
+  } catch (error) {
+    process.stderr.write(`${error?.message || error}\n`);
+    process.exitCode = 1;
+  }
+} else if (args[0] === 'rapport') {
+  // What rapport.js remembers: counts and dates only, local, yours to read and erase.
+  const rapport = require('./rapport');
+  const say = (t) => process.stdout.write(`${t}\n`);
+  try {
+    if (args[1] === 'forget') {
+      const gone = rapport.forget(args[2]);
+      say(gone.length ? `Forgotten: ${gone.map((h) => `@${h}`).join(', ')}.` : 'Nothing to forget.');
+    } else if (args[1] === 'decline' && args[2]) {
+      say(`/vibe will not suggest a line with @${rapport.decline(args[2])}.`);
+    } else {
+      const all = Object.entries(rapport.read()).sort(([a], [b]) => a.localeCompare(b));
+      if (!all.length) say('Nothing remembered yet.');
+      for (const [h, e] of all) {
+        const offer = e.offer ? ` · offer ${e.offer.state} ${new Date(e.offer.at).toISOString().slice(0, 10)}` : '';
+        say(`@${h}: ${e.unchanged} sent unchanged, ${e.edited} sent after an edit, ${e.replies} replies${e.lastAt ? ` · last ${new Date(e.lastAt).toISOString().slice(0, 10)}` : ''}${offer}`);
+      }
+      say('Counts only, kept on this machine (rapport.json), never sent. Erase: npx slashvibe-mcp rapport forget [@handle]');
+    }
   } catch (error) {
     process.stderr.write(`${error?.message || error}\n`);
     process.exitCode = 1;
