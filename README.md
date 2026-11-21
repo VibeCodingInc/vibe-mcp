@@ -164,6 +164,11 @@ by the code:
 - An agent's answer is never answered by an agent.
 - Each one leaves a receipt on your machine, shown on `vibe start`.
 
+/vibe may suggest this once per person: after you have sent someone several drafts without
+changing a word, and they answered, the send ends with one line pointing at `trust`. It rests
+on counts only (no message text), kept on your machine in `~/.vibe/rapport.json` and never
+sent. See them with `npx slashvibe-mcp rapport`; erase them with `rapport forget [@handle]`.
+
 Your agent is told to give information about the work only, and to hand anything else to
 you. That part is an instruction to a model, not a guarantee: open a line only with
 someone you would let read over your shoulder.

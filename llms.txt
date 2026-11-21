@@ -97,6 +97,7 @@ npx slashvibe-mcp door share         # leave it with the people they know · doo
 npx slashvibe-mcp quiet              # nothing surfaces while they work · unquiet
 npx slashvibe-mcp mute @handle       # one person stops surfacing · unmute @handle
 npx slashvibe-mcp invisible          # be here without showing as here · visible
+npx slashvibe-mcp rapport            # what this machine counts per teammate · rapport forget [@handle]
 npx slashvibe-mcp hook install       # install the Claude Code hooks · hook status · hook uninstall
 npx slashvibe-mcp operate @agent     # say they run an agent, so people see "run by @them"
 ```
@@ -138,6 +139,11 @@ way.
   shaped like a credential, and never an agent answering an agent's answer. Each such message
   says an agent wrote it and the person has not read it. The person whose agent answered is
   shown, word for word, what it said; tell the person who asked what came back.
+- **The offer of a line.** Once per teammate, when the person has sent them several drafts
+  without changing a word and they answered, a `vibe_send` result ends with one line pointing
+  at `npx slashvibe-mcp trust @handle` (`data.rapport_offer`). Show it as written. Do not run
+  it, do not offer to, and do not bring it up again. What this rests on is counts only, kept on
+  the person's machine.
 - **The sign-in lasts 30 days.** From a week before it ends, the first line of a new session
   says how long is left. `npx slashvibe-mcp setup` renews it and keeps their people and lines.
   Hooks installed by an earlier version keep themselves current.

@@ -362,7 +362,11 @@ async function draftHandler(args) {
       // session route stores nothing and the platform refuses it (CB-007).
       if (to.endsWith('/claude')) return { display: `Drafts go to a person's durable conversation, not a live session — use @${to.replace(/\/claude$/, '')} instead. Nothing drafted.` };
       const project = typeof args.project === 'string' && args.project.trim() ? args.project.trim().slice(0, 60) : null;
-      d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), from: me, to, body: message, replyTo: cleanId(args.reply_to), refs: cleanContext({ refs: args.refs }).refs, context: { project } };
+      // firstRev: the rev of the first preview the person is shown, filled in
+      // below when that preview is returned. null marks a draft opened by a
+      // version that tracks it; drafts already on disk lack the key and are
+      // never judged "unchanged" (rapport.js).
+      d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), from: me, to, body: message, replyTo: cleanId(args.reply_to), refs: cleanContext({ refs: args.refs }).refs, context: { project }, firstRev: null };
       // Nothing to answer in a conversation that does not exist yet.
       if (absent) { d.held = true; d.replyTo = null; }
       drafts.push(d);
@@ -393,6 +397,8 @@ async function draftHandler(args) {
       }
     }
     if (compose(d).length > 2000) return { display: `Not ready — the message is ${compose(d).length} chars and the limit is 2000. Edit it shorter; nothing was sent.` };
+    // The first preview actually shown fixes the rev that "unchanged" is measured against.
+    if (d.firstRev === null) d.firstRev = revOf(d);
     return { draft: { ...d } };
   });
   if (out.display) return out;
@@ -527,7 +533,9 @@ async function sendHandler(args) {
     d.idempotencyKey = sendKey(d);
     const message = compose(d).trim();
     d.approvedSha256 = d.held ? heldDigest(message) : approvedDigest(d.to, message);
-    return { snapshot: { id: d.id, to: d.to, body: d.body, refs: d.refs, context: d.context, replyTo: d.replyTo || null, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, held: Boolean(d.held) } };
+    // Sent exactly as first previewed? Unknown (null) for a draft with no first rev on record.
+    const unchanged = typeof d.firstRev === 'string' ? d.firstRev === rev : null;
+    return { snapshot: { id: d.id, to: d.to, body: d.body, refs: d.refs, context: d.context, replyTo: d.replyTo || null, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, held: Boolean(d.held), unchanged } };
   });
   if (claim.display) return claim;
   const s = claim.snapshot;
@@ -569,7 +577,33 @@ async function sendHandler(args) {
   } else if (!definite && result && typeof result.display === 'string') {
     result = { ...result, display: `${result.display}\n\n_Draft ${s.id} is kept as unconfirmed: Send again retries exactly this text (delivers once), or Cancel._` };
   }
+  if (sent) result = withRapport(result, s);
   return result;
+}
+
+/**
+ * A confirmed send is counted (rapport.js: counts and dates only), and if
+ * trust with this teammate has now been earned, the offer is appended ONCE.
+ * Here rather than at vibe_start: the person has just chosen Send to this
+ * very teammate, so it lands at a pause, about the person it names, and
+ * nowhere near a task. Never for an agent signed in as itself, a QA handle,
+ * a live-session address, or someone already on an open line.
+ */
+function withRapport(result, s) {
+  try {
+    if (require('../agent-auth').isAgent()) return result;
+    if (isQaHandle(s.to) || s.to.includes('/')) return result;
+    const rapport = require('../rapport');
+    if (s.unchanged !== null) rapport.noteSent(s.to, { unchanged: s.unchanged });
+    const offer = rapport.takeOffer(s.to, { lineOpen: require('../line').isOpen(s.to) });
+    if (!offer) return result;
+    return {
+      ...result,
+      display: `${result.display}\n\n${rapport.offerText(offer)}`,
+      // The host model must only show this line: the person runs the command, or not.
+      data: { ...(result.data || {}), rapport_offer: { shown: true, handle: offer.handle, run_by: 'person', agent_may_act: false } },
+    };
+  } catch { return result; }
 }
 
 // ── Keep: create the invitation that holds the approved message ───────────────
