@@ -1,12 +1,10 @@
 {
-  "version": "0.9.19",
+  "version": "0.9.20",
   "updated": "2026-11-21",
-  "changelog": "Your agent can no longer send wording you have not seen, and /vibe stops repeating itself.",
+  "changelog": "Someone who joins with your invitation reaches you straight away.",
   "features": [
-    "A draft can be sent only after you have had a turn to see it. If you say \"send it, but add this\", your agent shows you the new wording first",
-    "A message you have already answered is no longer listed as waiting, and an arrival is announced once, not twice",
-    "Before your agent tells you someone has not replied, it reads the conversation",
-    "When someone you do not know yet writes, /vibe reminds you it may be a person you invited"
+    "Your invite line now carries a code. When the person you invited signs in with it and writes to you, their message reaches you while you work, marked \"you invited them\", not held as someone you have never written to",
+    "Sign-in from the package now passes the invitation on, so an invitation is actually redeemed"
   ],
   "deprecated": [],
   "breaking": false,
