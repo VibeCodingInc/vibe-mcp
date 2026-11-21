@@ -15,10 +15,13 @@
  *   <VIBE_HOME>/turns/<hash of the project directory>.json = {"at": T};
  *
  *   vibe_send sends a rev only if a turn was recorded for this project
- *   strictly AFTER that rev was last shown.
+ *   strictly AFTER that rev was last shown. A turn the hook could not yet
+ *   confirm as the person's (pending: when, a sha256 of the prompt, and the
+ *   session transcript's path) is settled here at send time (judge).
  *
- * What is stored: a timestamp, in a file named by a hash of the directory.
- * No prompt text, no path in clear, no session id. Mode 0600.
+ * What is stored: a timestamp, in a file named by a hash of the directory;
+ * for an unconfirmed prompt also its sha256 and the transcript's path. No
+ * prompt text, no project path in clear, no session id. Mode 0600.
  *
  * The project is Claude Code's CLAUDE_PROJECT_DIR, which both the hook and the
  * MCP server receive (checked in a live session: it stays the project root
@@ -61,14 +64,58 @@ function anyRecorded(env = process.env) {
   try { return fs.readdirSync(turnsDir(env)).some((n) => /^[0-9a-f]{32}\.json$/.test(n)); } catch { return false; }
 }
 
-/** The last recorded person-turn for a project directory, or null. */
-function lastTurn(dir, env = process.env) {
+/**
+ * The turn record for a project directory: { at, pending } where at is the
+ * last confirmed person-turn (or null) and pending is a later prompt the hook
+ * could not yet confirm ({ at, sha256, transcript }) or null.
+ */
+function turnRecord(dir, env = process.env) {
   const k = key(dir);
-  if (!k) return null;
+  if (!k) return { at: null, pending: null };
   try {
-    const at = JSON.parse(fs.readFileSync(path.join(turnsDir(env), `${k}.json`), 'utf8')).at;
-    return Number.isFinite(at) ? at : null;
-  } catch { return null; }
+    const r = JSON.parse(fs.readFileSync(path.join(turnsDir(env), `${k}.json`), 'utf8'));
+    const p = r && r.pending;
+    const pending = p && Number.isFinite(p.at) && typeof p.sha256 === 'string' && /^[0-9a-f]{64}$/.test(p.sha256) && typeof p.transcript === 'string' && p.transcript
+      ? { at: p.at, sha256: p.sha256, transcript: p.transcript } : null;
+    return { at: Number.isFinite(r && r.at) ? r.at : null, pending };
+  } catch { return { at: null, pending: null }; }
+}
+
+/** The last confirmed person-turn for a project directory, or null. */
+function lastTurn(dir, env = process.env) {
+  return turnRecord(dir, env).at;
+}
+
+/** Replace the record (atomic, 0600): { at } with no pending. */
+function writeConfirmed(dir, at, env = process.env) {
+  try {
+    const k = key(dir);
+    if (!k) return false;
+    const d = turnsDir(env);
+    fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    const file = path.join(d, `${k}.json`);
+    const tmp = `${file}.${process.pid}.${crypto.randomBytes(3).toString('hex')}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ at }), { mode: 0o600 });
+    fs.renameSync(tmp, file);
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * Settle a pending turn at send time, when Claude Code has written the
+ * prompt's transcript entry: 'human' | 'other' | 'unknown' (no labels, or sdk:
+ * today's behaviour) | 'unconfirmed' (entry not found, or the transcript
+ * cannot be read). Bounded read of the tail (the hook's own reader); nothing
+ * from the transcript is kept.
+ */
+function settlePending(p) {
+  try {
+    const hook = require('./hooks/arrival-hook.cjs');
+    const r = hook.scanTail(p.transcript, p.sha256, p.at - hook.MATCH_SLACK_MS);
+    if (r.match === null) return 'unconfirmed';
+    if (r.match === 'unlabelled') return r.labelled ? 'other' : 'unknown';
+    return hook.decide(r);
+  } catch { return 'unconfirmed'; }
 }
 
 /** Record a person-turn (the hook's job; here for tests and the lab). */
@@ -202,9 +249,22 @@ function judge(revAt, { env = process.env, cwd = process.cwd, host } = {}) {
   const floor = sessionFloor(dir, env);
   if (floor === null) return { check: 'needs_turn', why: 'session_start_unreadable' };
   if (!(Number.isFinite(revAt) && revAt >= floor)) return { check: 'needs_turn', why: 'shown_in_earlier_session' };
-  const at = lastTurn(dir, env);
-  if (at !== null && Number.isFinite(revAt) && at > revAt) return { check: 'passed' };
+  const rec = turnRecord(dir, env);
+  if (rec.at !== null && Number.isFinite(revAt) && rec.at > revAt) return { check: 'passed' };
+  // A later prompt the hook could not confirm (Claude Code writes who started
+  // the turn only after the hook runs): settled now, from the transcript.
+  const p = rec.pending;
+  if (p && Number.isFinite(revAt) && p.at > revAt) {
+    const origin = settlePending(p);
+    if (origin === 'human' || origin === 'unknown') { writeConfirmed(dir, p.at, env); return { check: 'passed' }; }
+    if (origin === 'other') { if (rec.at !== null) writeConfirmed(dir, rec.at, env); else clearRecord(dir, env); return { check: 'needs_turn', why: 'no_turn_since_shown' }; }
+    return { check: 'needs_turn', why: 'turn_unconfirmed' };
+  }
   return { check: 'needs_turn', why: 'no_turn_since_shown' };
 }
 
-module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge, recordSessionStart, noteSessionStart, lastSessionStart, sessionFloor };
+function clearRecord(dir, env = process.env) {
+  try { const k = key(dir); if (k) fs.unlinkSync(path.join(turnsDir(env), `${k}.json`)); } catch {}
+}
+
+module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, turnRecord, settlePending, record, judge, recordSessionStart, noteSessionStart, lastSessionStart, sessionFloor };

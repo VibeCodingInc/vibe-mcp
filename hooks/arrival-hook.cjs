@@ -16,8 +16,8 @@
  *
  * Presentation only: writes no receipt and no read state. The one thing it
  * records is that the person prompted, and when (recordTurn, for vibe_send).
- * When Claude Code has not yet written who started the turn, a detached copy
- * of this file finishes that check (confirmTurn) and exits within seconds.
+ * When Claude Code has not yet written who started the turn, the turn is
+ * recorded as pending and vibe_send settles it (turns.js judge).
  *
  * One more thing it does on a prompt: when the person says they are stuck, it
  * reminds the agent, once per session, that vibe_bump exists (see stuckNudge).
@@ -108,9 +108,9 @@ function main() {
   // turn: the agent opens a menu, about anything, mid-run, and what it shows
   // can differ from what is sent.
   const submittedAt = Date.now();
-  const person = event === 'UserPromptSubmit' ? personPrompt(input) : 'no';
+  const person = event === 'UserPromptSubmit' ? personPrompt(input, submittedAt) : 'no';
   if (person === 'yes') recordTurn(input, submittedAt);
-  if (person === 'pending') startConfirm(input, submittedAt);
+  if (person === 'pending') recordTurn(input, submittedAt, { sha256: promptHash(input.prompt), transcript: String(input.transcript_path) });
 
   const dir = process.env.VIBE_ARRIVALS_DIR || path.join(__dirname, '..', 'arrivals');
   const session = String(input.session_id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
@@ -119,8 +119,8 @@ function main() {
     try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); fs.closeSync(fs.openSync(path.join(dir, `near-${session}.done`), 'wx', 0o600)); } catch {}
   }
   const rows = take(dir, Date.now(), session);
-  // The nudge only reminds the agent a tool exists, and it cannot wait for
-  // the detached check: shown unless the transcript already said no.
+  // The nudge only reminds the agent a tool exists: shown unless the quick
+  // look already said the prompt is not the person's.
   const nudge = person !== 'no' ? stuckNudge(input, dir) : '';
   if (rows.length === 0 && !nudge) return quiet();
 
@@ -193,38 +193,30 @@ function personWrote(prompt) {
 // no label at all. These fields are undocumented, observed 2026-11-21 (Claude
 // Code 2.1.330), and may change.
 //
-// After the wrapper rules have not said no:
-//   1. the newest user entry in the transcript's tail whose text equals this
-//      prompt decides. With a turnOrigin, or failing that origin.kind or
-//      promptSource: a turn only if human; "sdk" is today's behaviour, a turn.
-//   2. this transcript labels origins (some user entry in the tail has a
-//      turnOrigin other than "sdk") and the matching entry has no label: no
-//      turn.
-//   3. no transcript, an unreadable one, or no labels anywhere in the tail (an
-//      older Claude Code, another host, `claude -p`): today's behaviour, a turn.
-//
-// THE ENTRY MAY NOT BE THERE YET. Claude Code 2.1.330 writes a prompt's entry
-// only after its UserPromptSubmit hooks finish (seen with `claude -p --resume`:
-// absent for 650 ms of waiting, the whole time the hook ran). So the hook reads
-// for up to ~100 ms; if labels exist and the entry has not appeared, it hands
-// the decision to a detached copy of itself (confirmTurn) and exits. That copy
-// waits up to CONFIRM_MS for the entry and records the turn, dated to the
-// prompt, only if the entry is labelled human; otherwise, or if it never
-// appears, nothing is recorded. It is given a hash of the prompt, never the
-// text.
+// After the wrapper rules have not said no, ONE quick look at the transcript
+// tail (no waiting, nothing started):
+//   - the newest user entry whose text equals this prompt is labelled human
+//     (turnOrigin, else origin.kind, else promptSource): a confirmed turn;
+//   - it is labelled anything else but "sdk" (scheduled, peer,
+//     task_notification, ...): nothing is recorded;
+//   - no transcript, an unreadable one, no labels anywhere in the tail, or the
+//     match is "sdk": a confirmed turn, today's behaviour;
+//   - otherwise (the transcript labels origins, and this prompt's entry is not
+//     written yet or carries no label): a PENDING turn.
+// Claude Code 2.1.330 writes a prompt's entry only after its UserPromptSubmit
+// hooks finish (seen with `claude -p --resume`: absent for the 650 ms a probe
+// hook waited), so in a labelling transcript the usual outcome here is
+// pending. vibe_send resolves a pending turn when it needs one (turns.js
+// judge), by which time the entry is written. A pending turn stores when, a
+// sha256 of the prompt and the transcript's path; never the prompt's text.
 //
 // Only the last TAIL_BYTES are read. Nothing from the transcript is written or
 // printed anywhere.
 const TAIL_BYTES = 256 * 1024;
-const ORIGIN_TRIES = 3;
-const ORIGIN_WAIT_MS = 50;          // 2 waits: about 100 ms in the hook itself
-const CONFIRM_MS = 5000;
-const CONFIRM_POLL_MS = 100;
+// A match must be about this prompt, not an earlier one with the same words:
+// entries dated more than this before the prompt are ignored.
+const MATCH_SLACK_MS = 60 * 1000;
 const HUMAN_SOURCES = new Set(['typed', 'queued', 'suggestion_accepted']);
-
-function sleepMs(ms) {
-  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch {}
-}
 
 const promptHash = (text) => require('crypto').createHash('sha256').update(String(text).trim(), 'utf8').digest('hex');
 
@@ -269,11 +261,12 @@ function entryOrigin(e) {
 }
 
 /**
- * One read of the tail, for the prompt whose trimmed text hashes to `want`:
- * { labelled, match: 'human' | 'sdk' | 'other' | 'unlabelled' | null }.
- * Throws if the file cannot be read.
+ * One read of the tail, for the prompt whose trimmed text hashes to `want`,
+ * ignoring entries dated before `notBefore` (ms; entries without a date are
+ * kept): { labelled, match: 'human' | 'sdk' | 'other' | 'unlabelled' | null }.
+ * Throws if the file cannot be read. Shared with turns.js (the send-time check).
  */
-function scanTail(file, want) {
+function scanTail(file, want, notBefore = -Infinity) {
   const lines = tailLines(file);
   let labelled = false;
   let match = null;
@@ -284,77 +277,40 @@ function scanTail(file, want) {
     try { e = JSON.parse(line); } catch { continue; }
     if (!e || e.type !== 'user') continue;
     if (typeof e.turnOrigin === 'string' && e.turnOrigin !== 'sdk') labelled = true;
-    if (match === null && entryTexts(e).some((t) => promptHash(t) === want)) match = entryOrigin(e) || 'unlabelled';
+    if (match === null && entryTexts(e).some((t) => promptHash(t) === want)) {
+      const when = typeof e.timestamp === 'string' ? Date.parse(e.timestamp) : NaN;
+      if (!(Number.isFinite(when) && when < notBefore)) match = entryOrigin(e) || 'unlabelled';
+    }
     if (match !== null && labelled) break;
   }
   return { labelled, match };
 }
 
-/** What one read decides: 'human' | 'other' | 'unknown' | null (labels exist, entry not there yet). */
+/**
+ * What one read says about a prompt:
+ *   'human'    labelled human
+ *   'other'    labelled anything else but sdk
+ *   'unknown'  no labels in the tail, or sdk: today's behaviour
+ *   'pending'  the transcript labels origins; this entry is missing or unlabelled
+ */
 function decide(r) {
   if (r.match === 'human') return 'human';
-  if (r.match === 'sdk') return 'unknown';
   if (r.match === 'other') return 'other';
-  if (r.match === 'unlabelled') return r.labelled ? 'other' : 'unknown';
-  return r.labelled ? null : 'unknown';
+  if (r.match === 'sdk') return 'unknown';
+  return r.labelled ? 'pending' : 'unknown';
 }
 
-/**
- * Did the transcript say a person started this turn?
- *   'human'    the matching entry is labelled human
- *   'other'    labelled otherwise, or unlabelled in a transcript that labels
- *   'unknown'  no usable transcript, or no labels: today's rule
- *   'pending'  the transcript labels origins and this prompt's entry is not
- *              written yet (decided later by confirmTurn)
- */
-function transcriptOrigin(prompt, file, { tries = ORIGIN_TRIES, waitMs = ORIGIN_WAIT_MS } = {}) {
+/** The quick look: 'human' | 'other' | 'unknown' | 'pending'. Unreadable or absent: 'unknown'. */
+function transcriptOrigin(prompt, file, at = Date.now()) {
   if (typeof file !== 'string' || !file || typeof prompt !== 'string') return 'unknown';
-  const want = promptHash(prompt);
-  for (let t = 0; t < tries; t++) {
-    if (t > 0) sleepMs(waitMs);
-    let r;
-    try { r = scanTail(file, want); } catch { return 'unknown'; }
-    const d = decide(r);
-    if (d) return d;
-  }
-  return 'pending';
+  try { return decide(scanTail(file, promptHash(prompt), at - MATCH_SLACK_MS)); } catch { return 'unknown'; }
 }
 
-/**
- * The detached copy's job: wait for the entry, record the turn only if it is
- * labelled human (or carries no label in a transcript without labels).
- * Arguments: the prompt's hash, the transcript, when the prompt was submitted,
- * and the input cwd.
- */
-function confirmTurn([want, file, at, cwd], { budgetMs = CONFIRM_MS, pollMs = CONFIRM_POLL_MS } = {}) {
-  const until = Date.now() + budgetMs;
-  for (;;) {
-    let d = null;
-    try { d = decide(scanTail(file, want)); } catch { return false; }
-    if (d === 'human' || d === 'unknown') { recordTurn({ cwd }, Number(at)); return true; }
-    if (d === 'other') return false;
-    if (Date.now() >= until) return false;
-    sleepMs(pollMs);
-  }
-}
-
-function startConfirm(input, at) {
-  try {
-    const args = [__filename, '--confirm-turn', promptHash(input.prompt), String(input.transcript_path), String(at), typeof input.cwd === 'string' ? input.cwd : ''];
-    const child = require('child_process').spawn(process.execPath, args, { detached: true, stdio: 'ignore', env: process.env });
-    child.unref();
-    return true;
-  } catch { return false; }
-}
-
-/**
- * The person wrote this prompt: 'yes' | 'no' | 'pending' (a detached check
- * decides). The wrapper rules, then the transcript's own label.
- */
-function personPrompt(input) {
+/** The person wrote this prompt: 'yes' | 'no' | 'pending'. The wrapper rules, then the quick look. */
+function personPrompt(input, at = Date.now()) {
   if (!input || !personWrote(input.prompt)) return 'no';
   let origin;
-  try { origin = transcriptOrigin(input.prompt, input.transcript_path); } catch { origin = 'unknown'; }
+  try { origin = transcriptOrigin(input.prompt, input.transcript_path, at); } catch { origin = 'unknown'; }
   if (origin === 'other') return 'no';
   if (origin === 'pending') return 'pending';
   return 'yes';
@@ -362,11 +318,13 @@ function personPrompt(input) {
 
 // ── a person's turn (turns.js) ──────────────────────────────────────────────
 // vibe_send sends a draft revision only if the person has prompted since that
-// revision was prepared. This records the prompt: a timestamp in a file named
-// by a hash of the project directory. No prompt text, no path in clear.
-// Keyed by CLAUDE_PROJECT_DIR (the project root, unmoved by a cd) and by the
-// input cwd as well when it differs, so a server started in either place
-// finds it. key() must match turns.js (a test pins it).
+// revision was last shown. This records the prompt: a timestamp in a file
+// named by a hash of the project directory, {"at": T} for the last confirmed
+// turn, plus {"pending": {at, sha256, transcript}} for a later one not yet
+// confirmed (only the newest pending is kept). No prompt text, no project path
+// in clear. Keyed by CLAUDE_PROJECT_DIR (the project root, unmoved by a cd)
+// and by the input cwd as well when it differs, so a server started in either
+// place finds it. key() must match turns.js (a test pins it).
 function turnKey(dir) {
   let real = String(dir || '');
   if (!real) return null;
@@ -374,7 +332,8 @@ function turnKey(dir) {
   return require('crypto').createHash('sha256').update(real, 'utf8').digest('hex').slice(0, 32);
 }
 
-function recordTurn(input, when = Date.now()) {
+/** Write the turn record for this prompt's project(s): confirmed, or pending beside the last confirmed. */
+function recordTurn(input, when = Date.now(), pending = null) {
   try {
     const dir = process.env.VIBE_TURNS_DIR || path.join(__dirname, '..', 'turns');
     const keys = new Set([process.env.CLAUDE_PROJECT_DIR, input.cwd].filter((d) => typeof d === 'string' && d.trim()).map(turnKey).filter(Boolean));
@@ -382,12 +341,16 @@ function recordTurn(input, when = Date.now()) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     for (const k of keys) {
       const file = path.join(dir, `${k}.json`);
-      // A confirmed turn can land after a later prompt's: never move back.
-      let prev = null;
-      try { prev = JSON.parse(fs.readFileSync(file, 'utf8')).at; } catch {}
-      if (Number.isFinite(prev) && prev >= when) continue;
+      let rec;
+      if (pending) {
+        let prev = null;
+        try { prev = JSON.parse(fs.readFileSync(file, 'utf8')).at; } catch {}
+        rec = { at: Number.isFinite(prev) ? prev : null, pending: { at: when, sha256: pending.sha256, transcript: pending.transcript } };
+      } else {
+        rec = { at: when };
+      }
       const tmp = `${file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify({ at: when }), { mode: 0o600 });
+      fs.writeFileSync(tmp, JSON.stringify(rec), { mode: 0o600 });
       fs.renameSync(tmp, file);
     }
   } catch {}
@@ -429,8 +392,5 @@ function stuckNudge(input, dir) {
   } catch { return ''; }
 }
 
-if (require.main === module) {
-  if (process.argv[2] === '--confirm-turn') { try { confirmTurn(process.argv.slice(3)); } catch {} }
-  else { try { main(); } catch { quiet(); } }
-}
-module.exports = { personWrote, personPrompt, transcriptOrigin, confirmTurn, TAIL_BYTES, CONFIRM_MS };
+if (require.main === module) { try { main(); } catch { quiet(); } }
+module.exports = { personWrote, personPrompt, transcriptOrigin, scanTail, decide, promptHash, TAIL_BYTES, MATCH_SLACK_MS };

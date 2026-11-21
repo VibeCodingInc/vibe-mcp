@@ -736,6 +736,11 @@ async function unseenRefusal(d, why = null) {
   } else if (why === 'session_start_unreadable') {
     lead = 'Not sent yet: this session\'s start could not be read on this machine, so it cannot be told whether the person has seen this draft here.';
     reason = 'session_start_unreadable';
+  } else if (why === 'turn_unconfirmed') {
+    // Claude Code had not recorded who wrote their last message (turns.js
+    // settlePending). Not a claim about what they have seen.
+    lead = 'Not sent yet: their last message could not be confirmed as typed by them. Ask them to answer again.';
+    reason = 'turn_unconfirmed';
   } else if (d.reshown) {
     lead = 'Not sent yet: the draft was shown again just now; it can go after their next message.';
     reason = 'shown_again';

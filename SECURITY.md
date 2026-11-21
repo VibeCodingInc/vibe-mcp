@@ -57,6 +57,17 @@ running as the person:
   label, the prompt counts as a turn. A prompt given through `claude -p` or the
   Agent SDK is labelled only as coming from there, not as typed or scheduled,
   and counts.
+- Claude Code writes that label after the prompt hook runs, so the hook often
+  records a prompt as unconfirmed and `vibe_send` checks the label when it is
+  called. For that, the turn record (under `~/.vibe/turns/`, a directory only
+  you can open) holds the path of the session transcript and a SHA-256 of the
+  prompt, never its text. If the label cannot be found then, the send is
+  refused and the person is asked to answer again.
+- A prompt is matched to its transcript entry by its text. If the two differ
+  (a pasted image may be stored differently), a prompt the person typed can
+  fail to be confirmed and they are asked to answer again.
+- A prompt typed more than a minute before its transcript entry is dated is
+  not matched to it, and is likewise not confirmed.
 - A prompt the person typed while the agent was working (queued) has no
   separate typing time. It counts when it is delivered, even if it was typed
   before the draft was shown.
