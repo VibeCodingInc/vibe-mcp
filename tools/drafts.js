@@ -646,20 +646,12 @@ async function send(args, { byPerson }) {
  *   agent_identity an agent signed in as ITSELF sends in its own name: there is
  *                  no person whose words these are;
  *   unavailable    the arrival hook has never recorded a turn under this
- *                  VIBE_HOME, or the host is not Claude Code (no hook there);
- *   menu           the person chose Send in a question menu that showed this
- *                  exact draft (turns.menuApproved).
+ *                  VIBE_HOME, or the host is not Claude Code (no hook there).
  */
 function turnCheck(d, byPerson) {
   if (byPerson) return { check: 'by_person' };
   try { if (require('../agent-auth').isAgent()) return { check: 'agent_identity' }; } catch {}
-  const turns = require('../turns');
-  const j = turns.judge(revPreparedAt(d));
-  // A Send chosen in a question menu that showed this exact draft, in this
-  // session (hooks/arrival-hook.cjs menuApproval): approves this id and rev
-  // only, also when the preview was opened earlier in the same model turn.
-  if (j.check === 'needs_turn' && j.why !== 'session_start_unreadable' && turns.menuApproved(d.id, revOf(d))) return { check: 'menu' };
-  return j;
+  return require('../turns').judge(revPreparedAt(d));
 }
 function withTurn(result, turn) {
   if (!result || !turn) return result;

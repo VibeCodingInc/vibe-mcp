@@ -414,135 +414,43 @@ test('a session-start record that cannot be parsed is dated by its file time', (
   assert.ok(Number.isFinite(st.at) && Math.abs(st.at - fs.statSync(f).mtimeMs) < 1);
 });
 
-// ── a Send chosen in the question menu (review 2026-11-21, third and fourth pass) ──
-// A menu answer is never a general turn: the agent can open a menu about
-// anything mid-run. It approves one draft, at one rev, only when the option
-// the person picked is labelled exactly "Send to @<to>" and its preview IS
-// the draft's full text (whitespace collapsed), single-select, unique label,
-// exactly one open draft matching.
-function menuAnswer(label, { question = 'Send this to @linus?', preview, description = '', multiSelect = false, options } = {}) {
-  const q = { question, header: 'Send', multiSelect, options: options || [
-    { label: 'Send to @linus', description, ...(preview !== undefined ? { preview } : {}) },
-    { label: 'Edit', description: '' },
-    { label: 'Cancel', description: '' },
-  ] };
+// ── a question-menu answer is never the person's Send ───────────────────────
+// Reviews 2026-11-21 (third to fifth pass): a menu can be about anything, the
+// agent opens it mid-run, and what it shows can differ from what is sent
+// (invisible characters, rendered markdown, the reply target, layout). So an
+// AskUserQuestion answer records nothing, however well it shows the draft.
+function menuAnswer(label, options) {
+  const q = { question: 'Send this to @linus?', header: 'Send', multiSelect: false, options };
   const t = Date.now(); while (Date.now() === t) { /* next ms */ }
   const env = { PATH: process.env.PATH, VIBE_TURNS_DIR: TURNS, VIBE_ARRIVALS_DIR: path.join(HOME, 'arrivals'), CLAUDE_PROJECT_DIR: PROJECT };
   const input = { session_id: 'sess1', cwd: PROJECT, hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion', tool_input: { questions: [q] }, tool_response: { questions: [q], answers: { [q.question]: label }, annotations: {} } };
   const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(input), env, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
 }
-const menuFile = () => path.join(TURNS, `${turns.key(PROJECT)}.menu.json`);
-const clearMenu = () => { try { fs.unlinkSync(menuFile()); } catch {} };
 
-test('menu bypass: "send it", reopen, refused, then an unrelated menu answered Yes: still refused', async () => {
+test('a menu answer of any kind, even "Send to @linus" with the full text as preview, does not send; a typed prompt then does', async () => {
   await withWire(async (sends) => {
-    const p = await prepare({ message: 'shown in an earlier session' });
-    sessionStart('startup');
-    personTurn({ prompt: 'send it' });
-    const re = await drafts.vibe_prepare.handler({ id: p.data.draft.id });
-    assert.equal((await drafts.vibe_send.handler({ id: p.data.draft.id, rev: re.data.draft.rev })).data.reason, 'shown_again');
+    const p = await prepare({ message: 'the whole message, exactly' });
     const before = turns.lastTurn(PROJECT);
-    menuAnswer('Yes', { question: 'Run the test suite now?', options: [{ label: 'Yes', description: '' }, { label: 'No', description: '' }] });
-    assert.equal(turns.lastTurn(PROJECT), before, 'a menu answer records no turn');
-    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: re.data.draft.rev });
-    assert.equal(r.data.sent, false);
-    assert.equal(sends.length, 0);
-  });
-});
-
-test('"Send to @linus" whose preview is the full text approves that draft at that rev, even in the same model turn', async () => {
-  await withWire(async (sends) => {
-    clearMenu();
-    const p = await prepare({ message: 'the lease   fixed it,\nfor real', refs: [{ title: 'run', url: 'https://example.com/run/1' }] });
-    const other = await prepare({ handle: 'grace', message: 'a different draft' });
-    menuAnswer(' send TO @Linus ', { options: [
-      { label: ' send TO @Linus ', description: '', preview: 'the lease fixed it,\n\nfor real\nrun: https://example.com/run/1' },
-      { label: 'Edit', description: '' }, { label: 'Cancel', description: '' }] });
-    assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(menuFile(), 'utf8'))).sort(), ['at', 'id', 'rev']);
-    assert.equal((await drafts.vibe_send.handler({ id: other.data.draft.id, rev: other.data.draft.rev })).data.sent, false, 'not another draft');
-    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
-    assert.equal(r.data.sent, true);
-    assert.equal(r.data.turn_check, 'menu');
-    assert.equal(sends.length, 1);
-    assert.equal(sends[0].to, 'linus');
-  });
-});
-
-// The reviewer's fourth-pass probes (scratchpad review4/menu-probe.cjs): each
-// was approved by the "contains anywhere" rule, and must not be.
-test('no approval: labels other than exactly "Send to @<to>", text anywhere but the whole preview, look-alike handles', async () => {
-  await withWire(async (sends) => {
-    const cases = [
-      ['"Send later"', 'The build is green, merging tonight.', 'Send later', { preview: 'The build is green, merging tonight.' }],
-      ['"Send nothing"', 'The build is green, merging tonight.', 'Send nothing', { preview: 'The build is green, merging tonight.' }],
-      ['"Send for review", one-word draft in a question', 'ok', 'Send for review', { question: 'Tests look ok. Push and request review from @linus?', options: [{ label: 'Send for review', description: '' }, { label: 'Not yet', description: '' }] }],
-      ['"Send it", punctuation draft', '.', 'Send it', { question: "Push to @linus's fork. Continue?", options: [{ label: 'Send it', description: '' }, { label: 'Stop', description: '' }] }],
-      ['bare "Send"', 'plain words here', 'Send', { options: [{ label: 'Send', description: '', preview: 'plain words here' }, { label: 'Cancel', description: '' }] }],
-      ['shorter handle: draft to @linus, menu for @linusx', 'Here is the key you asked for.', 'Send to @linusx', { options: [{ label: 'Send to @linusx', description: '', preview: 'Here is the key you asked for.' }, { label: 'Cancel', description: '' }] }],
-      ['text in the question only', 'text in the question', 'Send to @linus', { question: 'Send this to @linus?\n\ntext in the question' }],
-      ['text in the description only', 'text in the description', 'Send to @linus', { description: 'text in the description' }],
-      ['text split between question and preview', 'please wire the funds today', 'Send to @linus', { question: 'Ask @linus: please wire', preview: 'the funds today' }],
-      ['preview holds more than the draft', 'hidden in preview', 'Send to @linus', { preview: 'Run the tests? hidden in preview' }],
-      ['preview holds less than the draft', 'the whole thing, all of it', 'Send to @linus', { preview: 'the whole thing' }],
-      ['a draft with a link, preview shows the body only', null, 'Send to @linus', { preview: 'see the doc' }],
-      ['ANSI conceal in the draft', 'hi \u001b[8mtoken=abc123\u001b[0m', 'Send to @linus', { preview: 'hi \u001b[8mtoken=abc123\u001b[0m' }],
-      ['bidi override in the draft', 'pay ‮yrros', 'Send to @linus', { preview: 'pay ‮yrros' }],
-      ['duplicate chosen label', 'dup label text', 'Send to @linus', { options: [{ label: 'Send to @linus', description: '', preview: 'dup label text' }, { label: 'send to @linus', description: '', preview: 'nothing' }] }],
-      ['multi-select', 'multi', 'Send to @linus', { preview: 'multi', multiSelect: true }],
-      ['Other free text', 'free text', 'Send to @linus please', { preview: 'free text' }],
-      ['Edit', 'edit me', 'Edit', { preview: 'edit me' }],
-      ['Cancel', 'cancel me', 'Cancel', { preview: 'cancel me' }],
-    ];
-    for (const [why, body, label, opts] of cases) {
-      clearMenu();
-      const p = body === null
-        ? await prepare({ message: 'see the doc', refs: [{ title: 'doc', url: 'https://example.com/d' }] })
-        : await prepare({ message: body });
-      menuAnswer(label, opts);
-      assert.ok(!fs.existsSync(menuFile()), `approved: ${why}`);
-      assert.equal((await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev })).data.sent, false, why);
-      await drafts.vibe_discard.handler({ id: p.data.draft.id });
+    const files = () => fs.readdirSync(TURNS).sort();
+    const listed = files();
+    for (const [label, options] of [
+      ['Send to @linus', [{ label: 'Send to @linus', description: '', preview: 'the whole message, exactly' }, { label: 'Edit', description: '' }, { label: 'Cancel', description: '' }]],
+      ['Send', [{ label: 'Send', description: '' }, { label: 'Cancel', description: '' }]],
+      ['Yes', [{ label: 'Yes', description: '' }, { label: 'No', description: '' }]],
+      ['Cancel', [{ label: 'Send to @linus', description: '' }, { label: 'Cancel', description: '' }]],
+    ]) {
+      menuAnswer(label, options);
+      assert.equal(turns.lastTurn(PROJECT), before, `${label}: no turn recorded`);
+      assert.deepEqual(files(), listed, `${label}: nothing written`);
+      const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+      assert.equal(r.data.sent, false, label);
+      assert.equal(r.data.turn_check, 'needs_turn');
     }
     assert.equal(sends.length, 0);
-  });
-});
-
-test('no approval: two open drafts with the same text to the same person; a draft changed after approval', async () => {
-  await withWire(async (sends) => {
-    clearMenu();
-    const p = await prepare({ message: 'menu text exactly' });
-    const twin = await prepare({ message: 'menu text exactly' });
-    menuAnswer('Send to @linus', { preview: 'menu text exactly' });
-    assert.ok(!fs.existsSync(menuFile()), 'two drafts match');
-    await drafts.vibe_discard.handler({ id: twin.data.draft.id });
-    menuAnswer('Send to @linus', { preview: 'menu text exactly' });
-    assert.ok(fs.existsSync(menuFile()));
-    const changed = await drafts.vibe_prepare.handler({ id: p.data.draft.id, message: 'menu text exactly, changed' });
-    assert.equal((await drafts.vibe_send.handler({ id: p.data.draft.id, rev: changed.data.draft.rev })).data.sent, false, 'the approval was for the earlier rev');
-    assert.equal(sends.length, 0);
-    await drafts.vibe_discard.handler({ id: p.data.draft.id });
-  });
-});
-
-test('a menu Send from before the latest session start does not carry over', async () => {
-  await withWire(async (sends) => {
-    clearMenu();
-    const p = await prepare({ message: 'approved yesterday' });
-    menuAnswer('Send to @linus', { preview: 'approved yesterday' });
-    assert.ok(fs.existsSync(menuFile()));
-    sessionStart('startup');
-    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
-    assert.equal(r.data.sent, false);
-    assert.equal(sends.length, 0);
-  });
-});
-
-test('the hook computes the same rev as drafts.js', async () => {
-  const { revOfDraft } = require('../hooks/arrival-hook.cjs');
-  await withWire(async () => {
-    const p = await prepare({ message: 'rev parity', reply_to: 'msg_1', refs: [{ title: 'doc', url: 'https://example.com/a' }] });
-    const d = drafts.loadDrafts().find((x) => x.id === p.data.draft.id);
-    assert.equal(revOfDraft(d), drafts.revOf(d));
+    personTurn({ prompt: 'send it' });
+    const ok = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+    assert.equal(ok.data.sent, true);
+    assert.equal(sends.length, 1);
   });
 });

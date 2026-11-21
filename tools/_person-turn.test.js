@@ -16,7 +16,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const HOOK = path.join(__dirname, '..', 'hooks', 'arrival-hook.cjs');
-const { personWrote, menuApproval } = require('../hooks/arrival-hook.cjs');
+const { personWrote } = require('../hooks/arrival-hook.cjs');
 
 function run(input) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-person-turn-'));
@@ -116,13 +116,12 @@ test('a prompt event without prompt text records nothing', () => {
 });
 
 // ── the question menu ───────────────────────────────────────────────────────
-// A menu answer is never a general turn (the approval of one draft is tested
-// in _send-needs-a-turn.test.js).
+// A menu answer is never a turn (and never approves a draft: see
+// _send-needs-a-turn.test.js).
 test('a question-menu answer records no turn, whatever it says', () => {
   const q = { question: 'Run the test suite now?', header: 'Run', options: [{ label: 'Yes', description: '' }, { label: 'Send', description: '' }], multiSelect: false };
   for (const label of ['Yes', 'Send']) {
     const input = { hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion', tool_input: { questions: [q] }, tool_response: { questions: [q], answers: { [q.question]: label }, annotations: {} } };
-    assert.equal(menuApproval(input), null);
     assert.equal(run(input).recorded, false, label);
   }
 });
