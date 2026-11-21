@@ -7,8 +7,7 @@
 // prepare and send. Claude Code runs UserPromptSubmit for hand-backs, messages
 // from other sessions and scheduled tasks (hooks reference), and the input has
 // no origin field, so the hook decides from the text, erring toward not
-// counting. And the person's answer in the question menu (AskUserQuestion)
-// recorded nothing, so a menu Send was refused; it now counts.
+// counting.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -17,7 +16,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const HOOK = path.join(__dirname, '..', 'hooks', 'arrival-hook.cjs');
-const { personWrote, answeredMenu } = require('../hooks/arrival-hook.cjs');
+const { personWrote, menuApproval } = require('../hooks/arrival-hook.cjs');
 
 function run(input) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-person-turn-'));
@@ -80,29 +79,13 @@ test('a prompt event without prompt text records nothing', () => {
 });
 
 // ── the question menu ───────────────────────────────────────────────────────
-// tool_response shape as Claude Code transcripts record an answered menu
-// (toolUseResult); the hooks reference does not document it.
-const answered = { questions: [{ question: 'Send this to @mira?', header: 'Send', options: [{ label: 'Send', description: '' }, { label: 'Cancel', description: '' }], multiSelect: false }], answers: { 'Send this to @mira?': 'Send' }, annotations: {} };
-
-test('an answered question menu (AskUserQuestion) is the person\'s turn', () => {
-  assert.equal(answeredMenu({ tool_name: 'AskUserQuestion', tool_response: answered }), true);
-  assert.equal(run({ hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion', tool_input: { questions: answered.questions }, tool_response: answered }).recorded, true);
-});
-
-test('not a turn: any other tool, or a menu not answered', () => {
-  const cases = [
-    { tool_name: 'Bash', tool_response: answered },
-    { tool_name: 'mcp__vibe__vibe_send', tool_response: answered },
-    { tool_name: 'mcp__x__AskUserQuestion', tool_response: answered },
-    { tool_name: 'AskUserQuestion', tool_response: 'User rejected tool use' },
-    { tool_name: 'AskUserQuestion', tool_response: { ...answered, answers: {} } },
-    { tool_name: 'AskUserQuestion', tool_response: { ...answered, answers: { q: '' } } },
-    { tool_name: 'AskUserQuestion', tool_response: { questions: answered.questions } },
-    { tool_name: 'AskUserQuestion', tool_response: { ...answered, is_error: true } },
-    { tool_name: 'AskUserQuestion' },
-  ];
-  for (const c of cases) {
-    assert.equal(answeredMenu(c), false, JSON.stringify(c).slice(0, 80));
-    assert.equal(run({ hook_event_name: 'PostToolUse', ...c }).recorded, false, JSON.stringify(c).slice(0, 80));
+// A menu answer is never a general turn (the approval of one draft is tested
+// in _send-needs-a-turn.test.js).
+test('a question-menu answer records no turn, whatever it says', () => {
+  const q = { question: 'Run the test suite now?', header: 'Run', options: [{ label: 'Yes', description: '' }, { label: 'Send', description: '' }], multiSelect: false };
+  for (const label of ['Yes', 'Send']) {
+    const input = { hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion', tool_input: { questions: [q] }, tool_response: { questions: [q], answers: { [q.question]: label }, annotations: {} } };
+    assert.equal(menuApproval(input), null);
+    assert.equal(run(input).recorded, false, label);
   }
 });

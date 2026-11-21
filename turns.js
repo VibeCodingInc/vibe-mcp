@@ -128,6 +128,38 @@ function lastSessionStart(dir, env = process.env) {
   return Number.isFinite(st.mtimeMs) ? { at: st.mtimeMs } : { unreadable: true };
 }
 
+// ── a Send chosen in the question menu (hooks/arrival-hook.cjs menuApproval) ─
+// One draft, one rev: the hook writes <hash>.menu.json = {id, rev, at} only
+// when the menu showed that draft's exact text and the person chose Send.
+
+function lastMenuApproval(dir, env = process.env) {
+  const k = key(dir);
+  if (!k) return null;
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(turnsDir(env), `${k}.menu.json`), 'utf8'));
+    return m && typeof m.id === 'string' && typeof m.rev === 'string' && Number.isFinite(m.at) ? m : null;
+  } catch { return null; }
+}
+
+/** Did the person choose Send in a menu that showed THIS id at THIS rev, in this session? */
+function menuApproved(id, rev, { env = process.env, cwd = process.cwd } = {}) {
+  const dir = projectDir(env, cwd);
+  const m = lastMenuApproval(dir, env);
+  if (!m || m.id !== id || m.rev !== rev || m.at > Date.now() + 5000) return false;
+  const floor = sessionFloor(dir, env);
+  return floor !== null && m.at >= floor;
+}
+
+/**
+ * The earliest a showing may be and still count in this session: the latest
+ * recorded session start for the project. null = cannot be told (unreadable).
+ */
+function sessionFloor(dir, env = process.env) {
+  const started = lastSessionStart(dir, env);
+  if (started && started.unreadable) return null;
+  return started ? started.at : 0;
+}
+
 /**
  * May a revision prepared at `revAt` be sent now?
  *   { check: 'passed' }       a turn for this project came strictly after it
@@ -152,4 +184,4 @@ function judge(revAt, { env = process.env, cwd = process.cwd, host } = {}) {
   return { check: 'needs_turn', why: 'no_turn_since_shown' };
 }
 
-module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge, recordSessionStart, lastSessionStart };
+module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge, recordSessionStart, lastSessionStart, lastMenuApproval, menuApproved, sessionFloor };

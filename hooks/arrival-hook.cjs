@@ -101,10 +101,12 @@ function main() {
   // Claude Code also runs UserPromptSubmit for a background subagent reporting
   // back, a message from another session, a scheduled task (hooks docs); the
   // input has no field saying who wrote it, so personWrote() decides, erring
-  // toward not counting. The person's answer in the question menu
-  // (AskUserQuestion) is their turn too, seen after that tool call.
+  // toward not counting. An answer in the question menu (AskUserQuestion) is
+  // never a general turn: the agent can ask one about anything, mid-run. It
+  // approves one draft only, when the menu itself showed that draft's exact
+  // text and the person chose Send (menuApproval).
   if (event === 'UserPromptSubmit' && personWrote(input.prompt)) recordTurn(input);
-  if (event === 'PostToolUse' && answeredMenu(input)) recordTurn(input);
+  if (event === 'PostToolUse') { const ok = menuApproval(input); if (ok) recordMenuApproval(input, ok); }
 
   const dir = process.env.VIBE_ARRIVALS_DIR || path.join(__dirname, '..', 'arrivals');
   const session = String(input.session_id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
@@ -155,20 +157,74 @@ function personWrote(prompt) {
   return true;
 }
 
-/**
- * The person answered Claude Code's question menu (AskUserQuestion): their
- * choice, made in front of the menu. Only that tool, and only a result that
- * carries at least one answer; a refused or errored menu does not count.
- * Shape from Claude Code transcripts (toolUseResult: {questions, answers:
- * {question: label}, annotations}); the hooks reference leaves it unstated.
- */
-function answeredMenu(input) {
-  if (!input || input.tool_name !== 'AskUserQuestion') return false;
-  const r = input.tool_response;
-  if (!r || typeof r !== 'object' || Array.isArray(r) || r.is_error === true || r.error) return false;
-  const a = r.answers;
-  if (!a || typeof a !== 'object' || Array.isArray(a)) return false;
-  return Object.values(a).some((v) => typeof v === 'string' && v.trim());
+// ── a Send chosen in the question menu ──────────────────────────────────────
+// Claude Code's question menu (AskUserQuestion) is a choice the person makes,
+// but a menu can be about anything, and the agent opens it mid-run: counted
+// as a turn, "Run the tests now?" -> Yes unlocked a send (review 2026-11-21).
+// So a menu answer approves ONE draft, and only when:
+//   - the menu put that draft in front of the person: the question, or the
+//     chosen option's description or preview, holds the draft's exact current
+//     text (whitespace normalised) and its recipient's @handle;
+//   - the chosen option's label starts with "Send" (not Other free text, not
+//     a multi-select, not Edit or Cancel);
+//   - exactly one open draft matches.
+// It is recorded as {id, rev, at}; vibe_send accepts it for that id and rev
+// only (turns.js menuApproved). Result shape from Claude Code transcripts
+// (toolUseResult: {questions, answers: {question: label}, annotations}); the
+// hooks reference does not document it.
+const ws = (t) => String(t == null ? '' : t).replace(/\s+/g, ' ').trim();
+/** = tools/drafts.js compose() and textHash(): what is sent, and the rev that binds it. */
+function composeDraft(d) {
+  const refs = Array.isArray(d.refs) && d.refs.length ? '\n' + d.refs.map((r) => `${r.title}: ${r.url}`).join('\n') : '';
+  return `${d.body || ''}${refs}`;
+}
+function revOfDraft(d) {
+  const h = composeDraft(d) + (d.replyTo ? `\n\u21a9${d.replyTo}` : '') + (d.held ? '\nheld-for-github' : '');
+  return require('crypto').createHash('sha1').update(h).digest('hex').slice(0, 8);
+}
+function menuApproval(input, draftsFile = path.join(process.env.VIBE_ARRIVALS_DIR || path.join(__dirname, '..', 'arrivals'), '..', 'drafts.json')) {
+  try {
+    if (!input || input.tool_name !== 'AskUserQuestion') return null;
+    const r = input.tool_response;
+    if (!r || typeof r !== 'object' || Array.isArray(r) || r.is_error === true || r.error) return null;
+    const answers = r.answers;
+    if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return null;
+    const questions = Array.isArray(r.questions) ? r.questions : (Array.isArray(input.tool_input && input.tool_input.questions) ? input.tool_input.questions : []);
+    const menus = [];
+    for (const q of questions) {
+      if (!q || typeof q.question !== 'string' || q.multiSelect === true) continue;
+      const label = answers[q.question];
+      if (typeof label !== 'string' || !/^\s*send\b/i.test(label)) continue;
+      const opt = (Array.isArray(q.options) ? q.options : []).find((o) => o && o.label === label);
+      if (!opt) continue;   // "Other": the person's own words, not this option
+      menus.push(ws([q.question, opt.description, opt.preview].filter((x) => typeof x === 'string').join(' ')));
+    }
+    if (menus.length === 0) return null;
+    const drafts = JSON.parse(fs.readFileSync(draftsFile, 'utf8'));
+    if (!Array.isArray(drafts)) return null;
+    const now = Date.now();
+    const hits = drafts.filter((d) => d && d.status === 'previewed' && !d.held && typeof d.id === 'string' &&
+      Number.isFinite(d.createdAt) && now - d.createdAt < TTL_MS && ws(composeDraft(d)) &&
+      menus.some((m) => m.includes(ws(composeDraft(d))) && m.toLowerCase().includes(`@${String(d.to || '').toLowerCase()}`)));
+    if (hits.length !== 1) return null;
+    return { id: hits[0].id, rev: revOfDraft(hits[0]) };
+  } catch { return null; }
+}
+
+function recordMenuApproval(input, ok) {
+  try {
+    const dir = process.env.VIBE_TURNS_DIR || path.join(__dirname, '..', 'turns');
+    const keys = new Set([process.env.CLAUDE_PROJECT_DIR, input.cwd].filter((d) => typeof d === 'string' && d.trim()).map(turnKey).filter(Boolean));
+    if (keys.size === 0) return;
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const body = JSON.stringify({ id: ok.id, rev: ok.rev, at: Date.now() });
+    for (const k of keys) {
+      const file = path.join(dir, `${k}.menu.json`);
+      const tmp = `${file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, body, { mode: 0o600 });
+      fs.renameSync(tmp, file);
+    }
+  } catch {}
 }
 
 // ── a person's turn (turns.js) ──────────────────────────────────────────────
@@ -238,4 +294,4 @@ function stuckNudge(input, dir) {
 }
 
 if (require.main === module) { try { main(); } catch { quiet(); } }
-module.exports = { personWrote, answeredMenu };
+module.exports = { personWrote, menuApproval, revOfDraft };
