@@ -169,6 +169,8 @@ async function noteArrivals(handle, threads) {
   if (!authStore.isVerified?.()) return;
   if (['0', 'off', 'false'].includes(String(process.env.VIBE_ARRIVALS || '').toLowerCase())) return;
   if (Date.now() - lastPruneAt > 60 * 60 * 1000) { lastPruneAt = Date.now(); arrival.prune(handle); }
+  // rapport.js counts replies; most never pass through arrival.record (waiting, quiet, parked).
+  arrival.countWaiting(threads, handle, { isMuted: (h) => reach.isMuted(h) });
   // Quiet: nothing surfaces. What comes in meanwhile is remembered as waiting,
   // so turning quiet off does not release a burst of old arrivals.
   if (reach.isQuiet()) {

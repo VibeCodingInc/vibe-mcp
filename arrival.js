@@ -260,15 +260,41 @@ function record(threads, me, { since = 0, roster = [], bindingFor = null, env = 
  * whichever process or session records it first: the `.counted` file is
  * claimed with `wx`, like `.shown`. rapport.json itself holds no ids.
  */
-function countReply(item, env = process.env) {
+function countReply(item, env = process.env, { at = Date.now() } = {}) {
   try {
     if (item.line || item.kind === 'agent' || door.parseCard(item.text)) return;
     if (require('./agent-auth').isAgent()) return;
     const safe = safeId(item.id);
     if (!safe) return;
+    ensureDir(spoolDir(env));
     fs.closeSync(fs.openSync(path.join(spoolDir(env), `${safe}.counted`), 'wx', 0o600));
-    rapport.noteReply(item.from, { env });
+    rapport.noteReply(item.from, { env, now: at });
   } catch {}
+}
+
+/**
+ * Replies that never pass through record(): unread already when this process
+ * first looked (the session-start hook's "waiting"), held while quiet, or from
+ * someone not surfaced mid-work. Counted from the thread rows the poll has
+ * already read (no network call), through countReply, so once per message id
+ * whichever path sees it first. One row per conversation: its newest message,
+ * and only when that message is theirs.
+ *
+ * A `.counted` claim is pruned after CLAIM_TTL_MS, so a message older than
+ * that, still unread, is not counted: it may have been counted before its
+ * claim was pruned. Muted people are not counted (record never sees them).
+ */
+function countWaiting(threads, me, { env = process.env, now = Date.now(), isMuted = () => false } = {}) {
+  const mine = String(me || '').toLowerCase();
+  for (const t of threads || []) {
+    try {
+      if (!t || !(t.unread > 0) || t.muted || !t.lastFrom || String(t.lastFrom).toLowerCase() === mine) continue;
+      if (!Number.isFinite(t.lastTimestamp) || now - t.lastTimestamp > CLAIM_TTL_MS) continue;
+      if (typeof t.lastMessage !== 'string' || isMuted(t.lastFrom)) continue;
+      countReply({ id: t.lastMessageId, from: t.lastFrom, text: t.lastMessage, kind: t.lastActorKind || null, line: line.isOpen(t.lastFrom, env) },
+        env, { at: Math.min(now, t.lastTimestamp) });
+    } catch {}
+  }
 }
 
 /**
@@ -363,6 +389,6 @@ async function wroteLastPeople(threads, me, { kindOf = null, limit = 3, ...opts 
 module.exports = {
   wroteLastPeople,
   spoolDir, safeId, claim, isClaimed, isSpooled, told,
-  render, pickArrivals, record, prune, wroteLast, countReply,
+  render, pickArrivals, record, prune, wroteLast, countReply, countWaiting,
   SPOOL_TTL_MS, ARRIVAL_SLACK_MS,
 };

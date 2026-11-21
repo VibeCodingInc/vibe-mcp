@@ -198,3 +198,45 @@ test('npx slashvibe-mcp rapport shows the counts and forgets them', () => {
   assert.match(cli('forget', '@stan').stdout, /Forgotten: @stan/);
   assert.match(cli().stdout, /Nothing remembered yet/);
 });
+
+test('a reply already waiting when the session started is counted once, from the rows the poll already read', async () => {
+  const presence = require('../presence');
+  const authStore = require('../auth-store');
+  const reach = require('../reach');
+  const orig = { isVerified: authStore.isVerified, getThread: store.getThread, fetch: global.fetch };
+  let network = 0;
+  const day = 24 * 60 * 60 * 1000;
+  await send('una', 'can you look at the migration?');
+  await send('vic', 'old question');
+  authStore.isVerified = () => true;
+  // Who-is-this lookups (store.getThread) belong to arrival, not to counting: stubbed, not counted.
+  store.getThread = async () => [];
+  global.fetch = async () => { network += 1; throw new Error('no network'); };
+  try {
+    const before = rapport.read().una.replies;
+    const waiting = { ...thread('una', 'msg_wait0001'), lastTimestamp: Date.now() - 2 * 60 * 60 * 1000 };
+    const stranger = { ...thread('wes', 'msg_wait0002'), lastTimestamp: Date.now() - 60 * 60 * 1000 };
+    const stale = { ...thread('vic', 'msg_wait0003'), lastTimestamp: Date.now() - 8 * day };
+    // The first look: all three were unread before this process started.
+    await presence.noteArrivals('ada', [waiting, stranger, stale]);
+    assert.equal(arrival.isSpooled('msg_wait0001'), false, 'waiting is not an arrival');
+    assert.equal(rapport.read().una.replies, before + 1, 'the waiting reply is counted');
+    await presence.noteArrivals('ada', [waiting, stranger, stale]);
+    arrival.record([waiting], 'ada');
+    arrival.countReply({ id: 'msg_wait0001', from: 'una', text: 'x' });
+    assert.equal(rapport.read().una.replies, before + 1, 'once per message id, whatever path sees it again');
+    assert.equal(rapport.read().wes, undefined, 'never written to: not a reply');
+    assert.equal(rapport.read().vic.replies, 0, 'older than a .counted claim lives: not counted, so never twice');
+    assert.ok(rapport.read().una.lastAt <= Date.now(), 'lastAt never moves past now');
+    // Quiet holds what arrives, and it still counts as a reply.
+    reach.setQuiet(true);
+    await presence.noteArrivals('ada', [waiting, thread('una', 'msg_quiet001')]);
+    reach.setQuiet(false);
+    assert.equal(rapport.read().una.replies, before + 2);
+    assert.equal(network, 0, 'counting makes no request: it uses the rows the poll already has');
+    const bytes = fs.readFileSync(FILE);
+    for (const needle of ['msg_wait', 'msg_quiet', 'sounds right']) assert.equal(bytes.includes(Buffer.from(needle)), false, `${needle} must not be in rapport.json`);
+  } finally {
+    authStore.isVerified = orig.isVerified; store.getThread = orig.getThread; global.fetch = orig.fetch;
+  }
+});

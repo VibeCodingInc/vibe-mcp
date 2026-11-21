@@ -109,7 +109,8 @@ function noteReply(handle, { env = process.env, now = Date.now() } = {}) {
     const e = p[h];
     if (!e || e.unchanged + e.edited === 0) return false;
     e.replies += 1;
-    e.lastAt = now;
+    // A reply counted late (it was waiting) carries its own time; never move lastAt back.
+    e.lastAt = Math.max(e.lastAt || 0, now);
     return true;
   }, env));
 }
