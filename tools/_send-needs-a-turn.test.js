@@ -368,8 +368,8 @@ test('a draft shown in an earlier session: the new session refuses it with the r
   });
 });
 
-test('resume and clear are new screens too', async () => {
-  for (const source of ['resume', 'clear']) {
+test('resume, clear and fork are new screens too', async () => {
+  for (const source of ['resume', 'clear', 'fork']) {
     await withWire(async (sends) => {
       const p = await prepare({ message: `before ${source}` });
       personTurn();

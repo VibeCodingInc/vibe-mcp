@@ -8,7 +8,7 @@ const packageJson = require('./package.json');
 
 // clear: no output, but the session start is recorded (turns.js: a draft shown
 // before it must be shown again). compact is left out on purpose.
-const HOOK_MATCHER = 'startup|resume|clear';
+const HOOK_MATCHER = 'startup|resume|clear|fork';
 const HOOK_TIMEOUT_SECONDS = 6;
 const VERSIONED_HOOK_COMMAND =
   /^npx -y slashvibe-mcp@[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)? hook run$/;

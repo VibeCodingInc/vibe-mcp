@@ -577,7 +577,8 @@ function markTold(rows, session) {
  * the person did see the text in this session. An input without a source
  * records nothing, because a compact cannot be told apart from a start.
  */
-const NEW_SCREEN = new Set(['startup', 'resume', 'clear']);
+// fork: a resume with --fork-session (hooks reference), a resume like any other.
+const NEW_SCREEN = new Set(['startup', 'resume', 'clear', 'fork']);
 function noteSessionStart(input, env = process.env) {
   try {
     if (!input || input.hook_event_name !== 'SessionStart' || !NEW_SCREEN.has(input.source)) return;
