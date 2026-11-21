@@ -371,6 +371,24 @@ async function main() {
   if (fixture !== null) { hookOutput(fixture); return; }
   const now = live();
   hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin);
+  claimShown(now.messages);
+}
+
+/**
+ * A message this hook has just put in front of the person is theirs to have
+ * seen, so the arrival hook must not announce it again a moment later as
+ * "@x wrote you" (lab 2026-11-20: the same words twice in one turn, when a
+ * message landed in the minute before the session opened and the server took
+ * it for an arrival). The session-start line owns it: the same one-per-machine
+ * `.shown` claim the arrival presenters use, taken here only after the line
+ * was handed over, so a start that timed out claims nothing. It records no
+ * read state; another session that opens later still lists it as waiting.
+ */
+function claimShown(messages) {
+  try {
+    const arrival = require('./arrival');
+    for (const m of messages || []) if (m && m.id) arrival.claim(m.id);
+  } catch {}
 }
 
 if (require.main === module) main().catch(emptyOutput);
