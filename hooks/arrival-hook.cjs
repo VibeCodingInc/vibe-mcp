@@ -98,7 +98,11 @@ function main() {
   if (!EVENTS.has(event)) return quiet();
   // The person typed: a draft prepared before now is one they could have seen.
   // Only on a prompt, never after a tool call (the agent's own turn).
-  if (event === 'UserPromptSubmit') recordTurn(input);
+  // Claude Code also runs UserPromptSubmit for a background subagent reporting
+  // back, a message from another session, a scheduled task (hooks docs); the
+  // input has no field saying who wrote it, so personWrote() decides, erring
+  // toward not counting.
+  if (event === 'UserPromptSubmit' && personWrote(input.prompt)) recordTurn(input);
 
   const dir = process.env.VIBE_ARRIVALS_DIR || path.join(__dirname, '..', 'arrivals');
   const session = String(input.session_id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
@@ -107,7 +111,7 @@ function main() {
     try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); fs.closeSync(fs.openSync(path.join(dir, `near-${session}.done`), 'wx', 0o600)); } catch {}
   }
   const rows = take(dir, Date.now(), session);
-  const nudge = event === 'UserPromptSubmit' ? stuckNudge(input, dir) : '';
+  const nudge = event === 'UserPromptSubmit' && personWrote(input.prompt) ? stuckNudge(input, dir) : '';
   if (rows.length === 0 && !nudge) return quiet();
 
   const context = rows.map((r) => r.context);
@@ -121,6 +125,32 @@ function main() {
       additionalContext: context.join('\n\n'),
     },
   }));
+}
+
+// ── who wrote this prompt ───────────────────────────────────────────────────
+// UserPromptSubmit fires for text no person typed: a subagent's hand-back, a
+// message from another Claude session, a background task notification. Seen
+// live (2026-11-21): a hand-back beginning "Another Claude session sent a
+// message:" recorded a turn, which would unlock a send with no human. There
+// is no origin field in the hook input, so a prompt that STARTS with one of
+// these wrappers, or is nothing but system-reminder blocks, is not the
+// person's. Quoting such text later in a prompt they wrote still counts.
+const NOT_PERSON = [
+  /^Another Claude session sent a message\b/i,
+  /^The coordinator sent a message\b/i,
+  /^<agent-message\b/i,
+  /^<task-notification\b/i,
+  /^\[SYSTEM NOTIFICATION\b/i,
+  /^<system-reminder>[\s\S]*?\[SYSTEM NOTIFICATION - NOT USER INPUT\]/i,
+];
+function personWrote(prompt) {
+  if (typeof prompt !== 'string') return false;
+  const said = prompt.trim();
+  if (!said) return false;
+  if (NOT_PERSON.some((re) => re.test(said))) return false;
+  // Only system-reminder blocks, nothing of the person's own.
+  if (/^<system-reminder>/i.test(said) && !said.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '').trim()) return false;
+  return true;
 }
 
 // ── a person's turn (turns.js) ──────────────────────────────────────────────
@@ -189,4 +219,5 @@ function stuckNudge(input, dir) {
   } catch { return ''; }
 }
 
-try { main(); } catch { quiet(); }
+if (require.main === module) { try { main(); } catch { quiet(); } }
+module.exports = { personWrote };
