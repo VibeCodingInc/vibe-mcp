@@ -66,9 +66,18 @@ function unsentState(dir, row, session) {
     const s = String(session || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
     const mark = s ? `unsent-${draft}-${s}` : null;
     if (mark && fs.existsSync(path.join(dir, `${mark}.shown`))) return { say: false };
+    // The draft must belong to the account the row was spooled for (the
+    // server's verified handle). This hook reads no credential file; a switch
+    // of account is handled by the server, whose every poll removes rows that
+    // do not qualify for the account signed in now (unsent.spool).
+    const me = String(row.to || '').toLowerCase();
+    if (!me) return { say: false };
     const drafts = JSON.parse(fs.readFileSync(path.join(dir, '..', 'drafts.json'), 'utf8'));
     const d = Array.isArray(drafts) ? drafts.find((x) => x && x.id === draft) : null;
-    return { say: Boolean(d && d.status === 'previewed'), mark };
+    const open = Boolean(d && d.status === 'previewed' && !d.held &&
+      String(d.from || '').toLowerCase() === me &&
+      Number.isFinite(d.createdAt) && Date.now() - d.createdAt < TTL_MS);
+    return { say: open, mark };
   } catch { return { say: false }; }
 }
 

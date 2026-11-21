@@ -412,9 +412,11 @@ async function draftHandler(args) {
     if (compose(d).length > 2000) return { display: `Not ready — the message is ${compose(d).length} chars and the limit is 2000. Edit it shorter; nothing was sent.` };
     // The first preview actually shown fixes the rev that "unchanged" is measured against.
     if (d.firstRev === null) d.firstRev = revOf(d);
-    // When THIS text was prepared: Send needs a person's turn after it (turns.js).
-    // Re-showing the same text keeps the time; any change, even back to an
-    // earlier text, starts it again.
+    // When THIS text was last shown: Send needs a person's turn after it
+    // (turns.js). Every showing starts it again, also re-showing unchanged
+    // text: a draft reopened in a later session (a reminder handed its id to
+    // a new agent, unsent.js) must be seen there before it can go, so
+    // reopening it and sending it inside one turn is refused.
     stampRev(d);
     return { draft: { ...d } };
   });
@@ -424,8 +426,7 @@ async function draftHandler(args) {
 }
 
 function stampRev(d) {
-  const rev = revOf(d);
-  if (d.revFor !== rev || !Number.isFinite(d.revAt)) { d.revFor = rev; d.revAt = Date.now(); }
+  d.revFor = revOf(d); d.revAt = Date.now();
 }
 /** When the stored text was prepared. A draft from before revAt existed: its creation (or now, if edited since). */
 function revPreparedAt(d) {

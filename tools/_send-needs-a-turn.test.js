@@ -174,13 +174,57 @@ test('changing the text back to one already seen still needs a turn', async () =
   });
 });
 
-test('showing the same text again does not reset it: a turn after the first showing still counts', async () => {
+// Reversed 2026-11-21 (review of the unsent-reply reminder): showing unchanged
+// text again used to keep the first showing's time, so a reminder that handed
+// an old draft id to a new session let "send it" -> prepare{id} -> send go out
+// in one turn, the text unseen in that session. Every showing now needs a turn.
+test('showing the same text again resets it: a send in the same turn as the re-show is refused; after a turn it goes', async () => {
   await withWire(async (sends) => {
     const p = await prepare({ message: 'unchanged words' });
     personTurn();
-    await drafts.vibe_prepare.handler({ id: p.data.draft.id, message: 'unchanged words' });
+    const again = await drafts.vibe_prepare.handler({ id: p.data.draft.id });
+    assert.equal(again.data.draft.rev, p.data.draft.rev, 'same text, same rev');
+    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+    assert.equal(r.data.sent, false);
+    assert.equal(r.data.turn_check, 'needs_turn');
+    assert.equal(sends.length, 0);
+    personTurn({ prompt: 'yes, send' });
+    const ok = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+    assert.equal(ok.data.sent, true);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('the normal flow is unchanged: prepare, the person says send, send (no re-show) goes', async () => {
+  await withWire(async (sends) => {
+    const p = await prepare({ message: 'normal flow' });
+    personTurn({ prompt: 'send it' });
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
     assert.equal(r.data.sent, true);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('unsent-reply reminder: shown, "send it", reopen + send in that turn is refused; the next prompt lets it go', async () => {
+  await withWire(async (sends) => {
+    // Yesterday: prepared, shown, the person took a turn, then never chose.
+    const p = await prepare({ message: 'yesterday\'s reply' });
+    personTurn({ prompt: 'something else entirely' });
+    // Today: the reminder line was shown at session start (unsent.js); the person answers it.
+    const unsent = require('../unsent');
+    const line = unsent.render({ id: p.data.draft.id, to: 'linus', at: Date.now() - 3 * 3600e3 }).line;
+    assert.match(line, /want to see it again\?$/);
+    personTurn({ prompt: 'send it' });
+    const shown = await drafts.vibe_prepare.handler({ id: p.data.draft.id });
+    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: shown.data.draft.rev });
+    assert.equal(sends.length, 0, 'nothing went out unseen');
+    assert.equal(r.data.sent, false);
+    assert.equal(r.data.reason, 'not_yet_seen');
+    assert.equal(r.data.turn_check, 'needs_turn');
+    assert.match(r.display, /^Not sent yet: the person has not seen this draft\./);
+    personTurn({ prompt: 'yes, send' });
+    const ok = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: shown.data.draft.rev });
+    assert.equal(ok.data.sent, true);
     assert.equal(sends.length, 1);
   });
 });

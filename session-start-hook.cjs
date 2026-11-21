@@ -283,10 +283,17 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
   const mayBeInvited = Number.isInteger(invited) && invited > 0 ? Math.min(invited, waitingUnknown) : 0;
   const signinNotice = signinLine(normalizeSignin(signin));
   const notes = normalizeNoted(noted);
-  const replies = normalizeUnsent(unsent);
-  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice && notes.length === 0 && replies.length === 0) {
+  // A reply the person drafted and never chose about (unsent.js): their own
+  // draft, so the line names only who it is for; nothing of the other side.
+  // Rendered first and on its own: a throw here drops only the reminder.
+  let reminders = [];
+  try {
+    const unsentMod = require('./unsent');
+    reminders = normalizeUnsent(unsent).map((r) => ({ id: r.id, ...unsentMod.render(r) }));
+  } catch { reminders = []; }
+  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice && notes.length === 0 && reminders.length === 0) {
     emptyOutput();
-    return;
+    return [];
   }
   const shown = [];
   const context = [];
@@ -357,12 +364,9 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
     shown.push(`/vibe · ${waitingCount(messages, now)} · ${messages.length === 1 ? 'from' : 'latest from'} @${inertField(latest.from, 40)}${messages.length > 1 && latest.seen ? ` (still waiting${latest.at ? ` since ${sinceWhen(latest.at, now)}` : ''})` : ''}: \u201c${preview}\u201d`);
   }
 
-  // A reply the person drafted and never chose about (unsent.js): their own
-  // draft, so the line names only who it is for; nothing of the other side.
-  for (const r of replies) {
-    const said = require('./unsent').render(r);
-    shown.push(said.line);
-    context.push(said.context);
+  for (const r of reminders) {
+    shown.push(r.line);
+    context.push(r.context);
   }
 
   fs.writeSync(
@@ -376,9 +380,11 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
       },
     })
   );
+  return reminders.map((r) => r.id);
 }
 
 async function fetchLive() {
+  const startedAt = Date.now();
   const authStore = require('./auth-store');
   const store = require('./store');
 
@@ -398,6 +404,9 @@ async function fetchLive() {
   const line = require('./line');
   if (reach.isQuiet()) return none;
   const me = String(verified.handle).toLowerCase();
+  // The unsent-reply check needs the conversation list; it runs beside the
+  // reads below, never after them, and only when an open draft exists.
+  const unsentP = fetchUnsent(store, me, reach);
   const rows = (await store.getRawInbox(verified.handle)).slice(0, 8);
   const kept = [];
   const unknown = new Set();   // senders they have never written to: counted, never shown
@@ -452,7 +461,10 @@ async function fetchLive() {
   const here = await fetchHere(store, me, reach, line);
   let noted = [];
   try { noted = pickNoted(require('./who').all(), { me, muted: reach.muted(), here: here.map((p) => p.handle) }); } catch {}
-  const unsent = await fetchUnsent(store, me, reach);
+  // Whatever time is left inside the deadline, less a margin; if it has not
+  // answered by then, only the reminder is lost.
+  const left = boundedDeadline(process.env.VIBE_SESSION_START_DEADLINE_MS) - (Date.now() - startedAt) - 400;
+  const unsent = await within(unsentP, left);
   return { messages: normalizeMessages(messages), here, doors, strangers: unknown.size, invited: invited.size, noted, unsent };
 }
 
@@ -466,14 +478,25 @@ async function fetchUnsent(store, me, reach) {
   try {
     if (require('./agent-auth').isAgent()) return [];
     const unsent = require('./unsent');
-    const drafts = unsent.readDrafts().filter((d) => d.status === 'previewed' && String(d.from || '').toLowerCase() === me);
-    if (drafts.length === 0) return [];
+    const drafts = unsent.readDrafts();
+    // Nothing that could qualify, whatever the conversations say: no request.
+    if (unsent.openReplies(drafts, drafts.map((d) => ({ handle: d && d.to, lastFrom: d && d.to })), me).length === 0) return [];
     const inbox = await store.getInboxResult(me);
     if (!inbox || inbox.ok !== true) return [];
     return unsent.openReplies(drafts, inbox.threads, me, { isMuted: (h) => reach.isMuted(h) });
   } catch {
     return [];
   }
+}
+
+/** p, or [] if it has not settled within ms (or rejects). */
+function within(p, ms) {
+  if (!(ms > 0)) return Promise.resolve([]);
+  let timer;
+  return Promise.race([
+    Promise.resolve(p).catch(() => []),
+    new Promise((resolve) => { timer = setTimeout(() => resolve([]), ms); }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 function normalizeUnsent(value) {
@@ -514,7 +537,9 @@ async function main() {
     const signin = readSignin();
     const found = await fetchLive().catch(() => ({ messages: [], here: [], doors: [], strangers: 0, invited: 0, noted: [], unsent: [] }));
     if (signin) markSigninShown();
-    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, invited: found.invited || 0, signin, noted: found.noted || [], unsent: found.unsent || [] }));
+    // Exit once written: a conversation-list read given up on (within) must
+    // not hold this reader open until the parent's deadline kills everything.
+    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, invited: found.invited || 0, signin, noted: found.noted || [], unsent: found.unsent || [] }), () => process.exit(0));
     return;
   }
 
@@ -529,10 +554,12 @@ async function main() {
   const now = live();
   // Once per session per draft: a resume of a session already told says nothing more.
   const session = input.session_id;
-  const unsent = now.unsent.filter((r) => { try { return !require('./unsent').told(r.id, session); } catch { return false; } });
-  hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited, now.noted, unsent);
+  // Once per session per draft, and at most two session starts per draft on
+  // this machine (also when the host gives no session id).
+  const unsent = now.unsent.filter((r) => { try { return require('./unsent').mayMentionAtStart(r.id, session); } catch { return false; } });
+  const said = hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited, now.noted, unsent);
   claimShown(now.messages);
-  markTold(unsent, session);
+  markTold((said || []).map((id) => ({ id })), session);
 }
 
 /** Taken only after the line was handed over, like claimShown. */
@@ -579,4 +606,6 @@ module.exports = {
   sinceWhen,
   waitingCount,
   normalizeUnsent,
+  fetchUnsent,
+  within,
 };
