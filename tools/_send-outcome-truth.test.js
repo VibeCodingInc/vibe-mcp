@@ -162,10 +162,10 @@ test('"not in a session" is said only when presence was read', async () => {
   } finally { store.getActiveUsersResult = async () => presence; }
 });
 
-test('@echo names the tool that exists', async () => {
+test('@echo is not a draft, and nothing points at a send with no preview', async () => {
   const r = await drafts.vibe_prepare.handler({ handle: 'echo', message: 'feedback' });
-  assert.match(r.display, /vibe_send \(handle \+ message\)/);
-  assert.doesNotMatch(r.display, /vibe_dm/);
+  assert.match(r.display, /Nothing drafted, nothing sent/);
+  assert.doesNotMatch(r.display, /vibe_dm|handle \+ message/);
 });
 
 test('no user-facing string names a tool or command that does not exist', () => {

@@ -135,15 +135,108 @@ test('a discarded draft never sends', async () => {
   });
 });
 
-test('the person\'s own words send directly, as composed, with the answer link', async () => {
-  const sends = await withWire(async () => {
-    const r = await drafts.vibe_send.handler({ handle: '@linus', message: '  ship it  ', reply_to: 'msg_q9' });
-    assert.equal(r.data.sent, true);
-    assert.match(r.display, /Sent to \*\*@linus\*\*/);
-    assert.match(r.display, /not in a session right now/);
-    assert.equal(drafts.getReturnBinding('linus'), null, 'an ordinary message supersedes the earlier work note');
+/** Every tool the server registers, as index.js registers it: name -> { definition, handler }. */
+function registeredTools() {
+  const src = fs.readFileSync(INDEX, 'utf8');
+  const out = {};
+  for (const m of src.matchAll(/^\s{2}(vibe_[a-z]+): require\('(\.\/tools\/[a-z]+)'\)(?:\.(vibe_[a-z]+))?,/gm)) {
+    const mod = require(path.join(__dirname, '..', m[2]));
+    out[m[1]] = m[3] ? mod[m[3]] : mod;
+  }
+  return out;
+}
+
+test('no tool call sends without a preview the person approved: a handle + message to any tool sends nothing', async () => {
+  const tools = registeredTools();
+  // The open line is the one deliberate exception (tools/line.js): opened
+  // from a terminal by both people, refused for anyone without a line.
+  const OPEN_LINE = new Set(['vibe_ask', 'vibe_answer']);
+  assert.ok(Object.keys(tools).length >= 12 && tools.vibe_send && tools.vibe_prepare, 'every registered tool was found');
+  const invites = [];
+  const posts = [];
+  const origInvite = store.createInvite;
+  store.createInvite = async (b) => { invites.push(b); return { success: false, statusCode: 500 }; };
+  const origFetch = global.fetch;
+  try {
+    const sends = await withWire(async (sent) => {
+      // Inside withWire (sendMessage stubbed); replace its fetch so nothing
+      // but the identity lookup answers, and record anything that writes.
+      global.fetch = async (url, opts = {}) => {
+        const u = String(url);
+        if (u.includes('/api/identity/')) return { ok: true, status: 200, json: async () => ({ handle: decodeURIComponent(u.split('/api/identity/')[1]), kind: 'human' }) };
+        if (String(opts.method || 'GET').toUpperCase() !== 'GET' && /messages|invites/.test(u)) posts.push(u);
+        throw new Error('offline');
+      };
+      const args = { handle: '@linus', to: 'linus', message: 'SECRET from a repo file', body: 'SECRET from a repo file', reply_to: 'msg_q9' };
+      for (const [name, tool] of Object.entries(tools)) {
+        if (OPEN_LINE.has(name)) continue;
+        let r;
+        try { r = await tool.handler({ ...args }); } catch (e) { r = { display: String(e && e.message) }; }
+        assert.equal(sent.length, 0, `${name} sent a message with no approved draft`);
+        assert.notEqual(r && r.data && r.data.sent, true, `${name} reported a send`);
+      }
+      // vibe_send in the old shape opened the preview instead: the same draft
+      // vibe_prepare opens, nothing sent, the id and rev to confirm.
+      const opened = await tools.vibe_send.handler({ ...args });
+      assert.equal(opened.data.sent, false);
+      assert.match(opened.display, /^Nothing sent\./);
+      assert.match(opened.display, /\*\*Message \(exact\):\*\*\nSECRET from a repo file\n/);
+      assert.deepEqual(opened.data.actions[0], { label: 'Send to @linus', tool: 'vibe_send', args: { id: opened.data.draft.id, rev: opened.data.draft.rev } });
+      assert.equal(opened.data.draft.to, 'linus');
+      assert.equal(sent.length, 0);
+      // Only the person's Send, naming that preview, sends it: bound to the
+      // approved bytes, marked as a prepared draft, answering what it named.
+      const r = await tools.vibe_send.handler({ id: opened.data.draft.id, rev: opened.data.draft.rev });
+      assert.equal(r.data.sent, true);
+    });
+    assert.equal(sends.length, 1);
+    assert.equal(sends[0].body, 'SECRET from a repo file');
+    assert.equal(sends[0].opts.origin, 'context_move');
+    assert.equal(sends[0].opts.replyTo, 'msg_q9');
+    assert.match(sends[0].opts.approvedSha256, /^[0-9a-f]{64}$/);
+    assert.deepEqual(invites, [], 'no invitation was created either');
+    assert.deepEqual(posts, [], 'nothing was written to messages or invites over the network');
+  } finally { store.createInvite = origInvite; global.fetch = origFetch; }
+});
+
+test('vibe_send with neither a draft nor a message sends nothing and names vibe_prepare', async () => {
+  await withWire(async (sent) => {
+    for (const a of [{}, { handle: 'linus' }, { message: 'hi' }, { handle: 'linus', message: '   ' }, { rev: 'abc' }]) {
+      const r = await drafts.vibe_send.handler(a);
+      assert.match(r.display, /Nothing sent/);
+      assert.match(r.display, /vibe_prepare/);
+      assert.equal(r.data.sent, false);
+    }
+    assert.equal(sent.length, 0);
   });
-  assert.deepEqual([sends[0].body, sends[0].opts.replyTo, sends[0].opts.origin], ['ship it', 'msg_q9', 'composed']);
+});
+
+test('the tool the model reads offers only the draft form', () => {
+  const def = drafts.vibe_send.definition;
+  assert.deepEqual(Object.keys(def.inputSchema.properties).sort(), ['id', 'rev']);
+  assert.doesNotMatch(def.description, /handle \+ message|own words|form 2|verbatim/i);
+});
+
+test('the only code that can reach deliver(): approved drafts, the open line, and the person\'s own terminal', () => {
+  const root = path.join(__dirname, '..');
+  const users = [];
+  const walk = (dir) => {
+    for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (['node_modules', '.git', 'lab', 'test'].includes(f.name)) continue;
+      const p = path.join(dir, f.name);
+      if (f.isDirectory()) walk(p);
+      else if (/\.(c|m)?js$/.test(f.name) && !/\.test\.|^_?.*\.test\.js$/.test(f.name)) {
+        if (/require\(['"](\.\/|\.\.\/)?(tools\/)?deliver['"]\)/.test(fs.readFileSync(p, 'utf8'))) users.push(path.relative(root, p));
+      }
+    }
+  };
+  walk(root);
+  assert.deepEqual(users.sort(), ['cli.js', 'tools/drafts.js', 'tools/line.js']);
+  // In drafts.js, deliver() is called once, and with the approved digest.
+  const src = fs.readFileSync(path.join(root, 'tools', 'drafts.js'), 'utf8');
+  const calls = [...src.matchAll(/await deliver\(([^)]*)\)/g)].map((m) => m[1]);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /approvedSha256: s\.approvedSha256/);
 });
 
 test('deliver refuses rather than shortens, and never reads a failure as delivery', async () => {

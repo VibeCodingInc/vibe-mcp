@@ -17,4 +17,4 @@ The person wants to reach someone on /vibe from the work in this session. They s
 
 If the person has no line saying what they are working on (`vibe_start` says so), offer once to set one from this session's work, in their words, and set it only if they agree.
 
-If they dictate exact words ("message @sam: ship it"), that is not this flow: send their words as they said them with `vibe_send` (`handle` + `message`).
+If they dictate exact words ("message @sam: ship it"), skip steps 1-3: call `vibe_prepare` with their words exactly as they said them, show the preview, and offer the same three choices. Nothing sends without a preview the person chose to send.

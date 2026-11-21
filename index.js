@@ -13,7 +13,7 @@
  *   vibe_people    who can be reached, and what they say they are doing
  *   vibe_thread    one conversation, in full
  *   vibe_prepare   the agent's words, previewed; sends nothing
- *   vibe_send      the approval (a prepared draft), or the person's own words
+ *   vibe_send      the approval: sends a prepared draft, and nothing else
  *   vibe_discard   cancel a draft
  *   vibe_ask       ask a person's agent, over an open line (line.js)
  *   vibe_answer    answer a person's agent, over an open line
@@ -100,9 +100,9 @@ const tools = {
 // sign-in gate instead of a missing tool. Every gated call does the same thing
 // (sign in, send nothing), so this list only decides which verb the model
 // reaches for. The messaging verb listed is vibe_prepare, the start of every
-// send (prepare, preview, Send): vibe_send alone would offer only its no-preview
-// form, since a draft id cannot exist while prepare is hidden. After sign-in,
-// tools/list_changed reveals the rest, vibe_send (both forms) included.
+// send (prepare, preview, Send): vibe_send sends only a draft, and a draft id
+// cannot exist while prepare is hidden. After sign-in, tools/list_changed
+// reveals the rest, vibe_send included.
 const PRE_AUTH_TOOLS = new Set(['vibe_start', 'vibe_init', 'vibe_token', 'vibe_people', 'vibe_thread', 'vibe_prepare']);
 const NO_AUTH_REQUIRED = new Set(['vibe_start', 'vibe_init', 'vibe_token']);
 
