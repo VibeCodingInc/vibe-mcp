@@ -285,7 +285,9 @@ npx slashvibe-mcp hook uninstall
 ```
 
 Two Claude Code hooks: one shows what was waiting when a session opens, one brings a
-message in at your next prompt or after the next tool call. Set `VIBE_ARRIVALS=off` in the
+message in at your next prompt or after the next tool call. A conversation you have answered
+is not waiting, even while their message is still unread; it is waiting again when they
+write again. Set `VIBE_ARRIVALS=off` in the
 server's env to turn arrival off.
 
 **Live push (optional, Claude Code research preview).** To have a message arrive while a

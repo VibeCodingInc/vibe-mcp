@@ -762,39 +762,23 @@ async function getRawInbox(handle) {
     // for compatibility with notification system
     const me = String(handle || '').toLowerCase();
     const isMine = (m) => String(m?.from || '').toLowerCase() === me;
-    const candidates = threads.filter((t) => t.unread > 0 && t.last_message);
 
-    // "Waiting" means THEIR words. When the newest message is mine — I replied
-    // and their earlier message is still unread — the thread's last_message
-    // is my own send, and presenting it as "MESSAGE from @me" told a person
-    // their own words had arrived (Seth, 2026-09-02, the day of the invite).
-    // For those threads read the TAIL of the thread (the API pages oldest-first)
-    // and take the newest message of theirs. Bounded parallelism: the session-
-    // start hook runs this under a 4s deadline (codex P2 ×2 on #38).
-    const TAIL = 50;
-    const resolveWaiting = async (thread) => {
-      if (!isMine(thread.last_message)) return thread.last_message;
-      try {
-        const count = Number(thread.message_count);
-        const offset = Number.isFinite(count) && count > TAIL ? count - TAIL : 0;
-        const t = await request('GET', `/api/v2/threads/${encodeURIComponent(thread.id)}?limit=${TAIL}&offset=${offset}`);
-        const theirs = (t.messages || []).filter((m) => !isMine(m));
-        return theirs.length ? theirs[theirs.length - 1] : null;
-      } catch {
-        return null;
-      }
-    };
-    const CONCURRENCY = 6;
-    const resolved = new Array(candidates.length);
-    let next = 0;
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, candidates.length) }, async () => {
-      while (next < candidates.length) { const i = next++; resolved[i] = await resolveWaiting(candidates[i]); }
-    }));
-
+    // "Waiting" means THEIR words, and only words nobody has answered yet.
+    // Replying does not mark anything read (seeing is not reading), so a
+    // conversation the person has answered can still hold an unread message
+    // of theirs. That message is not waiting: the newest word in the
+    // conversation is the person's own, however it was sent (a draft they
+    // approved, their agent over an open line, the terminal). Showing it as
+    // "1 message waiting" made the next session offer to answer it again
+    // (lab 2026-11-20, p01 in two runs). When they write again, their new
+    // message is the newest, and the conversation is waiting again.
+    // (Before this, the tail of the thread was read for their newest message,
+    // so the person's own reply was never shown as theirs: 2026-09-02.)
     const unreadMessages = [];
-    candidates.forEach((thread, i) => {
-      const waiting = resolved[i];
-      if (!waiting) return; // nothing of theirs to show — not a waiting message
+    threads.forEach((thread) => {
+      if (!(thread.unread > 0) || !thread.last_message) return;
+      const waiting = thread.last_message;
+      if (isMine(waiting)) return; // answered: their word is not the last one
       unreadMessages.push({
         id: waiting.id,
         from: waiting.from,

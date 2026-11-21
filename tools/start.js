@@ -93,7 +93,10 @@ async function handler(args = {}) {
   if (unreadSenders.length > 0) {
     display += '\n';
     unreadSenders.slice(0, 5).forEach((t) => {
-      display += `\n@${cell(t.handle, 39)} (${t.unread})${t.lastMessageId ? ` · #${cell(t.lastMessageId, 40)}` : ''}`;
+      // Unread, and already answered: replying does not mark read, so say so
+      // rather than let it read as something still owed.
+      const answered = t.lastFrom && normalizeHandle(t.lastFrom) === me ? ' · you wrote last' : '';
+      display += `\n@${cell(t.handle, 39)} (${t.unread})${t.lastMessageId ? ` · #${cell(t.lastMessageId, 40)}` : ''}${answered}`;
     });
     if (unreadSenders.length > 5) display += `\n_+${unreadSenders.length - 5} more_`;
   } else if (inboxRead && threads.length === 0) {

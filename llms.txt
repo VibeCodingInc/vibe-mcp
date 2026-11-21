@@ -113,6 +113,8 @@ way.
 - **A message arrives.** After their next prompt or tool call the session is told who wrote
   and what they said. If the session's own work holds something true to say back, the agent
   drafts a reply and shows it. Nothing is sent and nothing is marked read until they choose.
+  A conversation they have answered (by a draft, by you over an open line, or from the
+  terminal) is not shown as waiting, though nothing in it was marked read.
 - **Only people they know reach them mid-work**: someone they have written to, or opened a
   line with. Anyone else waits. When a session opens, one line says how many people they
   have not written to are waiting, with no name and none of their words, and how to ask:
