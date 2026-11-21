@@ -74,7 +74,7 @@ function cli(id, args, extraEnv = {}) {
   });
 }
 
-function session(id, prompt, { allowSend = false } = {}) {
+function session(id, prompt, { allowSend = false, resume = null } = {}) {
   const tools = ['Read', 'Edit', 'Write', 'Bash(sleep:*)', 'mcp__vibe__vibe_people', 'mcp__vibe__vibe_thread', 'mcp__vibe__vibe_prepare', 'mcp__vibe__vibe_discard', 'mcp__vibe__vibe_start',
     // The open-line tools are always offered: the code decides whether they may send.
     'mcp__vibe__vibe_ask', 'mcp__vibe__vibe_answer',
@@ -83,7 +83,9 @@ function session(id, prompt, { allowSend = false } = {}) {
     // The bump names only people the person knows; it sends nothing.
     'mcp__vibe__vibe_bump'];
   if (allowSend) tools.push('mcp__vibe__vibe_send');
-  const child = spawn('claude', ['-p', prompt, '--mcp-config', id.mcp, '--strict-mcp-config',
+  // resume: a later turn of the same session, the person typing again (a
+  // draft is sent only after the person has had a turn to see it, turns.js).
+  const child = spawn('claude', ['-p', prompt, ...(resume ? ['--resume', resume] : []), '--mcp-config', id.mcp, '--strict-mcp-config',
     // Never load the operator's own user settings: their real /vibe arrival hook
     // would run inside a lab session and claim a real message's one announcement.
     '--setting-sources', 'project,local', '--settings', id.settings,
@@ -92,9 +94,10 @@ function session(id, prompt, { allowSend = false } = {}) {
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
   const done = new Promise((resolve) => child.on('close', () => {
-    const t = { shown: [], tools: [], final: '', texts: [], returned: [] };
+    const t = { shown: [], tools: [], final: '', texts: [], returned: [], sessionId: null };
     for (const line of out.split('\n')) {
       let e; try { e = JSON.parse(line); } catch { continue; }
+      if (!t.sessionId && typeof e.session_id === 'string') t.sessionId = e.session_id;
       if (e.type === 'system' && e.subtype === 'informational' && String(e.content).includes('/vibe')) t.shown.push(String(e.content));
       // A SessionStart hook's line for the person arrives as the hook's own output.
       if (e.type === 'system' && e.subtype === 'hook_response') {
