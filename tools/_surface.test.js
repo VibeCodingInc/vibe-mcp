@@ -58,6 +58,8 @@ test('the surface is six tools, the two open-line tools, the visit and sign-in p
   const registered = [...src.matchAll(/^\s{2}(vibe_[a-z]+):/gm)].map((m) => m[1]).sort();
   assert.deepEqual(registered, ['vibe_answer', 'vibe_ask', 'vibe_bump', 'vibe_discard', 'vibe_init', 'vibe_people', 'vibe_prepare', 'vibe_send', 'vibe_start', 'vibe_thread', 'vibe_token', 'vibe_visit']);
   assert.match(get(1).result.instructions, /Never send without the person's explicit choice/);
+  // Measured: an agent told its person "she hasn't answered yet" while her reply sat unread in the conversation.
+  assert.match(get(1).result.instructions, /Before you tell them someone has not replied .*vibe_thread/);
 });
 
 test('modern clients are served statelessly; an unsupported revision is refused with the supported list', () => {
