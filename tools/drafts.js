@@ -334,6 +334,9 @@ async function findPerson(handle) {
  * view in the preview. Judged on the full composed text (body and link
  * lines); a line of only whitespace or U+2800 (braille blank) is blank.
  */
+function storedHidden(id, h) {
+  return `Not shown: draft ${id} contains a character that does not show (${h.codePoint} at character ${h.position}). Discard it with vibe_discard {id: "${id}"}, or edit it with vibe_prepare {id: "${id}", message: "..."} and new text and links. Nothing was sent.`;
+}
 const BLANK_LINES = 'Not prepared: the message has more than two blank lines in a row; remove the extra ones. Nothing was sent.';
 function tooManyBlankLines(text) {
   let run = 0;
@@ -442,6 +445,10 @@ async function draftHandler(args) {
         : `Draft ${d.id} was cancelled — open a new draft (vibe_prepare with handle + message). Nothing sent.` };
       if (d.status === 'sending') return { display: `Draft ${d.id} is being sent right now — nothing to edit.` };
       if (d.status === 'unknown' && (message || args.refs)) return { display: `Draft ${d.id}: the last Send to @${d.to} did not confirm, so the text is frozen — Send again to retry exactly that text (it delivers once), or Cancel. To say something different, cancel and open a new draft.` };
+      if (d.status === 'unknown') {
+        const stored = firstHidden(compose(d));
+        if (stored) return { display: storedHidden(d.id, stored) };
+      }
       if (d.status !== 'unknown') {
         // The preview's `message` already ends with the attachment lines;
         // an edit that pastes it back must not double them (codex P2).
@@ -449,6 +456,10 @@ async function draftHandler(args) {
         const body = message ? (tail && message.endsWith(tail) ? message.slice(0, -tail.length) : message) : d.body;
         const refs = args.refs ? cleanContext({ refs: args.refs }).refs : d.refs;
         if (tooManyBlankLines(compose({ body, refs }))) return { display: BLANK_LINES };
+        // A draft written before this rule (0.9.21 and earlier) may hold one:
+        // it is never shown again as it is.
+        const stored = firstHidden(compose({ body, refs }));
+        if (stored) return { display: storedHidden(d.id, stored) };
         if (message) { d.body = body; d.edited = true; }
         if (args.refs) d.refs = refs;
         if (args.reply_to !== undefined && !d.held) d.replyTo = cleanId(args.reply_to);

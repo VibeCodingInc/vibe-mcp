@@ -216,3 +216,14 @@ test('layout: blank-looking lines count as blank; link titles are one line; link
   assert.ok(p.display.includes('**Message (exact):**\nline one\nline two\n\nend\n'), 'the preview is the stored text');
   await drafts.vibe_discard.handler({ id: p.data.draft.id });
 });
+
+test('a draft on disk from an earlier version, holding a hidden character, is not shown again by id', async () => {
+  drafts.transact((all) => { all.push({ id: 'wdeadbeef', status: 'previewed', createdAt: Date.now() - 1000, from: 'ada', to: 'linus', body: 'ok\u200Bhidden\u{E0074}', refs: [], context: {}, firstRev: null }); });
+  const r = await drafts.vibe_prepare.handler({ id: 'wdeadbeef' });
+  assert.equal(r.display, 'Not shown: draft wdeadbeef contains a character that does not show (U+200B at character 3). Discard it with vibe_discard {id: "wdeadbeef"}, or edit it with vibe_prepare {id: "wdeadbeef", message: "..."} and new text and links. Nothing was sent.');
+  const d = drafts.loadDrafts().find((x) => x.id === 'wdeadbeef');
+  assert.ok(!Number.isFinite(d.revAt), 'not stamped as shown');
+  const fixed = await drafts.vibe_prepare.handler({ id: 'wdeadbeef', message: 'ok, visible now' });
+  assert.ok(fixed.data, fixed.display);
+  await drafts.vibe_discard.handler({ id: 'wdeadbeef' });
+});
