@@ -337,10 +337,13 @@ test('the agent is told, in the tool descriptions and the server instructions', 
 // the draft again. A draft whose last showing came before the latest session
 // start for the project is refused, whatever rev the agent holds.
 const SESSION_HOOK = path.join(__dirname, '..', 'session-start-hook.cjs');
-function sessionStart(source, { projectDir = PROJECT } = {}) {
+let sessions = 0;
+/** The real session-start hook. A new conversation gets a new id unless one is given. */
+function sessionStart(source, { projectDir = PROJECT, session = `s-${source}-${++sessions}` } = {}) {
   const t = Date.now(); while (Date.now() === t) { /* next ms */ }
   const env = { PATH: process.env.PATH, HOME, VIBE_HOME: HOME, VIBE_API_URL: 'http://127.0.0.1:9', VIBE_SESSION_START_DEADLINE_MS: '300', NODE_OPTIONS: process.env.NODE_OPTIONS || '', CLAUDE_PROJECT_DIR: projectDir };
-  const r = spawnSync(process.execPath, [SESSION_HOOK], { input: JSON.stringify({ hook_event_name: 'SessionStart', source, session_id: `s-${source}`, cwd: projectDir }), env, encoding: 'utf8', timeout: 20_000 });
+  const input = { hook_event_name: 'SessionStart', source, cwd: projectDir, ...(session === null ? {} : { session_id: session }) };
+  const r = spawnSync(process.execPath, [SESSION_HOOK], { input: JSON.stringify(input), env, encoding: 'utf8', timeout: 20_000 });
   assert.equal(r.status, 0, r.stderr);
   return r;
 }
@@ -453,4 +456,98 @@ test('a menu answer of any kind, even "Send to @linus" with the full text as pre
     assert.equal(ok.data.sent, true);
     assert.equal(sends.length, 1);
   });
+});
+
+// ── one process per turn (claude -p --resume; the lab) ──────────────────────
+// Lab 2026-11-21: every human turn was a new `claude -p --resume <id>` process,
+// so a new MCP server each turn. A floor at the server's start (removed) moved
+// past every showing and refused every send. These model that host: each turn
+// is a resume of the SAME conversation id; the draft is prepared in a separate
+// process (a different "server") from the one that sends it.
+const DRAFTS_JS = path.join(__dirname, 'drafts.js');
+/** vibe_prepare in its own node process, as a server started for that turn. */
+function prepareInOtherProcess(message, id = null) {
+  const script = `require(${JSON.stringify(path.join(__dirname, '..', 'host'))}).setClientInfo({ name: 'claude-code', version: 'test' });
+    const store = require(${JSON.stringify(path.join(__dirname, '..', 'store'))});
+    store.getActiveUsers = async () => []; store.getActiveUsersResult = async () => ({ ok: true, users: [] });
+    require(${JSON.stringify(path.join(__dirname, '..', 'reach'))}).know('linus');
+    require(${JSON.stringify(DRAFTS_JS)}).vibe_prepare.handler(${JSON.stringify(id ? { id } : { handle: 'linus', message })})
+      .then((r) => process.stdout.write(JSON.stringify(r.data.draft)));`;
+  const t = Date.now(); while (Date.now() === t) { /* next ms */ }
+  const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 20_000,
+    env: { PATH: process.env.PATH, HOME, VIBE_HOME: HOME, VIBE_API_URL: 'http://127.0.0.1:9', NODE_OPTIONS: process.env.NODE_OPTIONS || '', CLAUDE_PROJECT_DIR: PROJECT, VIBE_SETUP_NO_AUTORUN: '1' } });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+}
+
+test('resume of the same conversation each turn: prepared in one process, the next turn\'s "send" sends, no extra confirmation', async () => {
+  await withWire(async (sends) => {
+    sessionStart('startup', { session: 'conv-a' });
+    personTurn({ prompt: 'ask linus about the pooler' });
+    const d = prepareInOtherProcess('does 4.17.3 touch the legacy rate limiter?');
+    sessionStart('resume', { session: 'conv-a' });          // the next turn: a new process, same conversation
+    personTurn({ prompt: 'send' });
+    const r = await drafts.vibe_send.handler({ id: d.id, rev: d.rev });
+    assert.equal(r.data.sent, true, r.display);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('a different conversation: refused once, shown again, the next turn sends (no loop)', async () => {
+  await withWire(async (sends) => {
+    sessionStart('startup', { session: 'conv-b' });
+    personTurn();
+    const d = prepareInOtherProcess('shown in conversation b');
+    sessionStart('startup', { session: 'conv-c' });          // a new conversation
+    personTurn({ prompt: 'send it' });
+    const r1 = await drafts.vibe_send.handler({ id: d.id, rev: d.rev });
+    assert.equal(r1.data.reason, 'shown_in_earlier_session');
+    const shown = prepareInOtherProcess(null, d.id);          // shown again in conversation c
+    sessionStart('resume', { session: 'conv-c' });            // next turn, same conversation
+    personTurn({ prompt: 'send' });
+    const r2 = await drafts.vibe_send.handler({ id: d.id, rev: shown.rev });
+    assert.equal(r2.data.sent, true, r2.display);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('under resume-per-turn, refusal -> re-show -> prompt always ends in a send, over three turns', async () => {
+  await withWire(async (sends) => {
+    sessionStart('startup', { session: 'conv-d' });
+    personTurn();
+    const d = prepareInOtherProcess('three turns');
+    // Turn 1: Send in the same turn as the showing: refused, and that refusal is a showing.
+    const r1 = await drafts.vibe_send.handler({ id: d.id, rev: d.rev });
+    assert.equal(r1.data.sent, false);
+    // Turn 2: a new process, same conversation; the person says send.
+    sessionStart('resume', { session: 'conv-d' });
+    personTurn({ prompt: 'send' });
+    const r2 = await drafts.vibe_send.handler({ id: d.id, rev: d.rev });
+    assert.equal(r2.data.sent, true, r2.display);
+    // Turn 3: nothing left to send, nothing sent twice.
+    sessionStart('resume', { session: 'conv-d' });
+    personTurn({ prompt: 'thanks' });
+    assert.match((await drafts.vibe_send.handler({ id: d.id, rev: d.rev })).display, /already sent/);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('session start rules: same id on resume keeps the floor; a new id, startup/clear/fork without an id move it; resume without an id and compact do not', () => {
+  const at0 = () => turns.lastSessionStart(PROJECT).at;
+  sessionStart('startup', { session: 'conv-e' });
+  const a = at0();
+  sessionStart('resume', { session: 'conv-e' });
+  assert.equal(at0(), a, 'same conversation');
+  sessionStart('resume', { session: 'conv-f' });
+  assert.ok(at0() > a, 'a resume of a different conversation');
+  const b = at0();
+  sessionStart('resume', { session: null });
+  assert.equal(at0(), b, 'resume without an id');
+  sessionStart('compact', { session: 'conv-g' });
+  assert.equal(at0(), b, 'compact');
+  for (const source of ['startup', 'clear', 'fork']) {
+    const c = at0();
+    sessionStart(source, { session: null });
+    assert.ok(at0() > c, `${source} without an id`);
+  }
 });
