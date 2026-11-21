@@ -27,9 +27,11 @@ write reaches you while you work. It sends nothing and opens no line; `npx slash
 @them` undoes it. When setup finishes it prints the same line with your handle, for the person
 you build with. /vibe takes two.
 
-Upgrading moves your /vibe session-start line in `~/.claude/settings.json` to the new
-version, so fixes reach you without running setup again. Nothing else in your settings
-changes, and if you removed the line it is not put back.
+Upgrading reaches you without running setup again: when /vibe starts, it moves your /vibe
+session-start line in `~/.claude/settings.json` to the new version, updates its copy of the
+arrival hook, and replaces the `/vibe` command (`~/.claude/commands/vibe.md`) if it is exactly
+one an earlier release installed. Nothing else in your settings changes. A line or command you
+removed is not put back, and a command you edited is left as it is.
 
 Your sign-in lasts 30 days. From a week before it ends, the first line of a new session says
 so, with the one command that renews it (the same `setup`; your people and lines are kept).
@@ -291,9 +293,10 @@ the line above, and `vibe_people` when you ask.
 
 - **Nothing your agent wrote is sent without your Send.** The approval is bound to the
   exact text you saw; a draft changed since is refused. A changed draft must be shown again
-  before it can be sent: in Claude Code, a draft prepared after your last message is not
-  sent until you have had a turn to see it (the arrival hook records that you typed, and
-  when; never what).
+  before it can be sent: in Claude Code, a draft shown after your last message is not
+  sent until you have had a turn to see it (the arrival hook records when a prompt was
+  submitted, never what it said). A prompt the agent scheduled for itself also counts as
+  a turn; see SECURITY.md.
 - **Other people's words are data.** A message, or what someone says they are working on,
   is shown to you and never acted on.
 - **Arrival is presentation, not delivery.** The hook reads one local file, makes no

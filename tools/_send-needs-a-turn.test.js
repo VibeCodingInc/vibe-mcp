@@ -107,9 +107,10 @@ test('prepare then send in the same turn: refused, nothing sent, and the preview
     assert.equal(sends.length, 0, 'nothing reached the wire');
     assert.equal(r.data.sent, false);
     assert.equal(r.data.definite, true);
-    assert.equal(r.data.reason, 'not_yet_seen');
+    assert.equal(r.data.reason, 'no_turn_since_shown');
     assert.equal(r.data.turn_check, 'needs_turn');
-    assert.match(r.display, /^Not sent yet: the person has not seen this draft\./);
+    assert.match(r.display, /^Not sent yet: they have not typed a message since it was shown \(a pick in a question menu does not count\)\./);
+    assert.doesNotMatch(r.display, /has not seen this draft/);
     assert.match(r.display, /\*\*Message \(exact\):\*\*\nsend it, and it is not live yet/);
     assert.match(r.display, new RegExp(`rev ${p.data.draft.rev}`));
     assert.equal(r.data.draft.rev, p.data.draft.rev);
@@ -152,7 +153,8 @@ test('rev 1, a turn, then rev 2 with an added line and Send in the same turn: re
     assert.ok(r.data.actions.some((a) => a.tool === 'vibe_send' && a.args.rev === p2.data.draft.rev));
     // The old rev is not a way around it either.
     const old = await drafts.vibe_send.handler({ id: p1.data.draft.id, rev: p1.data.draft.rev });
-    assert.match(old.display, /changed since that preview/);
+    assert.match(old.display, /is not the version that rev names/);
+    assert.ok(!old.display.includes(p2.data.draft.rev), 'the refusal names no rev');
     personTurn({ prompt: 'yes send' });
     const ok = await drafts.vibe_send.handler({ id: p2.data.draft.id, rev: p2.data.draft.rev });
     assert.equal(ok.data.sent, true);
@@ -174,14 +176,78 @@ test('changing the text back to one already seen still needs a turn', async () =
   });
 });
 
-test('showing the same text again does not reset it: a turn after the first showing still counts', async () => {
+// Reversed 2026-11-21 (review of the unsent-reply reminder): showing unchanged
+// text again used to keep the first showing's time, so a reminder that handed
+// an old draft id to a new session let "send it" -> prepare{id} -> send go out
+// in one turn, the text unseen in that session. Every showing now needs a turn.
+test('showing the same text again resets it: a send in the same turn as the re-show is refused; after a turn it goes', async () => {
   await withWire(async (sends) => {
     const p = await prepare({ message: 'unchanged words' });
     personTurn();
-    await drafts.vibe_prepare.handler({ id: p.data.draft.id, message: 'unchanged words' });
+    const again = await drafts.vibe_prepare.handler({ id: p.data.draft.id });
+    assert.equal(again.data.draft.rev, p.data.draft.rev, 'same text, same rev');
+    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+    assert.equal(r.data.sent, false);
+    assert.equal(r.data.turn_check, 'needs_turn');
+    assert.equal(r.data.reason, 'shown_again');
+    assert.equal(sends.length, 0);
+    personTurn({ prompt: 'yes, send' });
+    const ok = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+    assert.equal(ok.data.sent, true);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('the normal flow is unchanged: prepare, the person says send, send (no re-show) goes', async () => {
+  await withWire(async (sends) => {
+    const p = await prepare({ message: 'normal flow' });
+    personTurn({ prompt: 'send it' });
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
     assert.equal(r.data.sent, true);
     assert.equal(sends.length, 1);
+  });
+});
+
+test('unsent-reply reminder: shown, "send it", reopen + send in that turn is refused; the next prompt lets it go', async () => {
+  await withWire(async (sends) => {
+    // Yesterday: prepared, shown, the person took a turn, then never chose.
+    const p = await prepare({ message: 'yesterday\'s reply' });
+    personTurn({ prompt: 'something else entirely' });
+    // Today: the reminder line was shown at session start (unsent.js); the person answers it.
+    const unsent = require('../unsent');
+    const line = unsent.render({ id: p.data.draft.id, to: 'linus', at: Date.now() - 3 * 3600e3 }).line;
+    assert.match(line, /want to see it again\?$/);
+    personTurn({ prompt: 'send it' });
+    const shown = await drafts.vibe_prepare.handler({ id: p.data.draft.id });
+    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: shown.data.draft.rev });
+    assert.equal(sends.length, 0, 'nothing went out unseen');
+    assert.equal(r.data.sent, false);
+    assert.equal(r.data.reason, 'shown_again');
+    assert.equal(r.data.turn_check, 'needs_turn');
+    assert.match(r.display, /^Not sent yet: the draft was shown again just now; it can go after their next message\./);
+    personTurn({ prompt: 'yes, send' });
+    const ok = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: shown.data.draft.rev });
+    assert.equal(ok.data.sent, true);
+    assert.equal(sends.length, 1);
+  });
+});
+
+// Review 2026-11-21 (scratchpad probe bypass.test.js): a reminder handed the
+// draft id to a new session; vibe_send with a made-up rev answered with the
+// current rev ("rev X → Y"), and a second vibe_send with it went out in the
+// same turn, the text never shown. A refusal never names a rev now.
+test('a wrong rev is refused without naming the current rev', async () => {
+  await withWire(async (sends) => {
+    const p = await prepare({ message: "yesterday's reply" });
+    personTurn({ prompt: 'something else' });
+    personTurn({ prompt: 'send it' });
+    const id = p.data.draft.id;
+    const probe = await drafts.vibe_send.handler({ id, rev: 'deadbeef' });
+    assert.ok(!probe.display.includes(p.data.draft.rev), `leaked the rev: ${probe.display}`);
+    assert.ok(!/→/.test(probe.display));
+    assert.match(probe.display, /Show it again with vibe_prepare \{id: "w[0-9a-f]+"\}/);
+    assert.ok(!probe.data || !probe.data.draft, 'no draft data either');
+    assert.equal(sends.length, 0);
   });
 });
 
@@ -223,7 +289,13 @@ test('a turn in the same millisecond as the rev does not count as after it', asy
     turns.record(PROJECT, d.revAt);
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
     assert.equal(r.data.sent, false);
-    turns.record(PROJECT, d.revAt + 1);
+    // The refusal showed the preview again, and that showing is stamped.
+    const shown = drafts.loadDrafts().find((x) => x.id === p.data.draft.id).revAt;
+    assert.ok(shown >= d.revAt);
+    turns.record(PROJECT, shown);
+    assert.equal((await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev })).data.sent, false, 'same millisecond as the re-show: still not after it');
+    const again = drafts.loadDrafts().find((x) => x.id === p.data.draft.id).revAt;
+    turns.record(PROJECT, again + 1);
     assert.equal((await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev })).data.sent, true);
     assert.equal(sends.length, 1);
   });
@@ -259,4 +331,224 @@ test('the agent is told, in the tool descriptions and the server instructions', 
   assert.ok(drafts.vibe_send.definition.description.includes(line));
   assert.ok(drafts.vibe_prepare.definition.description.includes(line));
   assert.ok(fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8').includes(line));
+});
+
+// ── a new session is a new screen (turns.js recordSessionStart) ─────────────
+// Review 2026-11-21: the send must not depend on the agent choosing to show
+// the draft again. A draft whose last showing came before the latest session
+// start for the project is refused, whatever rev the agent holds.
+const SESSION_HOOK = path.join(__dirname, '..', 'session-start-hook.cjs');
+let sessions = 0;
+/** The real session-start hook. A new conversation gets a new id unless one is given. */
+function sessionStart(source, { projectDir = PROJECT, session = `s-${source}-${++sessions}` } = {}) {
+  const t = Date.now(); while (Date.now() === t) { /* next ms */ }
+  const env = { PATH: process.env.PATH, HOME, VIBE_HOME: HOME, VIBE_API_URL: 'http://127.0.0.1:9', VIBE_SESSION_START_DEADLINE_MS: '300', NODE_OPTIONS: process.env.NODE_OPTIONS || '', CLAUDE_PROJECT_DIR: projectDir };
+  const input = { hook_event_name: 'SessionStart', source, cwd: projectDir, ...(session === null ? {} : { session_id: session }) };
+  const r = spawnSync(process.execPath, [SESSION_HOOK], { input: JSON.stringify(input), env, encoding: 'utf8', timeout: 20_000 });
+  assert.equal(r.status, 0, r.stderr);
+  return r;
+}
+
+test('a draft shown in an earlier session: the new session refuses it with the right rev; shown again, the next prompt sends it', async () => {
+  await withWire(async (sends) => {
+    const p = await prepare({ message: 'shown yesterday' });
+    personTurn({ prompt: 'not now' });
+    sessionStart('startup');
+    assert.ok(turns.lastSessionStart(PROJECT).at > drafts.loadDrafts().find((d) => d.id === p.data.draft.id).revAt);
+    personTurn({ prompt: 'send it' });
+    // The correct rev, however the agent came by it (the old preview, the file on disk).
+    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+    assert.equal(sends.length, 0, 'not sent: never shown in this session');
+    assert.equal(r.data.sent, false);
+    assert.equal(r.data.reason, 'shown_in_earlier_session');
+    assert.match(r.display, /^Not sent yet: this draft was last shown in an earlier session, so the person has not seen it in this one\./);
+    // Shown again with vibe_prepare; a send in that same turn still waits.
+    const shown = await drafts.vibe_prepare.handler({ id: p.data.draft.id });
+    assert.equal((await drafts.vibe_send.handler({ id: p.data.draft.id, rev: shown.data.draft.rev })).data.sent, false);
+    personTurn({ prompt: 'yes, send it' });
+    const ok = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: shown.data.draft.rev });
+    assert.equal(ok.data.sent, true);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('resume, clear and fork are new screens too', async () => {
+  for (const source of ['resume', 'clear', 'fork']) {
+    await withWire(async (sends) => {
+      const p = await prepare({ message: `before ${source}` });
+      personTurn();
+      sessionStart(source);
+      personTurn({ prompt: 'send it' });
+      const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+      assert.equal(r.data.reason, 'shown_in_earlier_session', source);
+      assert.equal(sends.length, 0);
+    });
+  }
+});
+
+test('a compact in between does not force a re-show', async () => {
+  await withWire(async (sends) => {
+    const before = turns.lastSessionStart(PROJECT);
+    const p = await prepare({ message: 'before compact' });
+    sessionStart('compact');
+    assert.deepEqual(turns.lastSessionStart(PROJECT), before, 'compact records nothing');
+    personTurn({ prompt: 'send it' });
+    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+    assert.equal(r.data.sent, true);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('a session start in another project does not touch this one; a host without the hook is unaffected', async () => {
+  await withWire(async (sends) => {
+    const p = await prepare({ message: 'other project start' });
+    sessionStart('startup', { projectDir: OTHER });
+    personTurn();
+    assert.equal((await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev })).data.sent, true);
+    assert.equal(sends.length, 1);
+  });
+  sessionStart('startup');
+  assert.deepEqual(turns.judge(0, { host: 'codex' }), { check: 'unavailable', why: 'host_without_turn_hook' });
+});
+
+test('a session-start record that cannot be parsed is dated by its file time', () => {
+  const f = path.join(TURNS, `${turns.key(PROJECT)}.start.json`);
+  fs.writeFileSync(f, 'not json');
+  const st = turns.lastSessionStart(PROJECT);
+  assert.ok(Number.isFinite(st.at) && Math.abs(st.at - fs.statSync(f).mtimeMs) < 1);
+});
+
+// ── a question-menu answer is never the person's Send ───────────────────────
+// Reviews 2026-11-21 (third to fifth pass): a menu can be about anything, the
+// agent opens it mid-run, and what it shows can differ from what is sent
+// (invisible characters, rendered markdown, the reply target, layout). So an
+// AskUserQuestion answer records nothing, however well it shows the draft.
+function menuAnswer(label, options) {
+  const q = { question: 'Send this to @linus?', header: 'Send', multiSelect: false, options };
+  const t = Date.now(); while (Date.now() === t) { /* next ms */ }
+  const env = { PATH: process.env.PATH, VIBE_TURNS_DIR: TURNS, VIBE_ARRIVALS_DIR: path.join(HOME, 'arrivals'), CLAUDE_PROJECT_DIR: PROJECT };
+  const input = { session_id: 'sess1', cwd: PROJECT, hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion', tool_input: { questions: [q] }, tool_response: { questions: [q], answers: { [q.question]: label }, annotations: {} } };
+  const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(input), env, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+}
+
+test('a menu answer of any kind, even "Send to @linus" with the full text as preview, does not send; a typed prompt then does', async () => {
+  await withWire(async (sends) => {
+    const p = await prepare({ message: 'the whole message, exactly' });
+    const before = turns.lastTurn(PROJECT);
+    const files = () => fs.readdirSync(TURNS).sort();
+    const listed = files();
+    for (const [label, options] of [
+      ['Send to @linus', [{ label: 'Send to @linus', description: '', preview: 'the whole message, exactly' }, { label: 'Edit', description: '' }, { label: 'Cancel', description: '' }]],
+      ['Send', [{ label: 'Send', description: '' }, { label: 'Cancel', description: '' }]],
+      ['Yes', [{ label: 'Yes', description: '' }, { label: 'No', description: '' }]],
+      ['Cancel', [{ label: 'Send to @linus', description: '' }, { label: 'Cancel', description: '' }]],
+    ]) {
+      menuAnswer(label, options);
+      assert.equal(turns.lastTurn(PROJECT), before, `${label}: no turn recorded`);
+      assert.deepEqual(files(), listed, `${label}: nothing written`);
+      const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+      assert.equal(r.data.sent, false, label);
+      assert.equal(r.data.turn_check, 'needs_turn');
+    }
+    assert.equal(sends.length, 0);
+    personTurn({ prompt: 'send it' });
+    const ok = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+    assert.equal(ok.data.sent, true);
+    assert.equal(sends.length, 1);
+  });
+});
+
+// ── one process per turn (claude -p --resume; the lab) ──────────────────────
+// Lab 2026-11-21: every human turn was a new `claude -p --resume <id>` process,
+// so a new MCP server each turn. A floor at the server's start (removed) moved
+// past every showing and refused every send. These model that host: each turn
+// is a resume of the SAME conversation id; the draft is prepared in a separate
+// process (a different "server") from the one that sends it.
+const DRAFTS_JS = path.join(__dirname, 'drafts.js');
+/** vibe_prepare in its own node process, as a server started for that turn. */
+function prepareInOtherProcess(message, id = null) {
+  const script = `require(${JSON.stringify(path.join(__dirname, '..', 'host'))}).setClientInfo({ name: 'claude-code', version: 'test' });
+    const store = require(${JSON.stringify(path.join(__dirname, '..', 'store'))});
+    store.getActiveUsers = async () => []; store.getActiveUsersResult = async () => ({ ok: true, users: [] });
+    require(${JSON.stringify(path.join(__dirname, '..', 'reach'))}).know('linus');
+    require(${JSON.stringify(DRAFTS_JS)}).vibe_prepare.handler(${JSON.stringify(id ? { id } : { handle: 'linus', message })})
+      .then((r) => process.stdout.write(JSON.stringify(r.data.draft)));`;
+  const t = Date.now(); while (Date.now() === t) { /* next ms */ }
+  const r = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', timeout: 20_000,
+    env: { PATH: process.env.PATH, HOME, VIBE_HOME: HOME, VIBE_API_URL: 'http://127.0.0.1:9', NODE_OPTIONS: process.env.NODE_OPTIONS || '', CLAUDE_PROJECT_DIR: PROJECT, VIBE_SETUP_NO_AUTORUN: '1' } });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+}
+
+test('resume of the same conversation each turn: prepared in one process, the next turn\'s "send" sends, no extra confirmation', async () => {
+  await withWire(async (sends) => {
+    sessionStart('startup', { session: 'conv-a' });
+    personTurn({ prompt: 'ask linus about the pooler' });
+    const d = prepareInOtherProcess('does 4.17.3 touch the legacy rate limiter?');
+    sessionStart('resume', { session: 'conv-a' });          // the next turn: a new process, same conversation
+    personTurn({ prompt: 'send' });
+    const r = await drafts.vibe_send.handler({ id: d.id, rev: d.rev });
+    assert.equal(r.data.sent, true, r.display);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('a different conversation: refused once, shown again, the next turn sends (no loop)', async () => {
+  await withWire(async (sends) => {
+    sessionStart('startup', { session: 'conv-b' });
+    personTurn();
+    const d = prepareInOtherProcess('shown in conversation b');
+    sessionStart('startup', { session: 'conv-c' });          // a new conversation
+    personTurn({ prompt: 'send it' });
+    const r1 = await drafts.vibe_send.handler({ id: d.id, rev: d.rev });
+    assert.equal(r1.data.reason, 'shown_in_earlier_session');
+    const shown = prepareInOtherProcess(null, d.id);          // shown again in conversation c
+    sessionStart('resume', { session: 'conv-c' });            // next turn, same conversation
+    personTurn({ prompt: 'send' });
+    const r2 = await drafts.vibe_send.handler({ id: d.id, rev: shown.rev });
+    assert.equal(r2.data.sent, true, r2.display);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('under resume-per-turn, refusal -> re-show -> prompt always ends in a send, over three turns', async () => {
+  await withWire(async (sends) => {
+    sessionStart('startup', { session: 'conv-d' });
+    personTurn();
+    const d = prepareInOtherProcess('three turns');
+    // Turn 1: Send in the same turn as the showing: refused, and that refusal is a showing.
+    const r1 = await drafts.vibe_send.handler({ id: d.id, rev: d.rev });
+    assert.equal(r1.data.sent, false);
+    // Turn 2: a new process, same conversation; the person says send.
+    sessionStart('resume', { session: 'conv-d' });
+    personTurn({ prompt: 'send' });
+    const r2 = await drafts.vibe_send.handler({ id: d.id, rev: d.rev });
+    assert.equal(r2.data.sent, true, r2.display);
+    // Turn 3: nothing left to send, nothing sent twice.
+    sessionStart('resume', { session: 'conv-d' });
+    personTurn({ prompt: 'thanks' });
+    assert.match((await drafts.vibe_send.handler({ id: d.id, rev: d.rev })).display, /already sent/);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('session start rules: same id on resume keeps the floor; a new id, startup/clear/fork without an id move it; resume without an id and compact do not', () => {
+  const at0 = () => turns.lastSessionStart(PROJECT).at;
+  sessionStart('startup', { session: 'conv-e' });
+  const a = at0();
+  sessionStart('resume', { session: 'conv-e' });
+  assert.equal(at0(), a, 'same conversation');
+  sessionStart('resume', { session: 'conv-f' });
+  assert.ok(at0() > a, 'a resume of a different conversation');
+  const b = at0();
+  sessionStart('resume', { session: null });
+  assert.equal(at0(), b, 'resume without an id');
+  sessionStart('compact', { session: 'conv-g' });
+  assert.equal(at0(), b, 'compact');
+  for (const source of ['startup', 'clear', 'fork']) {
+    const c = at0();
+    sessionStart(source, { session: null });
+    assert.ok(at0() > c, `${source} without an id`);
+  }
 });

@@ -25,6 +25,7 @@ const EVENTS = ['UserPromptSubmit', 'PostToolUse'];
 const SCRIPT_NAME = 'arrival-hook.cjs';
 const TIMEOUT_SECONDS = 5;
 const SOURCE = path.join(__dirname, 'hooks', SCRIPT_NAME);
+const PACKAGE_VERSION = require('./package.json').version;
 
 function scriptPath(env = process.env) {
   return path.join(vibeHome(env), 'hooks', SCRIPT_NAME);
@@ -107,12 +108,45 @@ function withEntry(settings, env, node) {
   return { settings: next, changed: JSON.stringify(settings) !== JSON.stringify(next) };
 }
 
-/** Copy the script into place when missing or different. Returns true if written. */
-function syncScript(env = process.env, fileSystem = fs) {
+/** The package version that wrote the installed copy: <script>.version beside it. */
+function versionPath(env = process.env) {
+  return `${scriptPath(env)}.version`;
+}
+
+/** -1, 0, 1 for dotted numeric versions; anything unparseable sorts lowest. */
+function compareVersions(a, b) {
+  const parse = (v) => (typeof v === 'string' && /^\d+(\.\d+)*$/.test(v) ? v.split('.').map(Number) : null);
+  const x = parse(a); const y = parse(b);
+  if (!x && !y) return 0;
+  if (!x) return -1;
+  if (!y) return 1;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] || 0) - (y[i] || 0);
+    if (d !== 0) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * Copy the script into place when missing or different. Returns true if
+ * written. FORWARD ONLY: a copy written by a newer package version is left
+ * alone, so an older server still running (another session, a pinned npx)
+ * cannot put back a hook a newer release replaced. A copy with no recorded
+ * version predates the record and is treated as older.
+ */
+function syncScript(env = process.env, fileSystem = fs, version = PACKAGE_VERSION) {
   const target = scriptPath(env);
   const source = fileSystem.readFileSync(SOURCE);
   try { if (fileSystem.readFileSync(target).equals(source)) return false; } catch {}
+  let installed = null;
+  try { installed = JSON.parse(fileSystem.readFileSync(versionPath(env), 'utf8')).version; } catch {}
+  if (installed !== null && compareVersions(installed, version) > 0) return false;
   fileSystem.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  // The version first: interrupted between the two writes, the next start of
+  // this version or newer finishes the copy.
+  const vtmp = `${versionPath(env)}.${process.pid}.tmp`;
+  fileSystem.writeFileSync(vtmp, JSON.stringify({ version }), { mode: 0o600 });
+  fileSystem.renameSync(vtmp, versionPath(env));
   const tmp = `${target}.${process.pid}.tmp`;
   fileSystem.writeFileSync(tmp, source, { mode: 0o700 });
   fileSystem.renameSync(tmp, target);
@@ -146,6 +180,7 @@ function createArrivalHookManager(options = {}) {
     const next = without(current.settings, env);
     if (next.removed > 0) atomicWrite(target, next.settings, current.mode, fileSystem, options.randomUUID || crypto.randomUUID);
     try { fileSystem.unlinkSync(scriptPath(env)); } catch {}
+    try { fileSystem.unlinkSync(versionPath(env)); } catch {}
     return { ...status(), changed: next.removed > 0, removed: next.removed };
   }
 
@@ -172,4 +207,4 @@ function createArrivalHookManager(options = {}) {
   return { install, uninstall, status, refresh };
 }
 
-module.exports = { EVENTS, SCRIPT_NAME, createArrivalHookManager, hookCommand, scriptPath, stableNode, syncScript };
+module.exports = { EVENTS, SCRIPT_NAME, createArrivalHookManager, hookCommand, scriptPath, versionPath, compareVersions, stableNode, syncScript };

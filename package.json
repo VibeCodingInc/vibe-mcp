@@ -87,6 +87,9 @@
     "who.js",
     "agent-auth.js",
     "invite.js",
-    "near.js"
+    "near.js",
+    "unsent.js",
+    "showable.js",
+    "host-command.js"
   ]
 }

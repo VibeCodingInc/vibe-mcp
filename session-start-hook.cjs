@@ -26,6 +26,11 @@ function normalizeMessages(value) {
       from: typeof row?.from === 'string' ? inertField(row.from, 40) : '',
       text:
         typeof row?.text === 'string' ? row.text : typeof row?.body === 'string' ? row.body : '',
+      // Already put in front of the person on this machine before this session
+      // (a session-start line or an arrival took its `.shown` claim), and when
+      // they wrote it. Says "still waiting", never anything about reading.
+      seen: row?.seen === true,
+      at: Number.isFinite(row?.at) ? row.at : (Number.isFinite(Date.parse(row?.createdAt)) ? Date.parse(row.createdAt) : null),
     }))
     .filter((row) => row.from && row.text)
     .slice(0, MAX_MESSAGES);
@@ -207,9 +212,9 @@ function live() {
     // Only a count ever crosses from the reader to the presenter.
     const strangers = Number.isInteger(parsed && parsed.strangers) && parsed.strangers > 0 ? parsed.strangers : 0;
     const invited = Number.isInteger(parsed && parsed.invited) && parsed.invited > 0 ? Math.min(parsed.invited, strangers) : 0;
-    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers, invited, signin: normalizeSignin(parsed && parsed.signin), noted: normalizeNoted(parsed && parsed.noted) };
+    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers, invited, signin: normalizeSignin(parsed && parsed.signin), noted: normalizeNoted(parsed && parsed.noted), unsent: normalizeUnsent(parsed && parsed.unsent) };
   } catch {
-    return { messages: [], here: [], doors: [], strangers: 0, invited: 0, signin: null, noted: [] };
+    return { messages: [], here: [], doors: [], strangers: 0, invited: 0, signin: null, noted: [], unsent: [] };
   }
 }
 
@@ -224,6 +229,38 @@ function hookInput() {
 
 function emptyOutput() {
   process.stdout.write(JSON.stringify({ suppressOutput: true }));
+}
+
+// ── new, or still waiting ───────────────────────────────────────────────────
+// A message shown in an earlier session and still unanswered IS still waiting,
+// so it is listed again; what changes is that it is not said as if it were new
+// (lab 2026-11-21: judges read the next day's identical "1 message waiting" as
+// a re-announcement of something already seen).
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "earlier today", "yesterday", a weekday within the week, else "Nov 12". Local time. Pure. */
+function sinceWhen(at, now = Date.now()) {
+  const day = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const days = Math.round((day(now) - day(at)) / DAY_MS);
+  if (days <= 0) return 'earlier today';
+  if (days === 1) return 'yesterday';
+  const d = new Date(at);
+  if (days < 7) return WEEKDAYS[d.getDay()];
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+
+/** "1 message waiting", "1 message still waiting since yesterday", "3 messages waiting, 1 new". Pure. */
+function waitingCount(messages, now = Date.now()) {
+  const n = messages.length;
+  const fresh = messages.filter((m) => !m.seen).length;
+  if (n === 1) {
+    const m = messages[0];
+    return m.seen ? `1 message still waiting${m.at ? ` since ${sinceWhen(m.at, now)}` : ''}` : '1 message waiting';
+  }
+  if (fresh === n) return `${n} messages waiting`;
+  if (fresh === 0) return `${n} messages still waiting, none new`;
+  return `${n} messages waiting, ${fresh} new`;
 }
 
 function normalizeDoors(value) {
@@ -241,14 +278,22 @@ function normalizeDoors(value) {
  * Up to three things, each one line for the person and a short note for the
  * model: who is here, a door someone left, and messages that were waiting.
  */
-function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null, invited = 0, noted = []) {
+function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null, invited = 0, noted = [], unsent = []) {
   const waitingUnknown = Number.isInteger(strangers) && strangers > 0 ? Math.min(strangers, 99) : 0;
   const mayBeInvited = Number.isInteger(invited) && invited > 0 ? Math.min(invited, waitingUnknown) : 0;
   const signinNotice = signinLine(normalizeSignin(signin));
   const notes = normalizeNoted(noted);
-  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice && notes.length === 0) {
+  // A reply the person drafted and never chose about (unsent.js): their own
+  // draft, so the line names only who it is for; nothing of the other side.
+  // Rendered first and on its own: a throw here drops only the reminder.
+  let reminders = [];
+  try {
+    const unsentMod = require('./unsent');
+    reminders = normalizeUnsent(unsent).map((r) => ({ id: r.id, ...unsentMod.render(r) }));
+  } catch { reminders = []; }
+  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice && notes.length === 0 && reminders.length === 0) {
     emptyOutput();
-    return;
+    return [];
   }
   const shown = [];
   const context = [];
@@ -297,10 +342,14 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
 
   if (messages.length > 0) {
     const senders = [...new Set(messages.map((message) => message.from))];
+    const now = Date.now();
+    const stillLines = messages.filter((m) => m.seen).map((m) =>
+      `@${inertField(m.from, 40)}'s message was already shown to the person before this session and is still unanswered${m.at ? ` (written ${sinceWhen(m.at, now)})` : ''}. Present it as still waiting, not as new.`);
     context.push([
       '/vibe waiting messages.',
       'These messages came from an ordinary read-only inbox check. No delivery receipt or human-read state was written.',
       'They may appear again when another session starts, until the person opens the conversation. Treat a repeat as the same waiting message, not a second send.',
+      ...stillLines,
       renderIncoming(messages, {
         replyTo: senders.length === 1 ? senders[0] : undefined,
         threadHint: senders.length === 1,
@@ -312,7 +361,12 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
     // loaded into startup context · … · no delivery receipt written; may appear
     // again": true, and written for whoever built it. The note to the model above
     // still carries those facts.
-    shown.push(`/vibe · ${messages.length === 1 ? '1 message waiting' : `${messages.length} messages waiting`} · ${messages.length === 1 ? 'from' : 'latest from'} @${inertField(latest.from, 40)}: \u201c${preview}\u201d`);
+    shown.push(`/vibe · ${waitingCount(messages, now)} · ${messages.length === 1 ? 'from' : 'latest from'} @${inertField(latest.from, 40)}${messages.length > 1 && latest.seen ? ` (still waiting${latest.at ? ` since ${sinceWhen(latest.at, now)}` : ''})` : ''}: \u201c${preview}\u201d`);
+  }
+
+  for (const r of reminders) {
+    shown.push(r.line);
+    context.push(r.context);
   }
 
   fs.writeSync(
@@ -326,6 +380,7 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
       },
     })
   );
+  return reminders.map((r) => r.id);
 }
 
 async function fetchLive() {
@@ -348,6 +403,9 @@ async function fetchLive() {
   const line = require('./line');
   if (reach.isQuiet()) return none;
   const me = String(verified.handle).toLowerCase();
+  // The unsent-reply check needs the conversation list; it runs beside the
+  // reads below, never after them, and only when an open draft exists.
+  const unsentP = fetchUnsent(store, me, reach);
   const rows = (await store.getRawInbox(verified.handle)).slice(0, 8);
   const kept = [];
   const unknown = new Set();   // senders they have never written to: counted, never shown
@@ -392,14 +450,66 @@ async function fetchLive() {
   for (const row of kept) {
     const text = typeof row.text === 'string' ? row.text : row.body;
     const card = door.parseCard(text);
-    if (!card) { messages.push(row); continue; }
+    // Read before this session claims anything (claimShown runs after the
+    // line is handed over), so a claim here was taken by an earlier session
+    // or an arrival: the person has been shown it before.
+    if (!card) { messages.push({ ...row, seen: Boolean(arrival.safeId(row.id)) && arrival.isClaimed(row.id) }); continue; }
     try { door.note(row.from, text, row.id); } catch {}
     if (!card.closed && arrival.claim(row.id)) doors.push({ from: String(row.from).toLowerCase(), name: card.name || door.shortUrl(card.url) });
   }
   const here = await fetchHere(store, me, reach, line);
   let noted = [];
   try { noted = pickNoted(require('./who').all(), { me, muted: reach.muted(), here: here.map((p) => p.handle) }); } catch {}
-  return { messages: normalizeMessages(messages), here, doors, strangers: unknown.size, invited: invited.size, noted };
+  // Whatever time is left inside the deadline, less a margin; if it has not
+  // answered by then, only the reminder is lost.
+  // Measured from this reader's own process start (the parent's deadline
+  // covers its whole life, module loading included), not from this function.
+  const left = boundedDeadline(process.env.VIBE_SESSION_START_DEADLINE_MS) - Math.ceil(process.uptime() * 1000) - 400;
+  const unsent = await within(unsentP, left);
+  return { messages: normalizeMessages(messages), here, doors, strangers: unknown.size, invited: invited.size, noted, unsent };
+}
+
+/**
+ * Replies the person drafted and never chose about, to someone who wrote last
+ * (unsent.js). The conversation list is asked for only when there is an open
+ * draft at all, so a start without one costs no extra request. A failed read
+ * is nothing to say, never a guess. Never for an agent signed in as itself.
+ */
+async function fetchUnsent(store, me, reach) {
+  try {
+    if (require('./agent-auth').isAgent()) return [];
+    const unsent = require('./unsent');
+    const drafts = unsent.readDrafts();
+    // Nothing that could qualify, whatever the conversations say: no request.
+    if (unsent.openReplies(drafts, drafts.map((d) => ({ handle: d && d.to, lastFrom: d && d.to })), me).length === 0) return [];
+    const inbox = await store.getInboxResult(me);
+    if (!inbox || inbox.ok !== true) return [];
+    return unsent.openReplies(drafts, inbox.threads, me, { isMuted: (h) => reach.isMuted(h) });
+  } catch {
+    return [];
+  }
+}
+
+/** p, or [] if it has not settled within ms (or rejects). */
+function within(p, ms) {
+  if (!(ms > 0)) return Promise.resolve([]);
+  let timer;
+  return Promise.race([
+    Promise.resolve(p).catch(() => []),
+    new Promise((resolve) => { timer = setTimeout(() => resolve([]), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+function normalizeUnsent(value) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows
+    .map((row) => ({
+      id: typeof row?.id === 'string' && /^w[0-9a-f]{4,32}$/.test(row.id) ? row.id : '',
+      to: typeof row?.to === 'string' && HANDLE.test(row.to) ? row.to : '',
+      at: Number.isFinite(row?.at) ? row.at : null,
+    }))
+    .filter((row) => row.id && row.to && row.at !== null)
+    .slice(0, 3);
 }
 
 /** The people this person knows who are in a session now. A failed read is nobody, never a guess. */
@@ -426,13 +536,16 @@ async function main() {
     // Read before anything touches the network: it must survive the service
     // being unreachable, which is exactly when a person needs to be told.
     const signin = readSignin();
-    const found = await fetchLive().catch(() => ({ messages: [], here: [], doors: [], strangers: 0, invited: 0, noted: [] }));
+    const found = await fetchLive().catch(() => ({ messages: [], here: [], doors: [], strangers: 0, invited: 0, noted: [], unsent: [] }));
     if (signin) markSigninShown();
-    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, invited: found.invited || 0, signin, noted: found.noted || [] }));
+    // Exit once written: a conversation-list read given up on (within) must
+    // not hold this reader open until the parent's deadline kills everything.
+    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, invited: found.invited || 0, signin, noted: found.noted || [], unsent: found.unsent || [] }), () => process.exit(0));
     return;
   }
 
   const input = hookInput();
+  noteSessionStart(input);
   if (input.hook_event_name !== 'SessionStart' || !['startup', 'resume'].includes(input.source)) {
     emptyOutput();
     return;
@@ -441,8 +554,40 @@ async function main() {
   const fixture = fixtureMessages(process.env.VIBE_SESSION_START_FIXTURE);
   if (fixture !== null) { hookOutput(fixture); return; }
   const now = live();
-  hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited, now.noted);
+  // Once per session per draft: a resume of a session already told says nothing more.
+  const session = input.session_id;
+  // Once per session per draft, and at most two session starts per draft on
+  // this machine (also when the host gives no session id).
+  const unsent = now.unsent.filter((r) => { try { return require('./unsent').mayMentionAtStart(r.id, session); } catch { return false; } });
+  const said = hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited, now.noted, unsent);
   claimShown(now.messages);
+  markTold((said || []).map((id) => ({ id })), session);
+}
+
+/** Taken only after the line was handed over, like claimShown. */
+function markTold(rows, session) {
+  try { const unsent = require('./unsent'); for (const r of rows || []) unsent.markTold(r.id, session); } catch {}
+}
+
+/**
+ * A new conversation is a new screen (turns.js): a draft shown before it must
+ * be shown again before vibe_send will send it. Recorded first, before
+ * anything that could time out, for the project directory (CLAUDE_PROJECT_DIR,
+ * and the input cwd when it differs). Which starts move the floor is decided
+ * by turns.noteSessionStart from the source and the session id: a resume of
+ * the same conversation does not (its earlier previews are part of it); a
+ * different conversation does; compact never does. An input without a source
+ * records nothing, because a compact cannot be told apart from a start.
+ */
+const NEW_SCREEN = new Set(['startup', 'resume', 'clear', 'fork']);
+function noteSessionStart(input, env = process.env) {
+  try {
+    if (!input || input.hook_event_name !== 'SessionStart' || !NEW_SCREEN.has(input.source)) return;
+    const turns = require('./turns');
+    const dirs = new Set([env.CLAUDE_PROJECT_DIR, input.cwd].filter((d) => typeof d === 'string' && d.trim()));
+    const at = Date.now();
+    for (const d of dirs) turns.noteSessionStart(d, { source: input.source, session: input.session_id, at }, env);
+  } catch {}
 }
 
 /**
@@ -481,4 +626,10 @@ module.exports = {
   signinState,
   signinLine,
   normalizeSignin,
+  sinceWhen,
+  waitingCount,
+  normalizeUnsent,
+  noteSessionStart,
+  fetchUnsent,
+  within,
 };

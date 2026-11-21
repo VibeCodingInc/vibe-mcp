@@ -19,9 +19,9 @@
  *    never leave the machine.
  *  - The approval is bound to bytes: Send names the rev of the preview the
  *    person saw; a draft changed since is refused.
- *  - Seen, not just bound: Send goes only if the person has had a turn (a
- *    prompt, recorded by the arrival hook) after the rev was prepared, so an
- *    agent cannot prepare and send in one turn (turns.js).
+ *  - Shown, then a typed turn: Send goes only if the person has had a turn (a
+ *    prompt, recorded by the arrival hook) after the rev was last shown, so an
+ *    agent cannot show and send in one turn (turns.js).
  *  - Exactly once: Send claims the draft under a whole-file lock, sends with
  *    an idempotency key derived from the exact text, and finalizes against
  *    the latest stored state. A draft whose delivery could not be confirmed
@@ -43,7 +43,7 @@ const crypto = require('crypto');
 const config = require('../config');
 const store = require('../store');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
-const { canonicalHandle, storedRecipientHandle } = require('../protocol/handle');
+const { canonicalHandle, isCanonicalHandle, storedRecipientHandle } = require('../protocol/handle');
 const { inertField } = require('../incoming');
 const { deliver } = require('./deliver');
 const invite = require('../invite');
@@ -250,6 +250,8 @@ const handleForLogin = (login) => String(login || '').replace(/-/g, '_');
 // mid-word is not "the exact text you approve" (product-test finding —
 // the previous 280-char slice produced "…and it judge").
 const FIELD_MAX = { project: 60, doing: 300, result: 1500, question: 1500, blocker: 1500 };
+/** Cut by code point, never inside a surrogate pair (a cut pair is a lone surrogate). */
+const cutCodePoints = (t, max) => Array.from(t).slice(0, max).join('');
 function cleanContext(raw) {
   const ctx = raw && typeof raw === 'object' ? raw : {};
   const tooLong = [];
@@ -261,7 +263,7 @@ function cleanContext(raw) {
     return t;
   };
   const refs = Array.isArray(ctx.refs)
-    ? ctx.refs.filter(r => r && typeof r.url === 'string' && /^https?:\/\//.test(r.url)).slice(0, 3).map(r => ({ title: (typeof r.title === 'string' && r.title.trim() ? r.title.trim().slice(0, 80) : r.url), url: r.url.slice(0, 300) }))
+    ? ctx.refs.filter(r => r && typeof r.url === 'string' && /^https?:\/\//.test(r.url)).slice(0, 3).map(r => ({ title: (typeof r.title === 'string' && r.title.trim() ? cutCodePoints(r.title.trim(), 80) : cutCodePoints(r.url, 300)), url: cutCodePoints(r.url, 300) }))
     : [];
   return { project: str('project', FIELD_MAX.project), doing: str('doing', FIELD_MAX.doing), result: str('result', FIELD_MAX.result), question: str('question', FIELD_MAX.question), blocker: str('blocker', FIELD_MAX.blocker), refs, tooLong };
 }
@@ -273,7 +275,7 @@ function compose(d) { return `${d.body || ''}${refLines(d.refs)}`; }
 
 const draftDefinition = {
   name: 'vibe_prepare',
-  description: "Prepare a message to a person for review. Sends NOTHING. Use this whenever YOU wrote the words (from the work in this session, or as an answer to a message that arrived): pass handle + message, and reply_to when it answers a specific message. Returns the exact preview and the three choices: Send / Edit / Cancel. To edit, call again with the draft id and the new message. A changed draft must be shown again before it can be sent: show the person the new preview and wait for their next message. If the handle is not on /vibe yet, the preview says so and the message is held for that GitHub account instead.",
+  description: "Prepare a message to a person for review. Sends NOTHING. Use this whenever YOU wrote the words (from the work in this session, or as an answer to a message that arrived): pass handle + message, and reply_to when it answers a specific message. Returns the exact preview and the three choices: Send / Edit / Cancel. Show the preview and ask in words; a pick in a question menu does not count as the person's choice. To edit, call again with the draft id and the new message. A changed draft must be shown again before it can be sent: show the person the new preview and wait for their next message. If the handle is not on /vibe yet, the preview says so and the message is held for that GitHub account instead.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -288,6 +290,8 @@ const draftDefinition = {
 };
 
 const cleanId = (v) => (typeof v === 'string' ? v.trim().replace(/^#/, '') : '') || null;
+/** A message id as the platform mints them: letters, digits, '_' and '-' (a leading '#' is allowed). */
+const isMessageId = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]+$/.test(cleanId(v) || '');
 
 /**
  * One visible line when the draft carries words from one of the person's
@@ -327,12 +331,62 @@ async function findPerson(handle) {
   } catch { return null; }
 }
 
+/**
+ * More than two blank lines in a row could push the rest of the text out of
+ * view in the preview. Judged on the full composed text (body and link
+ * lines); a line of only whitespace or U+2800 (braille blank) is blank.
+ */
+function storedHidden(id, h) {
+  return `Not shown: draft ${id} contains a character that does not show (${h.codePoint} at character ${h.position}). Discard it with vibe_discard {id: "${id}"}, or edit it with vibe_prepare {id: "${id}", message: "..."} and new text and links. Nothing was sent.`;
+}
+const BLANK_LINES = 'Not prepared: the message has more than two blank lines in a row; remove the extra ones. Nothing was sent.';
+function tooManyBlankLines(text) {
+  let run = 0;
+  for (const line of String(text).split('\n')) {
+    run = /^[\s\u2800]*$/u.test(line) ? run + 1 : 0;
+    if (run > 2) return true;
+  }
+  return false;
+}
+
 async function draftHandler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
   const me = config.getHandle();
-  const message = typeof (args && args.message) === 'string' ? args.message.trim() : '';
+  // CRLF is one line break written two ways: stored as LF, so what is checked,
+  // previewed and sent is the same text. A lone CR stays a hidden character.
+  const rawMessage = typeof (args && args.message) === 'string' ? args.message.replace(/\r\n/g, '\n') : '';
+  // Trailing spaces on a line are trimmed and the trimmed text is stored, so
+  // the preview is exactly what is sent.
+  const message = rawMessage.split('\n').map((l) => l.replace(/\s+$/u, '')).join('\n').trim();
   const wantId = args && args.id;
+  // What the person approves must show what it is (showable.js): a body, link
+  // title or link address with a character that does not show is refused,
+  // naming the character and where it is, never echoing the text around it.
+  const { firstHidden } = require('../showable');
+  const said = (what, h) => `Not prepared: ${what} contains a character that does not show (${h.codePoint} at character ${h.position}); remove it. Nothing was sent.`;
+  const hiddenInMessage = message ? firstHidden(rawMessage) : null;
+  if (hiddenInMessage) return { display: said('the message', hiddenInMessage) };
+  // reply_to names a message: an id, nothing else (it is in the rev and the preview).
+  if (args && args.reply_to !== undefined && args.reply_to !== null && args.reply_to !== '' && !isMessageId(args.reply_to)) {
+    return { display: "Not prepared: reply_to must be a message id (letters, digits, '_' and '-'). Nothing was sent." };
+  }
+  for (const r of (args && Array.isArray(args.refs) ? args.refs : [])) {
+    const t = r && firstHidden(r.title);
+    if (t) return { display: said('a link title', t) };
+    const u = r && firstHidden(r.url);
+    if (u) return { display: said('a link address', u) };
+    // Layout: a link is one line, and its address has no spaces to hide text behind.
+    if (r && typeof r.title === 'string' && /[\n\r]/.test(r.title)) return { display: 'Not prepared: a link title has a line break; keep it to one line. Nothing was sent.' };
+    if (r && typeof r.url === 'string' && /\s/u.test(r.url)) return { display: 'Not prepared: a link address contains a space or a line break; remove it. Nothing was sent.' };
+  }
+
+  // A recipient is a canonical ASCII handle (protocol/handle.js): a look-alike
+  // such as a Cyrillic letter would name someone else while reading the same.
+  // Checked before any lookup, and the handle is not echoed back.
+  if (!wantId && args && typeof args.handle === 'string' && args.handle.trim() && !isCanonicalHandle(String(args.handle).trim().replace(/\/claude$/, ''))) {
+    return { display: "Not prepared: that is not a /vibe handle. Handles are plain letters a-z, digits, '_' and '-'. Nothing was sent." };
+  }
 
   // Is the person on /vibe at all? Asked only for a NEW draft to a handle
   // shaped like a GitHub login. Only a definite "no such handle" (404) makes
@@ -380,6 +434,7 @@ async function draftHandler(args) {
       // version that tracks it; drafts already on disk lack the key and are
       // never judged "unchanged" (rapport.js).
       d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), from: me, to, body: message, replyTo: cleanId(args.reply_to), refs: cleanContext({ refs: args.refs }).refs, context: { project }, firstRev: null };
+      if (tooManyBlankLines(compose(d))) return { display: BLANK_LINES };
       // Nothing to answer in a conversation that does not exist yet.
       if (absent) { d.held = true; d.replyTo = null; }
       drafts.push(d);
@@ -396,15 +451,23 @@ async function draftHandler(args) {
         : `Draft ${d.id} was cancelled — open a new draft (vibe_prepare with handle + message). Nothing sent.` };
       if (d.status === 'sending') return { display: `Draft ${d.id} is being sent right now — nothing to edit.` };
       if (d.status === 'unknown' && (message || args.refs)) return { display: `Draft ${d.id}: the last Send to @${d.to} did not confirm, so the text is frozen — Send again to retry exactly that text (it delivers once), or Cancel. To say something different, cancel and open a new draft.` };
+      if (d.status === 'unknown') {
+        const stored = firstHidden(compose(d));
+        if (stored) return { display: storedHidden(d.id, stored) };
+      }
       if (d.status !== 'unknown') {
-        if (message) {
-          // The preview's `message` already ends with the attachment lines;
-          // an edit that pastes it back must not double them (codex P2).
-          const tail = refLines(d.refs);
-          d.body = tail && message.endsWith(tail) ? message.slice(0, -tail.length) : message;
-          d.edited = true;
-        }
-        if (args.refs) { d.refs = cleanContext({ refs: args.refs }).refs; }
+        // The preview's `message` already ends with the attachment lines;
+        // an edit that pastes it back must not double them (codex P2).
+        const tail = refLines(d.refs);
+        const body = message ? (tail && message.endsWith(tail) ? message.slice(0, -tail.length) : message) : d.body;
+        const refs = args.refs ? cleanContext({ refs: args.refs }).refs : d.refs;
+        if (tooManyBlankLines(compose({ body, refs }))) return { display: BLANK_LINES };
+        // A draft written before this rule (0.9.21 and earlier) may hold one:
+        // it is never shown again as it is.
+        const stored = firstHidden(compose({ body, refs }));
+        if (stored) return { display: storedHidden(d.id, stored) };
+        if (message) { d.body = body; d.edited = true; }
+        if (args.refs) d.refs = refs;
         if (args.reply_to !== undefined && !d.held) d.replyTo = cleanId(args.reply_to);
         d.status = 'previewed';
       }
@@ -412,9 +475,11 @@ async function draftHandler(args) {
     if (compose(d).length > 2000) return { display: `Not ready — the message is ${compose(d).length} chars and the limit is 2000. Edit it shorter; nothing was sent.` };
     // The first preview actually shown fixes the rev that "unchanged" is measured against.
     if (d.firstRev === null) d.firstRev = revOf(d);
-    // When THIS text was prepared: Send needs a person's turn after it (turns.js).
-    // Re-showing the same text keeps the time; any change, even back to an
-    // earlier text, starts it again.
+    // When THIS text was last shown: Send needs a person's turn after it
+    // (turns.js). Every showing starts it again, also re-showing unchanged
+    // text: a draft reopened in a later session (a reminder handed its id to
+    // a new agent, unsent.js) must be seen there before it can go, so
+    // reopening it and sending it inside one turn is refused.
     stampRev(d);
     return { draft: { ...d } };
   });
@@ -425,9 +490,12 @@ async function draftHandler(args) {
 
 function stampRev(d) {
   const rev = revOf(d);
-  if (d.revFor !== rev || !Number.isFinite(d.revAt)) { d.revFor = rev; d.revAt = Date.now(); }
+  // The same text shown again (not a first showing, not a change): a refusal
+  // that follows says so in those words.
+  d.reshown = d.revFor === rev && Number.isFinite(d.revAt);
+  d.revFor = rev; d.revAt = Date.now();
 }
-/** When the stored text was prepared. A draft from before revAt existed: its creation (or now, if edited since). */
+/** When the stored text was last shown (revAt, stamped at every showing). A draft from before revAt existed: its creation (or now, if edited since). */
 function revPreparedAt(d) {
   if (d.revFor === revOf(d) && Number.isFinite(d.revAt)) return d.revAt;
   return d.edited ? Date.now() : (d.createdAt || Date.now());
@@ -551,7 +619,12 @@ async function send(args, { byPerson }) {
     if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — not sending it twice.` };
     if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.` };
     if (!rev) return { display: `Send needs the rev shown in the preview of draft ${d.id} — open it with vibe_prepare and send with that rev. Nothing sent.` };
-    if (rev !== revOf(d)) return { display: `Draft ${d.id} changed since that preview (rev ${rev} → ${revOf(d)}) — open it again with vibe_prepare and approve what it shows now. Nothing sent.` };
+    // The current rev is not named here, but that is not what protects the
+    // person: a rev is a hash of the text, so an agent can compute it. The
+    // control is the shown-time stamp plus the turn check below: a rev goes
+    // only after a typed turn that came after its last showing (review
+    // 2026-11-21: probe a wrong rev, read the right one, send).
+    if (rev !== revOf(d)) return { display: `Draft ${d.id} is not the version that rev names. Show it again with vibe_prepare {id: "${d.id}"}, and send only what the person approves after seeing it. Nothing sent.` };
     if (d.status === 'sending') {
       // The claiming process died mid-send: the SAME text under the SAME key
       // is what a retry would send. Uncertainty is recorded BEFORE the retry
@@ -566,10 +639,17 @@ async function send(args, { byPerson }) {
       // honest options are to cancel (with the warning) or write anew.
       return { display: `Draft ${d.id}: the earlier Send to @${d.to} did not confirm, and this transport cannot deduplicate a retry. Cancel it (the earlier attempt may have reached them) and open a new draft if you still want to say it. Nothing sent.` };
     }
-    // The person must have had a turn since THIS text was prepared (turns.js):
-    // an agent cannot prepare a new rev and send it inside one turn.
+    // The person must have had a turn since THIS text was last shown
+    // (turns.js): an agent cannot show a new rev and send it inside one turn.
     turn = turnCheck(d, byPerson);
-    if (turn.check === 'needs_turn') return { unseen: { ...d } };
+    if (turn.check === 'needs_turn') {
+      // The refusal shows the preview with its rev: that is a showing, and it
+      // is stamped like one, so the next Send needs the person's next prompt.
+      const why = turn.why || null;
+      const reshown = Boolean(d.reshown);   // how it was last shown, before this refusal shows it
+      stampRev(d);
+      return { unseen: { ...d, reshown }, why };
+    }
     d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
     d.idempotencyKey = sendKey(d);
     const message = compose(d).trim();
@@ -579,7 +659,7 @@ async function send(args, { byPerson }) {
     return { snapshot: { id: d.id, to: d.to, body: d.body, refs: d.refs, context: d.context, replyTo: d.replyTo || null, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, held: Boolean(d.held), unchanged } };
   });
   if (claim.display) return claim;
-  if (claim.unseen) return unseenRefusal(claim.unseen);
+  if (claim.unseen) return unseenRefusal(claim.unseen, claim.why);
   const s = claim.snapshot;
   if (s.held) return withTurn(await keepHeld(s, me), turn);
 
@@ -642,21 +722,38 @@ function withTurn(result, turn) {
   return { ...result, data: { ...(result.data || {}), turn_check: turn.check } };
 }
 /**
- * Not sent: this text was prepared after the person's last turn, so they have
- * not seen it. Normal, not an error: the preview is shown again, and the next
- * Send after their answer goes. Nothing reached the network on this path.
+ * Not sent: this text was last shown after the person's last turn (or in an
+ * earlier session). Normal, not an error: the preview is shown again, and the
+ * next Send after their answer goes. Nothing reached the network on this path.
  */
-async function unseenRefusal(d) {
+async function unseenRefusal(d, why = null) {
   const changed = typeof d.firstRev === 'string' && d.firstRev !== revOf(d);
   const p = d.held ? heldPreview(d) : preview(d, await findPerson(d.to));
-  const lead = changed
-    ? 'Not sent yet: the text changed, and the person has not seen this version. A changed draft must be shown again before it can be sent.'
-    : 'Not sent yet: the person has not seen this draft. A draft must be shown before it can be sent.';
+  let lead; let reason;
+  if (why === 'shown_in_earlier_session') {
+    lead = 'Not sent yet: this draft was last shown in an earlier session, so the person has not seen it in this one. It can go after their next message.';
+    reason = 'shown_in_earlier_session';
+  } else if (why === 'session_start_unreadable') {
+    lead = 'Not sent yet: this session\'s start could not be read on this machine, so it cannot be told whether the person has seen this draft here.';
+    reason = 'session_start_unreadable';
+  } else if (d.reshown) {
+    lead = 'Not sent yet: the draft was shown again just now; it can go after their next message.';
+    reason = 'shown_again';
+  } else if (changed) {
+    lead = 'Not sent yet: the text changed, and the person has not seen this version. A changed draft must be shown again before it can be sent.';
+    reason = 'changed_since_seen';
+  } else {
+    // No typed message since it was last shown (turns.js why
+    // 'no_turn_since_shown'). They may well have seen it; what is missing is a
+    // message they typed after it.
+    lead = 'Not sent yet: they have not typed a message since it was shown (a pick in a question menu does not count).';
+    reason = 'no_turn_since_shown';
+  }
   const ask = `Show them the preview below exactly as it is and wait for their choice. If they choose ${d.held ? 'Keep' : 'Send'}, call vibe_send again with this id and rev.`;
   return {
     ...p,
     display: `${lead} ${ask}\n\n${p.display}`,
-    data: { ...(p.data || {}), sent: false, definite: true, reason: changed ? 'changed_since_seen' : 'not_yet_seen', turn_check: 'needs_turn' },
+    data: { ...(p.data || {}), sent: false, definite: true, reason, turn_check: 'needs_turn' },
   };
 }
 

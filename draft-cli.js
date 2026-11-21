@@ -86,4 +86,5 @@ async function main() {
   return out({ error: 'usage', message: 'vibe-draft list | send <id> <rev> | discard <id>' }, 2);
 }
 
-main().catch((e) => out({ error: 'store_failed', message: e && e.message ? e.message : String(e) }, 1));
+// Only as the entry point: loading this file must not read argv and act on it.
+if (require.main === module) main().catch((e) => out({ error: 'store_failed', message: e && e.message ? e.message : String(e) }, 1));

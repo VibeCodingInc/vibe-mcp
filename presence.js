@@ -252,6 +252,10 @@ async function noteArrivals(handle, threads) {
     parked.clear();
     return;
   }
+  // A reply the person drafted and left unchosen, to someone who wrote last:
+  // said once, mid-session, by the arrival hook (unsent.js). From the rows
+  // this poll already read; never pushed through a channel, it is not an arrival.
+  try { if (!require('./agent-auth').isAgent()) require('./unsent').spool(threads, handle, { isMuted: (h) => reach.isMuted(h) }); } catch {}
   // What was already unread on the FIRST look is "waiting" (shown when the
   // session opens), not an arrival. It is remembered by message id, so after
   // that first look a new id is an arrival whatever the two clocks say; only

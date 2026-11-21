@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Turns — has the person had a turn since this exact text was prepared?
+ * Turns — has the person had a turn since this exact text was last shown?
  *
  * The promise: nothing is sent unless the person saw the exact text and chose
  * Send. The rev binds Send to bytes, but on its own it cannot tell whether the
@@ -15,10 +15,12 @@
  *   <VIBE_HOME>/turns/<hash of the project directory>.json = {"at": T};
  *
  *   vibe_send sends a rev only if a turn was recorded for this project
- *   strictly AFTER that rev was prepared.
+ *   strictly AFTER that rev was last shown.
  *
  * What is stored: a timestamp, in a file named by a hash of the directory.
- * No prompt text, no path in clear, no session id. Mode 0600.
+ * No prompt text, no path in clear. The session-start record beside it
+ * (<hash>.start.json, below) also holds Claude Code's session id, reduced to
+ * letters, digits, '_' and '-' (at most 80). Mode 0600.
  *
  * The project is Claude Code's CLAUDE_PROJECT_DIR, which both the hook and the
  * MCP server receive (checked in a live session: it stays the project root
@@ -84,8 +86,107 @@ function record(dir, at = Date.now(), env = process.env) {
   return true;
 }
 
+// ── a new session is a new screen ───────────────────────────────────────────
+// A draft shown in an earlier session was not seen in this one: a reminder
+// (unsent.js) can hand its id to a new agent, and that agent must not be able
+// to send it without showing it here first. The session-start hook records
+// when a session started for the project, under
+// <turns dir>/<hash of the project directory>.start.json = {"at": T}, on the
+// SessionStart sources startup, resume, clear and fork; never on compact (after
+// a compaction the person did see the text in this session). One record per
+// project folder: two sessions open in the same folder share it.
+
+function startFile(dir, env = process.env) {
+  const k = key(dir);
+  return k ? path.join(turnsDir(env), `${k}.start.json`) : null;
+}
+
+/** Session ids are hook input: only a safe, bounded form is stored. */
+const safeSession = (v) => (typeof v === 'string' ? v.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80) : '') || null;
+
+/** Record a session start for a project directory: {at, session}. */
+function recordSessionStart(dir, at = Date.now(), env = process.env, session = null) {
+  const file = startFile(dir, env);
+  if (!file) return false;
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.${crypto.randomBytes(3).toString('hex')}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify({ at, session: safeSession(session) }), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+  return true;
+}
+
 /**
- * May a revision prepared at `revAt` be sent now?
+ * The session-start hook's decision: does this start move the floor?
+ *   compact (or any other source)        never
+ *   a session id equal to the recorded   no: a resume of the same conversation,
+ *                                        whose earlier previews are part of it
+ *                                        (and a host that runs one process per
+ *                                        turn resumes every turn)
+ *   a different session id               yes: a new conversation
+ *   no session id                        yes on startup, clear and fork; not on
+ *                                        resume (it cannot be told apart from
+ *                                        the same conversation)
+ * Returns whether it moved.
+ */
+function noteSessionStart(dir, { source, session, at = Date.now() } = {}, env = process.env) {
+  if (!['startup', 'resume', 'clear', 'fork'].includes(source)) return false;
+  const id = safeSession(session);
+  if (id) {
+    let recorded = null;
+    try { recorded = JSON.parse(fs.readFileSync(startFile(dir, env), 'utf8')).session || null; } catch {}
+    if (recorded === id) return false;
+    return recordSessionStart(dir, at, env, id);
+  }
+  if (source === 'resume') return false;
+  return recordSessionStart(dir, at, env, null);
+}
+
+/**
+ * The last session start recorded for a project:
+ *   null                 none recorded (no session-start hook here yet)
+ *   { at }               when
+ *   { unreadable: true } a record exists and nothing can be read of it
+ * A record whose contents cannot be parsed is dated by its file time.
+ */
+function lastSessionStart(dir, env = process.env) {
+  const file = startFile(dir, env);
+  if (!file) return null;
+  let st;
+  try { st = fs.statSync(file); } catch (e) { return e && e.code === 'ENOENT' ? null : { unreadable: true }; }
+  let at = null;
+  try {
+    const v = JSON.parse(fs.readFileSync(file, 'utf8')).at;
+    if (Number.isFinite(v)) at = v;
+  } catch {}
+  if (at === null) at = Number.isFinite(st.mtimeMs) ? st.mtimeMs : null;
+  if (at === null) return { unreadable: true };
+  // A start in the future would strand every draft until then: ignored, as
+  // if missing.
+  if (at > Date.now() + FUTURE_SLACK_MS) return null;
+  return { at };
+}
+
+const FUTURE_SLACK_MS = 5000;
+
+/**
+ * The earliest a showing may be and still count in this session: the latest
+ * recorded session start for the project (0 when none). null = cannot be told
+ * (the record exists and cannot be read).
+ *
+ * Not this server's own start: a host that runs one process per turn
+ * (claude -p --resume) starts a new server every turn, which moved the floor
+ * past every showing and refused every send (lab 2026-11-21, zero sends in
+ * two full runs). A rev is never handed out without a stamped showing, and a
+ * showing needs a later typed prompt, so that floor protected nothing more.
+ */
+function sessionFloor(dir, env = process.env) {
+  const started = lastSessionStart(dir, env);
+  if (started && started.unreadable) return null;
+  return started ? started.at : 0;
+}
+
+/**
+ * May a revision last shown at `revAt` be sent now?
  *   { check: 'passed' }       a turn for this project came strictly after it
  *   { check: 'needs_turn' }   no turn since (or none at all for this project)
  *   { check: 'unavailable' }  the hook has never recorded a turn here, or this
@@ -96,9 +197,16 @@ function judge(revAt, { env = process.env, cwd = process.cwd, host } = {}) {
   const agent = host || (() => { try { return require('./host').getHost().agent; } catch { return null; } })();
   if (agent !== 'claude-code') return { check: 'unavailable', why: 'host_without_turn_hook' };
   if (!anyRecorded(env)) return { check: 'unavailable', why: 'no_turn_recorded' };
-  const at = lastTurn(projectDir(env, cwd), env);
+  const dir = projectDir(env, cwd);
+  // Shown before this session started: it must be shown again here. Only
+  // where the turn check itself applies (above), so a host without the hook
+  // is never made unable to send.
+  const floor = sessionFloor(dir, env);
+  if (floor === null) return { check: 'needs_turn', why: 'session_start_unreadable' };
+  if (!(Number.isFinite(revAt) && revAt >= floor)) return { check: 'needs_turn', why: 'shown_in_earlier_session' };
+  const at = lastTurn(dir, env);
   if (at !== null && Number.isFinite(revAt) && at > revAt) return { check: 'passed' };
-  return { check: 'needs_turn' };
+  return { check: 'needs_turn', why: 'no_turn_since_shown' };
 }
 
-module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge };
+module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge, recordSessionStart, noteSessionStart, lastSessionStart, sessionFloor };

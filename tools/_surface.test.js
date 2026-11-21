@@ -99,7 +99,7 @@ test('the agent\'s words are previewed and nothing leaves until Send names that 
     assert.match(noRev.display, /Send needs the rev/);
     const e = await drafts.vibe_prepare.handler({ id, message: 'edited text' });
     const stale = await drafts.vibe_send.handler({ id, rev });
-    assert.match(stale.display, /changed since that preview/);
+    assert.match(stale.display, /is not the version that rev names/);
     assert.equal(sent.length, 0, 'a stale approval sends nothing');
 
     const ok = await drafts.vibe_send.handler({ id, rev: e.data.draft.rev });
@@ -123,7 +123,7 @@ test('changing what a draft answers changes what was approved', async () => {
     const q = await drafts.vibe_prepare.handler({ id: p.data.draft.id, reply_to: 'msg_b' });
     assert.notEqual(p.data.draft.rev, q.data.draft.rev);
     const stale = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
-    assert.match(stale.display, /changed since that preview/);
+    assert.match(stale.display, /is not the version that rev names/);
     assert.equal(sent.length, 0);
   });
 });

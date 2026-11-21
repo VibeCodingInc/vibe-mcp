@@ -46,10 +46,49 @@ function take(dir, now, session) {
     // A row made for one session (who is near, after THIS person said they
     // were stuck) is shown there and nowhere else; it is left for that session.
     if (typeof row.session === 'string' && row.session !== session) continue;
+    // A reply the person drafted and left unchosen (unsent.js): said only if
+    // the draft is still open now, and not to a session already told at start.
+    const unsent = row.kind === 'unsent' ? unsentState(dir, row, session, now) : null;
+    // Shown again since it was spooled: not this row's to say, and not claimed,
+    // so the server can spool a fresh one once that showing is old enough.
+    if (unsent && unsent.later) continue;
     try { fs.closeSync(fs.openSync(path.join(dir, `${id}.shown`), 'wx', 0o600)); } catch { continue; }
+    if (unsent && !unsent.say) continue;
+    if (unsent && unsent.mark) { try { fs.closeSync(fs.openSync(path.join(dir, `${unsent.mark}.shown`), 'wx', 0o600)); } catch {} }
     rows.push(row);
   }
   return rows;
+}
+
+// ── a reply drafted and not sent (unsent.js) ────────────────────────────────
+// The session mark's name must match unsent.js sessionMark (a test pins it).
+const UNSENT_AFTER_MS = 30 * 60 * 1000;   // = unsent.js MID_SESSION_AFTER_MS
+function unsentState(dir, row, session, now = Date.now()) {
+  try {
+    const draft = typeof row.draft === 'string' && /^w[0-9a-f]{4,32}$/.test(row.draft) ? row.draft : null;
+    if (!draft) return { say: false };
+    const s = String(session || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
+    const mark = s ? `unsent-${draft}-${s}` : null;
+    if (mark && fs.existsSync(path.join(dir, `${mark}.shown`))) return { say: false };
+    // The draft must belong to the account the row was spooled for (the
+    // server's verified handle). This hook reads no credential file; a switch
+    // of account is handled by the server, whose every poll removes rows that
+    // do not qualify for the account signed in now (unsent.spool).
+    const me = String(row.to || '').toLowerCase();
+    if (!me) return { say: false };
+    const drafts = JSON.parse(fs.readFileSync(path.join(dir, '..', 'drafts.json'), 'utf8'));
+    const d = Array.isArray(drafts) ? drafts.find((x) => x && x.id === draft) : null;
+    const open = Boolean(d && d.status === 'previewed' && !d.held &&
+      String(d.from || '').toLowerCase() === me &&
+      Number.isFinite(d.createdAt) && now - d.createdAt < TTL_MS);
+    if (!open) return { say: false };
+    // When it was last shown, as spooled: a showing since (or a row that does
+    // not say) means the person may be looking at it right now.
+    const shownAt = Number.isFinite(d.revAt) ? d.revAt : d.createdAt;
+    if (!Number.isFinite(row.shownAt) || shownAt !== row.shownAt) return { say: false, later: true };
+    if (now - shownAt < UNSENT_AFTER_MS) return { say: false, later: true };
+    return { say: true, mark };
+  } catch { return { say: false }; }
 }
 
 function main() {
@@ -59,7 +98,15 @@ function main() {
   if (!EVENTS.has(event)) return quiet();
   // The person typed: a draft prepared before now is one they could have seen.
   // Only on a prompt, never after a tool call (the agent's own turn).
-  if (event === 'UserPromptSubmit') recordTurn(input);
+  // Claude Code also runs UserPromptSubmit for a background subagent reporting
+  // back, a message from another session, a scheduled task (hooks docs); the
+  // input has no field saying who wrote it, so personWrote() decides by the
+  // wrappers those carry, erring toward not counting. A prompt the agent
+  // scheduled for itself carries no wrapper and still counts: a known gap
+  // (SECURITY.md). An answer in Claude Code's question menu
+  // (AskUserQuestion) is never a turn: the agent opens a menu, about
+  // anything, mid-run, and what it shows can differ from what is sent.
+  if (event === 'UserPromptSubmit' && personWrote(input.prompt)) recordTurn(input);
 
   const dir = process.env.VIBE_ARRIVALS_DIR || path.join(__dirname, '..', 'arrivals');
   const session = String(input.session_id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
@@ -68,7 +115,7 @@ function main() {
     try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); fs.closeSync(fs.openSync(path.join(dir, `near-${session}.done`), 'wx', 0o600)); } catch {}
   }
   const rows = take(dir, Date.now(), session);
-  const nudge = event === 'UserPromptSubmit' ? stuckNudge(input, dir) : '';
+  const nudge = event === 'UserPromptSubmit' && personWrote(input.prompt) ? stuckNudge(input, dir) : '';
   if (rows.length === 0 && !nudge) return quiet();
 
   const context = rows.map((r) => r.context);
@@ -82,6 +129,49 @@ function main() {
       additionalContext: context.join('\n\n'),
     },
   }));
+}
+
+// ── who wrote this prompt ───────────────────────────────────────────────────
+// UserPromptSubmit fires for text no person typed: a subagent's hand-back, a
+// message from another Claude session, a background task notification. Seen
+// live (2026-11-21): a hand-back beginning "Another Claude session sent a
+// message:" recorded a turn, which would unlock a send with no human. There
+// is no origin field in the hook input, so a prompt that STARTS with one of
+// these wrappers, or is nothing but system-reminder blocks, is not the
+// person's. Quoting such text later in a prompt they wrote still counts.
+const NOT_PERSON = [
+  /^Another Claude session sent a message\b/i,
+  /^The coordinator sent a message\b/i,
+  /^<agent-message\b/i,
+  /^<teammate-message\b/i,
+  /^<channel\b/i,
+  /^<task-notification\b/i,
+  /^\[SYSTEM NOTIFICATION\b/i,
+  /^<system-reminder\b/i,   // one left after stripping is unclosed: not theirs either
+];
+// Leading whitespace, zero-width characters and whole system-reminder blocks
+// are stripped before the patterns are tried: a wrapper hidden behind them is
+// still a wrapper (review 2026-11-21). A stripped block that carries Claude
+// Code's "[SYSTEM NOTIFICATION - NOT USER INPUT]" marks the whole prompt as
+// not the person's, whatever follows it. Scanned forward once (sticky
+// regexes), so a long prompt costs one pass, not one copy per block.
+const LEAD_WS = /[\s\u200B-\u200D\u2060\uFEFF]*/y;
+const REMINDER = /<system-reminder\b[^>]*>([\s\S]*?)<\/system-reminder>/iy;
+const NOTIFICATION = '[SYSTEM NOTIFICATION - NOT USER INPUT]';
+function personWrote(prompt) {
+  if (typeof prompt !== 'string') return false;
+  let i = 0;
+  for (;;) {
+    LEAD_WS.lastIndex = i; LEAD_WS.exec(prompt); i = LEAD_WS.lastIndex;
+    REMINDER.lastIndex = i;
+    const m = REMINDER.exec(prompt);
+    if (!m) break;
+    if (m[1].includes(NOTIFICATION)) return false;
+    i = REMINDER.lastIndex;
+  }
+  const said = prompt.slice(i);
+  if (!said.trim()) return false;
+  return !NOT_PERSON.some((re) => re.test(said));
 }
 
 // ── a person's turn (turns.js) ──────────────────────────────────────────────
@@ -150,4 +240,5 @@ function stuckNudge(input, dir) {
   } catch { return ''; }
 }
 
-try { main(); } catch { quiet(); }
+if (require.main === module) { try { main(); } catch { quiet(); } }
+module.exports = { personWrote };

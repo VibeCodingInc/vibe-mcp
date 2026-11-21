@@ -194,36 +194,13 @@ function configureAllHosts() {
 }
 
 /**
- * Install the /vibe host command — the one-line entry to context-guided
- * messaging ("from what I'm doing, who should I talk to?"). Written only where
- * no /vibe command or skill already exists; never overwritten, so a person's
- * own /vibe stays theirs. Claude Code reads ~/.claude/commands/vibe.md.
+ * Install the /vibe host command (host-command.js): where none exists, or
+ * where the file there is exactly one an earlier release installed. A person's
+ * own /vibe is never overwritten. The server also updates an earlier
+ * release's copy at every start (host-command.js refresh).
  */
 function installHostCommands() {
-  const src = path.join(__dirname, 'hosts', 'vibe-command.md');
-  let body;
-  try { body = fs.readFileSync(src, 'utf8'); } catch { return []; }
-  const installed = [];
-  // Optional on both hosts: a failure here (unwritable dir, an entry that is
-  // not a file) is reported per host and never aborts setup (codex P2).
-  const tryInstall = (host, file, content) => {
-    try {
-      if (fs.existsSync(file)) return;
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, content, 'utf8');
-      installed.push({ host, path: file });
-    } catch (e) {
-      installed.push({ host, path: file, error: e && e.message ? e.message : String(e) });
-    }
-  };
-  // A person's own /vibe (command or skill) is never overwritten: when it
-  // exists, the candidate installs beside it as /vibe-moves and says so.
-  const claudeDir = path.join(os.homedir(), '.claude');
-  if (fs.existsSync(claudeDir)) {
-    const taken = fs.existsSync(path.join(claudeDir, 'skills', 'vibe', 'SKILL.md')) || fs.existsSync(path.join(claudeDir, 'commands', 'vibe.md'));
-    tryInstall('Claude Code', path.join(claudeDir, 'commands', taken ? 'vibe-moves.md' : 'vibe.md'), body);
-  }
-  return installed;
+  return require('./host-command').install();
 }
 
 /**
@@ -411,7 +388,7 @@ async function setup() {
   printStep(2, 'Adding /vibe MCP server...', 'running');
   const hostResults = configureAllHosts();
   const hostCommands = installHostCommands();
-  for (const c of hostCommands) console.log(c.error ? `  (could not install the /vibe command for ${c.host}: ${c.error} — everything else still works)` : `  /vibe command installed for ${c.host}: ${c.path}`);
+  for (const c of hostCommands) console.log(c.error ? `  (could not install the /vibe command for ${c.host}: ${c.error} — everything else still works)` : `  /vibe command ${c.replaced ? 'updated' : 'installed'} for ${c.host}: ${c.path}`);
   for (const r of hostResults) {
     const note = r.status === 'added' ? 'configured'
       : r.status === 'exists' ? 'already configured'
@@ -575,23 +552,38 @@ async function setup() {
   }
 }
 
-// Run setup when this file is loaded (invoked by cli.js or npx vibe-setup).
-//
-// Requiring this module USED to be indistinguishable from running it, which is a
-// live hazard rather than a style point: it means anything that so much as inspects
-// setup.js opens a browser, writes host configs and authenticates against production.
-// It happened during a rehearsal. VIBE_SETUP_NO_AUTORUN lets a caller load the module
-// to look at it — nothing in normal use sets that variable.
-if (process.env.VIBE_SETUP_NO_AUTORUN !== '1') {
-  setup().catch(err => {
+/**
+ * Run setup as a person runs it: the walk, and a non-zero exit if it fails.
+ * The only two callers are this file as the entry point (`vibe-setup`, `node
+ * setup.js`) and cli.js on `npx slashvibe-mcp setup`.
+ *
+ * VIBE_SETUP_NO_AUTORUN=1 refuses even an explicit run: test suites and the lab
+ * set it for every process they start, so nothing below them can sign in to
+ * production as whoever owns the machine. Nothing in normal use sets it.
+ */
+function run() {
+  if (process.env.VIBE_SETUP_NO_AUTORUN === '1') {
+    process.stderr.write('slashvibe-mcp: setup not run (VIBE_SETUP_NO_AUTORUN=1 is set in this environment).\n');
+    process.exitCode = 1;
+    return Promise.resolve();
+  }
+  return setup().catch(err => {
     console.error(`${colors.red}Setup failed: ${err.message}${colors.reset}`);
     process.exit(1);
   });
 }
 
+// Loading this module does nothing. It used to run setup on require, so anything
+// that so much as inspected setup.js (a test, a one-liner, a tool reading its
+// exports) opened a browser, wrote host configs and signed in to production as the
+// machine's real user. That happened twice. Setup runs only when this file is the
+// entry point, or when cli.js calls run().
+if (require.main === module) run();
+
 // Named exports for tests and for callers that want a piece rather than the whole
 // ceremony. Deliberately narrow.
 module.exports = {
+  run,
   setup,
   findClaudeConfig,
   configureAllHosts,
@@ -599,5 +591,6 @@ module.exports = {
   saveAuthConfig,
   retireDeadCredential,
   installHostCommands,
+  SHIPPED_COMMAND_SHA256: require('./host-command').SHIPPED_COMMAND_SHA256,
   openBrowser,
 };

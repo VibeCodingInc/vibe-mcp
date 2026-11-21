@@ -67,7 +67,7 @@ if (CHANNEL_ENABLED) SERVER_CAPABILITIES.experimental = { 'claude/channel': {} }
 
 const SERVER_INSTRUCTIONS = [
   '/vibe lets the person you are working with exchange messages with other people from inside this session, without stopping to write them.',
-  'When their work produces a question for someone or a result someone would want, you may offer to send it: choose who with vibe_people, write 1-3 sentences from the work, and open it with vibe_prepare. That shows a preview and sends nothing. Only vibe_send with the draft id and rev sends, and only after the person chose Send. A changed draft must be shown again before it can be sent: if the person asks for a change and Send in the same message, prepare the change, show it, and wait for their next message.',
+  'When their work produces a question for someone or a result someone would want, you may offer to send it: choose who with vibe_people, write 1-3 sentences from the work, and open it with vibe_prepare. That shows a preview and sends nothing. Only vibe_send with the draft id and rev sends, and only after the person chose Send. A changed draft must be shown again before it can be sent: if the person asks for a change and Send in the same message, prepare the change, show it, and wait for their next message. Show the preview and ask in words; a pick in a question menu does not count as the person\'s choice.',
   'When a message arrives for them, tell them in one line and, if this session holds something true to say back, prepare the answer the same way.',
   'Before you tell them someone has not replied (or has not written), read the conversation with vibe_thread: not every message is announced in this session.',
   'With a person marked "open line" in vibe_people, the two of them have agreed their agents may consult each other unattended: vibe_ask asks that person\'s agent a question from the work and waits for the answer; an arrival over an open line may be answered with vibe_answer when this session\'s work truly holds the answer. The tools refuse anyone without a line. Always tell the person afterwards what was asked and what was said.',
@@ -165,6 +165,9 @@ class VibeMCPServer {
     try {
       if (!(require('./vibe-home').isIsolated() && !process.env.CLAUDE_CONFIG_DIR)) {
         require('./session-start-hook-settings').createHookSettingsManager().refresh();
+        // The /vibe command: an earlier release's copy is replaced with this
+        // one, so an upgrade reaches people without setup. Never creates it.
+        require('./host-command').refresh();
       }
     } catch {}
 
@@ -359,4 +362,15 @@ class VibeMCPServer {
   }
 }
 
-new VibeMCPServer().start();
+/** Start the MCP server on stdin/stdout. cli.js calls this; so does `node index.js`. */
+function start() {
+  const server = new VibeMCPServer();
+  server.start();
+  return server;
+}
+
+// Loading this file starts nothing: requiring it used to start a server on the
+// requirer's stdin and verify the saved sign-in against production.
+if (require.main === module) start();
+
+module.exports = { start, VibeMCPServer, SERVER_INSTRUCTIONS };
