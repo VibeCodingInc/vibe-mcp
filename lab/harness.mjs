@@ -69,6 +69,63 @@ export function cli(id, args, extraEnv = {}) {
   });
 }
 
+// The /vibe server a person's open session keeps running between prompts.
+//
+// In a real interactive Claude Code session the MCP server starts once and
+// stays up while the person thinks, reads, or walks away: it polls the inbox
+// (every 15s while active, 60s when idle) and spools what arrives, so the
+// arrival hook has it at their next prompt. A lab turn is `claude -p`, whose
+// server lives only as long as that one turn; a `--resume` turn starts a fresh
+// one, and a fresh server counts everything already unread as "waiting" (the
+// SessionStart hook's to show), not as an arrival. Without this, a message sent
+// between two turns of the same lab session is shown to nobody, which no real
+// person would experience. This is the same index.js, as the same identity,
+// with its stdin held open the way the host holds it; it sends nothing and
+// marks nothing read. activeWindowMs keeps it on the fast cadence (lab time is
+// compressed: the person's next turn is "hours later" in the story).
+export function keepOpen(id, { activeWindowMs = 24 * 60 * 60 * 1000 } = {}) {
+  const server = JSON.parse(fs.readFileSync(id.mcp, 'utf8')).mcpServers.vibe;
+  const child = spawn(server.command, server.args, {
+    cwd: id.work, stdio: ['pipe', 'ignore', 'ignore'],
+    env: { ...process.env, ...server.env, VIBE_POLL_ACTIVE_WINDOW_MS: String(activeWindowMs) },
+  });
+  const startedAt = Date.now();
+  let closed = false;
+  child.on('close', () => { closed = true; });
+  return {
+    pid: child.pid, startedAt, handle: id.handle,
+    get closed() { return closed; },
+    // The host closing the pipe is how a session ends; by pid if it lingers.
+    stop: () => new Promise((resolve) => {
+      if (closed) return resolve();
+      child.once('close', () => resolve());
+      try { child.stdin.end(); } catch {}
+      setTimeout(() => { if (!closed) { try { process.kill(child.pid, 'SIGKILL'); } catch {} } }, 3000).unref();
+    }),
+  };
+}
+
+/**
+ * Wait until a kept-open server has looked at the inbox since every message
+ * sent to this identity: each is spooled or claimed on disk, or the server has
+ * read the inbox after it was sent and had a moment to decide (a message from
+ * someone the person does not know is held, not spooled). Resolves with
+ * { waitedMs, timedOut, pending }.
+ */
+export async function caughtUp(id, stub, { since = 0, timeoutMs = 45000, settleMs = 3000 } = {}) {
+  const start = Date.now();
+  const arrivals = path.join(id.home, 'arrivals');
+  const onDisk = (msgId) => fs.existsSync(path.join(arrivals, `${msgId}.json`)) || fs.existsSync(path.join(arrivals, `${msgId}.shown`));
+  const looked = (t) => stub.effects.some((e) => e.effect === 'read_threads' && e.me === id.handle && e.t > t && Date.now() - e.t >= settleMs);
+  for (;;) {
+    const pending = stub.messages.filter((m) => m.to === id.handle && Date.parse(m.created_at) > since)
+      .filter((m) => !onDisk(m.id) && !looked(Date.parse(m.created_at))).map((m) => m.id);
+    if (!pending.length) return { waitedMs: Date.now() - start, timedOut: false, pending };
+    if (Date.now() - start > timeoutMs) return { waitedMs: Date.now() - start, timedOut: true, pending };
+    await sleep(500);
+  }
+}
+
 // The tools a rehearsal session is allowed by default (vibe_send only with allowSend).
 export const DEFAULT_TOOLS = ['Read', 'Edit', 'Write', 'Bash(sleep:*)', 'mcp__vibe__vibe_people', 'mcp__vibe__vibe_thread', 'mcp__vibe__vibe_prepare', 'mcp__vibe__vibe_discard', 'mcp__vibe__vibe_start',
   // The open-line tools are always offered: the code decides whether they may send.
