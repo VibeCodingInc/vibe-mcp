@@ -1,15 +1,11 @@
 {
-  "version": "0.9.16",
+  "version": "0.9.17",
   "updated": "2026-11-20",
-  "changelog": "Fixes from an outside read of 0.9.15. A message to a GitHub name with a hyphen now reaches that person, and /vibe no longer says \"Sent\" or \"not in a session\" when it could not confirm it.",
+  "changelog": "Nothing an agent writes leaves without a preview you approved, and the line you send a friend to bring them in now names you.",
   "features": [
-    "A message to a GitHub name with a hyphen goes to the handle as /vibe spells it, so it reaches the person. The preview shows the handle used",
-    "setup --from now recognises an inviter whose GitHub name has a hyphen",
-    "A reply from /vibe that cannot be read is no longer shown as Sent. It is marked unconfirmed, and a prepared message offers the same text again or Cancel",
-    "\"Not in a session right now\" is said only when presence was actually read",
-    "A message that could not be checked during a network blip is checked again, instead of waiting for the rest of the session",
-    "An answer over an open line cannot be sent twice",
-    "Messages that named commands which do not exist now name the real ones"
+    "Every message an agent sends for you goes through a preview first. A request to send without one opens the preview and sends nothing",
+    "The line /vibe gives you to bring someone in now carries your handle, so your first message reaches them while they work instead of waiting for their next session",
+    "Before sign-in, asking to message someone leads to sign-in and then a preview"
   ],
   "deprecated": [],
   "breaking": false,
