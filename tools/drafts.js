@@ -250,6 +250,8 @@ const handleForLogin = (login) => String(login || '').replace(/-/g, '_');
 // mid-word is not "the exact text you approve" (product-test finding —
 // the previous 280-char slice produced "…and it judge").
 const FIELD_MAX = { project: 60, doing: 300, result: 1500, question: 1500, blocker: 1500 };
+/** Cut by code point, never inside a surrogate pair (a cut pair is a lone surrogate). */
+const cutCodePoints = (t, max) => Array.from(t).slice(0, max).join('');
 function cleanContext(raw) {
   const ctx = raw && typeof raw === 'object' ? raw : {};
   const tooLong = [];
@@ -261,7 +263,7 @@ function cleanContext(raw) {
     return t;
   };
   const refs = Array.isArray(ctx.refs)
-    ? ctx.refs.filter(r => r && typeof r.url === 'string' && /^https?:\/\//.test(r.url)).slice(0, 3).map(r => ({ title: (typeof r.title === 'string' && r.title.trim() ? r.title.trim().slice(0, 80) : r.url), url: r.url.slice(0, 300) }))
+    ? ctx.refs.filter(r => r && typeof r.url === 'string' && /^https?:\/\//.test(r.url)).slice(0, 3).map(r => ({ title: (typeof r.title === 'string' && r.title.trim() ? cutCodePoints(r.title.trim(), 80) : cutCodePoints(r.url, 300)), url: cutCodePoints(r.url, 300) }))
     : [];
   return { project: str('project', FIELD_MAX.project), doing: str('doing', FIELD_MAX.doing), result: str('result', FIELD_MAX.result), question: str('question', FIELD_MAX.question), blocker: str('blocker', FIELD_MAX.blocker), refs, tooLong };
 }

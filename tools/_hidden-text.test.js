@@ -48,6 +48,14 @@ const HIDDEN = {
   'a digit and U+FE0F without the keycap': 'step 1\uFE0F next',
   'a letter as a keycap': 'a\uFE0F\u20E3',
   'a subdivision flag (tag characters)': '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}',
+  // Sixth pass: other default-ignorable, private-use, unassigned and lone surrogate code points.
+  'combining grapheme joiner (U+034F)': 'pa\u034Fy',
+  'Mongolian free variation selector': 'a\u180Bb',
+  'Khmer inherent vowel': 'a\u17B4b',
+  'private use': 'a\uE000b',
+  'unassigned': 'a\u0378b',
+  'lone high surrogate': 'a\uD800b',
+  'lone low surrogate': 'a\uDC00b',
   'escape sequence': 'hi \u001b[8mtoken\u001b[0m',
   'carriage return': 'a\rb',
   'C1 control': 'a\u0085b',
@@ -126,4 +134,29 @@ test('a recipient handle must be canonical ASCII: a Cyrillic look-alike is refus
   }
   const live = await drafts.vibe_prepare.handler({ handle: 'linus/claude', message: 'hi' });
   assert.match(live.display, /not a live session/, 'the live-session address keeps its own answer');
+});
+
+test('U+034F as a one-bit-per-letter carrier is refused', async () => {
+  const bits = [...Buffer.from('sk-12')].map((b) => b.toString(2).padStart(8, '0')).join('');
+  let out = ''; let k = 0;
+  for (const c of 'Thanks for the review, the fix looks good to me and I will merge it after lunch') { out += c; if (k < bits.length) { if (bits[k] === '1') out += '\u034F'; k++; } }
+  const r = await drafts.vibe_prepare.handler({ handle: 'linus', message: out });
+  assert.ok(!r.data, r.display);
+});
+
+test('two lone surrogates cannot be two drafts that read the same', async () => {
+  for (const body of ['pay \uD800 now', 'pay \uDBFF now']) {
+    const r = await drafts.vibe_prepare.handler({ handle: 'linus', message: body });
+    assert.ok(!r.data, 'refused');
+  }
+});
+
+test('a link title is cut by code point, never into a lone surrogate', async () => {
+  const r = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'see doc', refs: [{ title: 'x'.repeat(79) + '\u{1F600}extra', url: 'https://example.com' }] });
+  assert.ok(r.data, r.display);
+  const title = r.data.draft.refs[0].title;
+  assert.equal(Array.from(title).length, 80);
+  assert.ok(title.endsWith('\u{1F600}'));
+  assert.equal(hasHiddenCharacters(title), false);
+  await drafts.vibe_discard.handler({ id: r.data.draft.id });
 });
