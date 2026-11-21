@@ -29,12 +29,6 @@
 
 'use strict';
 
-// When this server started: the session floor vibe_send measures a draft's
-// last showing against (turns.js). Taken here, first, at startup, so nothing
-// loaded or awaited later can move it.
-const SERVER_STARTED_AT = Date.now() - Math.round(process.uptime() * 1000);
-require('./turns').setServerStart(SERVER_STARTED_AT);
-
 const presence = require('./presence');
 const store = require('./store');
 const authStore = require('./auth-store');

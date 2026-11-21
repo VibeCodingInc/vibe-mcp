@@ -129,41 +129,28 @@ function lastSessionStart(dir, env = process.env) {
   if (at === null) at = Number.isFinite(st.mtimeMs) ? st.mtimeMs : null;
   if (at === null) return { unreadable: true };
   // A start in the future would strand every draft until then: ignored, as
-  // if missing (the server's own start still sets a floor, sessionFloor).
+  // if missing.
   if (at > Date.now() + FUTURE_SLACK_MS) return null;
   return { at };
 }
 
 const FUTURE_SLACK_MS = 5000;
-/**
- * When this process (the MCP server) started: a session start no hook can fail
- * to record. Set once by the server entry point at startup (index.js); until
- * then, and in a process that is not the server, the process's own start
- * from its uptime, which does not move with when this file was loaded.
- */
-let serverStartedAt = null;
-function setServerStart(at) {
-  if (serverStartedAt === null && Number.isFinite(at)) serverStartedAt = at;
-  return serverStartedAt;
-}
-function serverStart() {
-  return serverStartedAt !== null ? serverStartedAt : Date.now() - Math.round(process.uptime() * 1000);
-}
 
 /**
- * The earliest a showing may be and still count in this session: the later of
- * the latest recorded session start for the project and this server's start.
- * null = cannot be told (the record exists and cannot be read).
+ * The earliest a showing may be and still count in this session: the latest
+ * recorded session start for the project (0 when none). null = cannot be told
+ * (the record exists and cannot be read).
+ *
+ * Not this server's own start: a host that runs one process per turn
+ * (claude -p --resume) starts a new server every turn, which moved the floor
+ * past every showing and refused every send (lab 2026-11-21, zero sends in
+ * two full runs). A rev is never handed out without a stamped showing, and a
+ * showing needs a later typed prompt, so that floor protected nothing more.
  */
-function sessionFloor(dir, env = process.env, { processStart = serverStart() } = {}) {
+function sessionFloor(dir, env = process.env) {
   const started = lastSessionStart(dir, env);
   if (started && started.unreadable) return null;
-  // The server starts with its session (and again on a reconnect), so its own
-  // start is a floor even where the session-start hook recorded nothing. A
-  // start more than FUTURE_SLACK_MS ahead of now (the clock was set back) is
-  // ignored, like a future start record, so it cannot strand sending.
-  const proc = Number.isFinite(processStart) && processStart <= Date.now() + FUTURE_SLACK_MS ? processStart : 0;
-  return Math.max(started ? started.at : 0, proc);
+  return started ? started.at : 0;
 }
 
 /**
@@ -174,7 +161,7 @@ function sessionFloor(dir, env = process.env, { processStart = serverStart() } =
  *                             host is not Claude Code: today's behaviour
  * A turn in the same millisecond as the rev does not count as after it.
  */
-function judge(revAt, { env = process.env, cwd = process.cwd, host, processStart = serverStart() } = {}) {
+function judge(revAt, { env = process.env, cwd = process.cwd, host } = {}) {
   const agent = host || (() => { try { return require('./host').getHost().agent; } catch { return null; } })();
   if (agent !== 'claude-code') return { check: 'unavailable', why: 'host_without_turn_hook' };
   if (!anyRecorded(env)) return { check: 'unavailable', why: 'no_turn_recorded' };
@@ -182,7 +169,7 @@ function judge(revAt, { env = process.env, cwd = process.cwd, host, processStart
   // Shown before this session started: it must be shown again here. Only
   // where the turn check itself applies (above), so a host without the hook
   // is never made unable to send.
-  const floor = sessionFloor(dir, env, { processStart });
+  const floor = sessionFloor(dir, env);
   if (floor === null) return { check: 'needs_turn', why: 'session_start_unreadable' };
   if (!(Number.isFinite(revAt) && revAt >= floor)) return { check: 'needs_turn', why: 'shown_in_earlier_session' };
   const at = lastTurn(dir, env);
@@ -190,4 +177,4 @@ function judge(revAt, { env = process.env, cwd = process.cwd, host, processStart
   return { check: 'needs_turn', why: 'no_turn_since_shown' };
 }
 
-module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge, recordSessionStart, lastSessionStart, sessionFloor, setServerStart, serverStart };
+module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge, recordSessionStart, lastSessionStart, sessionFloor };
