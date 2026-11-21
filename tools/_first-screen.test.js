@@ -715,3 +715,30 @@ test('vibe_start({}) with no building value never erases an existing work status
   assert.equal(after.pendingAuth, true, 'the child never reached the write under test');
   assert.equal(after.workingOn, 'KEEP-WORK', 'an omitted input erased the work status');
 });
+
+test('the pre-sign-in presence count asks the configured API, never a hard-coded production URL', async () => {
+  // tools/init.js used to fetch https://www.slashvibe.dev/api/presence whatever
+  // VIBE_API_URL said, so a test (or a local stack) reached production.
+  const http = require('node:http');
+  const hits = [];
+  const server = http.createServer((req, res) => {
+    hits.push(req.url);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ active: [{ handle: 'zoe' }, { handle: 'bot', isAgent: true }], away: [{ handle: 'kai' }] }));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  // In a child: this file stubs global.fetch, and the child is what a real
+  // session runs, with the real fetch.
+  const { execFile } = require('node:child_process');
+  const script = `require(${JSON.stringify(path.join(__dirname, 'init.js'))}).getPresenceCounts().then((c) => process.stdout.write(JSON.stringify(c)))`;
+  try {
+    const out = await new Promise((resolve, reject) => execFile(process.execPath, ['-e', script], {
+      env: { ...process.env, HOME, VIBE_HOME: HOME, VIBE_API_URL: `http://127.0.0.1:${server.address().port}/`, VIBE_SETUP_NO_AUTORUN: '1', CI: '1' },
+      encoding: 'utf8', timeout: 10000,
+    }, (e, stdout) => (e ? reject(e) : resolve(stdout))));
+    assert.deepEqual(JSON.parse(out), { online: 3, humans: 2, agents: 1 });
+    assert.deepEqual(hits, ['/api/presence']);
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});

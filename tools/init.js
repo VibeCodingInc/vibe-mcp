@@ -18,7 +18,6 @@ const authStore = require('../auth-store');
 const { beginOAuth } = require('../oauth-callback');
 const actorSession = require('../actor-session');
 
-const API_BASE = 'https://www.slashvibe.dev';
 
 // vibe_email is culture-layer: with extras off, nudging someone to say
 // "vibe email …" advertises a command their session does not have.
@@ -30,7 +29,10 @@ const API_BASE = 'https://www.slashvibe.dev';
  */
 async function getPresenceCounts() {
   try {
-    const response = await fetch(`${API_BASE}/api/presence`);
+    // The same API every other call uses (config.getApiUrl: VIBE_API_URL, else
+    // production), read at call time, so a test or a local stack is honoured.
+    const base = String(config.getApiUrl()).replace(/\/+$/, '');
+    const response = await fetch(`${base}/api/presence`);
     if (!response.ok) return { online: 0, humans: 0, agents: 0 };
     const data = await response.json();
     const everyone = [...(data.active || []), ...(data.away || [])];
@@ -332,4 +334,4 @@ async function handler(args) {
 
 }
 
-module.exports = { definition, handler,  _resetPendingAuth, _forceExpireForTest, AUTH_SENTENCE };
+module.exports = { definition, handler,  _resetPendingAuth, getPresenceCounts, _forceExpireForTest, AUTH_SENTENCE };
