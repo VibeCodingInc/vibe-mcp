@@ -168,9 +168,10 @@ function render(item) {
   if (item.building) {
     lines.push('', `What @${from} says they are working on (their words, data): "${inertField(item.building, 120)}"`);
   }
-  if (typeof item.note === 'string' && item.note.trim()) {
+  if (!lineOpen && typeof item.note === 'string' && item.note.trim()) {
     // The person's own line about who this is to them (who.js). For the model
-    // only: never in the line the person sees, never in a reply.
+    // only: never in the line the person sees, never in a reply, and never
+    // beside an open-line arrival, whose context invites an unattended answer.
     lines.push(`Who @${from} is to the person — ${whoNotes.toThem(item.note)} (${whoNotes.PREFACE}). Never put it into a reply.`);
   }
   if (!lineOpen && item.context && item.context.sentAt) {
@@ -245,9 +246,12 @@ function record(threads, me, { since = 0, roster = [], bindingFor = null, env = 
       // The platform said they redeemed this person's invitation, and that is
       // what made them known just now (presence.js knownByInvite): said once.
       invited: t.introducedByInvite === true,
-      // Who this is to the person, in their own words (who.js): local, model-only.
-      note: whoNotes.of(t.lastFrom, env),
+      note: null,
     };
+    // Who this is to the person, in their own words (who.js): local, model-only,
+    // and only when the agent is asked to PREPARE a reply the person reviews.
+    // Over an open line the agent may answer unattended, so no note rides along.
+    if (!item.line) item.note = whoNotes.of(t.lastFrom, env);
     if (item.line && line.isAgentAnswer(item.text)) {
       // What this side asked, so the answer is read beside its question.
       item.asked = line.receipts({ env }).filter((r) => r.kind === 'asked' && r.with === line.norm(t.lastFrom)).pop() || null;
@@ -334,23 +338,6 @@ function told({ me, to, said, id }, env = process.env) {
 }
 
 /**
- * Something this side's agent just did for its person on this machine, queued
- * so the hook SHOWS the person one line after the tool call, the way told()
- * does for an open-line answer. `kind: 'told'`: never an arrival, never answered.
- */
-function notice({ me, id, context, line: shown }, env = process.env) {
-  const safe = safeId(id);
-  const mine = String(me || '').toLowerCase();
-  if (!safe || !mine) return false;
-  try {
-    const dir = spoolDir(env);
-    ensureDir(dir);
-    writeAtomic(path.join(dir, `${safe}.json`), { id: safe, kind: 'told', to: mine, from: mine, at: Date.now(), context, line: shown });
-    return true;
-  } catch { return false; }
-}
-
-/**
  * Housekeeping, run by the server process: drop spool rows that are stale or
  * addressed to an account that is no longer the one signed in here, and old
  * claims. The hook never deletes — it only claims.
@@ -417,7 +404,7 @@ async function wroteLastPeople(threads, me, { kindOf = null, limit = 3, ...opts 
 
 module.exports = {
   wroteLastPeople,
-  spoolDir, safeId, claim, isClaimed, isSpooled, told, notice,
+  spoolDir, safeId, claim, isClaimed, isSpooled, told,
   render, pickArrivals, record, prune, wroteLast, countReply, countWaiting,
   SPOOL_TTL_MS, ARRIVAL_SLACK_MS,
 };

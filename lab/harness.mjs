@@ -133,9 +133,7 @@ export const DEFAULT_TOOLS = ['Read', 'Edit', 'Write', 'Bash(sleep:*)', 'mcp__vi
   // Visiting a door opens nothing here (CI=1) and sends nothing.
   'mcp__vibe__vibe_visit',
   // The bump names only people the person knows; it sends nothing.
-  'mcp__vibe__vibe_bump',
-  // A note on who someone is to the person: local, refused unless it is their own words just now.
-  'mcp__vibe__vibe_note'];
+  'mcp__vibe__vibe_bump'];
 
 const clip = (v, n) => { const s = typeof v === 'string' ? v : JSON.stringify(v); return s.length > n ? `${s.slice(0, n)}…` : s; };
 const resultText = (c) => (Array.isArray(c.content) ? c.content.map((y) => y.text || '').join('\n') : String(c.content || ''));

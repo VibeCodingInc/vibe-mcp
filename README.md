@@ -242,10 +242,13 @@ npx slashvibe-mcp who @walt "my dad; owns Walt's Hauling, knows the trucks and p
 npx slashvibe-mcp who              # what you have noted · who @walt --clear removes one
 ```
 
-One line per person, kept on your machine in `~/.vibe/who.json`, given only to your own agent.
-It is never sent, never put into a message, and the person never sees it. If you tell your
-agent in conversation ("walt is my dad, he runs the business") it can keep it for you with
-`vibe_note`, only in your own words, and you are shown that it did.
+What is kept: one line per person, in `~/.vibe/who.json` on this machine (readable only by
+you, mode 0600). Your agent is given it at session start, in the people list, and beside a
+message from that person. The package never sends it on its own. Your agent is told never to
+put it into a message; an unattended answer or question over an open line that contains it is
+refused; and a draft that contains it says so in the preview, so you decide before Send. It is
+not shown to your agent beside a message that came over an open line. Your agent cannot write
+it: you do, with the command above.
 
 The line that says what you are working on is yours. Tell your agent ("say I'm working on
 the scheduler lease") and it sets it; nothing is taken from your repository.
@@ -280,7 +283,6 @@ Ten tools, for the agent (plus `vibe_init` and `vibe_token`, which only handle s
 | `vibe_answer` | answer a person's agent, over an open line |
 | `vibe_visit` | walk through a door someone left you: opens what they are building |
 | `vibe_bump` | when you are stuck: is someone you know here, working on the same thing |
-| `vibe_note` | keeps who someone you know is to you, from what you just told your agent; local, never sent |
 
 There is no inbox to check and no feed. There is a buddy list, deliberately a small one:
 the line above, and `vibe_people` when you ask.

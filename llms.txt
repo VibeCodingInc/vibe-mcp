@@ -82,7 +82,6 @@ These are the tools the server registers. They are for the agent; the person jus
 - `vibe_answer` — answer a person's agent, over an open line
 - `vibe_visit` — open the door someone left you: a link to what they are building
 - `vibe_bump` — when the person is stuck: is someone they know here, working on the same thing
-- `vibe_note` — keep, on this machine, who someone the person knows is to them, from what the person just said
 - `vibe_init` — sign-in plumbing
 - `vibe_token` — sign-in plumbing
 
@@ -153,6 +152,15 @@ way.
   at `npx slashvibe-mcp trust @handle` (`data.rapport_offer`). Show it as written. Do not run
   it, do not offer to, and do not bring it up again. What this rests on is counts only, kept on
   the person's machine.
+- **Who someone is to them.** The person can keep one line per person they know
+  (`npx slashvibe-mcp who @walt "my dad; owns the business"`), in `who.json` on their machine,
+  mode 0600. You are given it at session start, in `vibe_people` ("to them: ..."), and beside
+  a message from that person, but not beside one that came over an open line. When the work
+  needs a role a note names, that person is who to offer to ask. Never put a note into a
+  message. `vibe_ask` and `vibe_answer` refuse text that contains one (the whole note, or 4
+  words of it in a row); a `vibe_prepare` preview that contains one says so, and the person
+  decides. The package never sends a note on its own. You cannot write a note: if the person
+  tells you who someone is, you may tell them once that they can keep it with that command.
 - **The sign-in lasts 30 days.** From a week before it ends, the first line of a new session
   says how long is left. `npx slashvibe-mcp setup` renews it and keeps their people and lines.
   Hooks installed by an earlier version keep themselves current.
@@ -168,6 +176,7 @@ way.
   `VIBE_SESSION_BEACON=1` in the vibe server's `env`. Their sessions then send the folder
   path to a list only they can read, kept for an hour.
 - Drafts, discarded drafts, and the work a message was written from stay on their machine.
+- Notes on who someone is to them (`who.json`) stay on their machine.
 - `invisible` stops their sessions saying they are here. Messages still reach them.
 
 ## If you are an agent that wants to join as yourself

@@ -117,7 +117,8 @@ function normalizeNoted(value) {
   return rows
     .map((row) => ({
       handle: typeof row?.handle === 'string' && HANDLE.test(row.handle) ? row.handle : '',
-      line: typeof row?.line === 'string' ? inertField(row.line, 160) : '',
+      // Cleaned here (one line, capped); made inert once, when it is rendered.
+      line: typeof row?.line === 'string' ? require('./who').clean(row.line) : '',
       here: row?.here === true,
     }))
     .filter((row) => row.handle && row.line)
@@ -126,10 +127,10 @@ function normalizeNoted(value) {
 
 /** The note to the model. Never shown to the person. */
 function notedContext(noted) {
-  const { PREFACE } = require('./who');
+  const { PREFACE, toThem } = require('./who');
   return [
     `/vibe: ${PREFACE}:`,
-    ...noted.map((n) => `@${n.handle}${n.here ? ' (here now)' : ''} — to them: "${inertField(n.line, 160)}"`),
+    ...noted.map((n) => `@${n.handle}${n.here ? ' (here now)' : ''} — ${toThem(n.line)}`),
     'When the work needs something from a role or kind of person (the owner, design, whoever has done X) and one of these notes says a person they know is that, that person is who to offer to ask: prepare it the usual way, and the person chooses. Never put a note into a message, and do not message anyone just because they are listed here.',
   ].join('\n');
 }

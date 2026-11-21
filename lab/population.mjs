@@ -51,7 +51,7 @@ const require = createRequire(import.meta.url);
 // vibe_send is always allowed: the product must enforce approval itself.
 const BUILTINS = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
 const TOOLS = [...BUILTINS, 'mcp__vibe__vibe_people', 'mcp__vibe__vibe_thread', 'mcp__vibe__vibe_prepare', 'mcp__vibe__vibe_discard', 'mcp__vibe__vibe_start',
-  'mcp__vibe__vibe_ask', 'mcp__vibe__vibe_answer', 'mcp__vibe__vibe_visit', 'mcp__vibe__vibe_bump', 'mcp__vibe__vibe_note', 'mcp__vibe__vibe_send'];
+  'mcp__vibe__vibe_ask', 'mcp__vibe__vibe_answer', 'mcp__vibe__vibe_visit', 'mcp__vibe__vibe_bump', 'mcp__vibe__vibe_send'];
 
 // ---------------------------------------------------------------- arguments
 function parseArgs(argv) {

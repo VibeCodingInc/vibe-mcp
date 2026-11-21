@@ -73,7 +73,8 @@ async function handler() {
   // Who someone is to the person, in the person's own words (who.js): for the
   // model to connect a role in the work to someone it may offer to ask.
   const notes = Object.fromEntries(who.all().map((e) => [e.handle, e.line]));
-  const noteOf = (h) => notes[normalizeHandle(h || '')] || null;
+  // Never for a muted person, anywhere in this list (session start does the same).
+  const noteOf = (h) => { const n = normalizeHandle(h || ''); return n && n !== me && !reach.isMuted(n) ? notes[n] || null : null; };
   let anyNote = false;
   const toThem = (h) => { const n = noteOf(h); if (!n) return ''; anyNote = true; return ` · ${who.toThem(n)}`; };
   const doorOf = (h) => { const d = door.of(h); return d ? `   \u{1F6AA} door \u2192 ${door.shortUrl(d.url)}` : ''; };
@@ -116,7 +117,7 @@ async function handler() {
   // Noted people who are in neither list: the role-to-person link matters
   // whether or not they are here.
   const listed = new Set([...here.map((u) => normalizeHandle(u.handle)), ...threads.map((t) => normalizeHandle(t.handle || ''))]);
-  const otherNoted = who.all().filter((e) => e.handle !== me && !listed.has(e.handle) && !reach.isMuted(e.handle)).slice(0, 8);
+  const otherNoted = who.all().filter((e) => !listed.has(e.handle) && noteOf(e.handle)).slice(0, 8);
   if (otherNoted.length) {
     lines.push('', 'others the person has noted:');
     for (const e of otherNoted) lines.push(`@${e.handle} — ${who.toThem(e.line)}`);
@@ -133,10 +134,10 @@ async function handler() {
       // Doors people left with this person (door.js). The name is the owner's words: data.
       doors: Object.fromEntries([...new Set([...here.map((u) => normalizeHandle(u.handle)), ...threads.map((t) => normalizeHandle(t.handle || ''))])].map((h) => [h, door.of(h)]).filter(([, d]) => d).map(([h, d]) => [h, { url: d.url, name: d.name || null, visit: `vibe_visit ${h}` }])),
       others: presence.ok ? others : null,   // people in a session whom this person does not know: a count, never names
-      here: presence.ok ? here.map((u) => ({ handle: u.handle, agent: Boolean(u.isAgent), says: inertField(u.one_liner || u.activity || u.workingOn || '', 100), ...(noteOf(u.handle) ? { to_them: inertField(noteOf(u.handle), who.MAX_LINE) } : {}) })) : null,
-      conversations: inbox.ok ? threads.map((t) => ({ handle: t.handle, lastFrom: t.lastFrom || null, lastMessageId: t.lastMessageId || null, unread: t.unread || 0, ...(noteOf(t.handle) ? { to_them: inertField(noteOf(t.handle), who.MAX_LINE) } : {}) })) : null,
+      here: presence.ok ? here.map((u) => ({ handle: u.handle, agent: Boolean(u.isAgent), says: inertField(u.one_liner || u.activity || u.workingOn || '', 100), ...(noteOf(u.handle) ? { to_them: who.quoted(noteOf(u.handle)) } : {}) })) : null,
+      conversations: inbox.ok ? threads.map((t) => ({ handle: t.handle, lastFrom: t.lastFrom || null, lastMessageId: t.lastMessageId || null, unread: t.unread || 0, ...(noteOf(t.handle) ? { to_them: who.quoted(noteOf(t.handle)) } : {}) })) : null,
       // The person's own private notes on who someone is to them (who.js): data, never sent.
-      noted: otherNoted.map((e) => ({ handle: e.handle, to_them: inertField(e.line, who.MAX_LINE) })),
+      noted: otherNoted.map((e) => ({ handle: e.handle, to_them: who.quoted(e.line) })),
     },
   };
 }

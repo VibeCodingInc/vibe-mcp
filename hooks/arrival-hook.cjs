@@ -14,9 +14,8 @@
  * most of a second). The spool is the sibling directory, so the copy always
  * reads the identity it was installed for.
  *
- * Presentation only: writes no receipt and no read state. What it records is
- * that the person prompted, and when (recordTurn, for vibe_send), and hashes
- * of the words of that one latest prompt (recordSaid, for vibe_note).
+ * Presentation only: writes no receipt and no read state. The one thing it
+ * records is that the person prompted, and when (recordTurn, for vibe_send).
  *
  * One more thing it does on a prompt: when the person says they are stuck, it
  * reminds the agent, once per session, that vibe_bump exists (see stuckNudge).
@@ -60,7 +59,7 @@ function main() {
   if (!EVENTS.has(event)) return quiet();
   // The person typed: a draft prepared before now is one they could have seen.
   // Only on a prompt, never after a tool call (the agent's own turn).
-  if (event === 'UserPromptSubmit') { recordTurn(input); recordSaid(input); }
+  if (event === 'UserPromptSubmit') recordTurn(input);
 
   const dir = process.env.VIBE_ARRIVALS_DIR || path.join(__dirname, '..', 'arrivals');
   const session = String(input.session_id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
@@ -110,36 +109,6 @@ function recordTurn(input) {
       const file = path.join(dir, `${k}.json`);
       const tmp = `${file}.${process.pid}.tmp`;
       fs.writeFileSync(tmp, at, { mode: 0o600 });
-      fs.renameSync(tmp, file);
-    }
-  } catch {}
-}
-
-// ── what the person just said (who.js, tools/note.js) ──────────────────────
-// vibe_note records who someone is to the person only from the person's own
-// words. This keeps, for the latest prompt only, short hashes of its words
-// (never the text), per project like recordTurn, overwritten every prompt.
-// saidWords/hashWord must match who.js (a test pins it).
-function saidWords(text) {
-  return String(text || '').slice(0, 8000).normalize('NFKC').toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 2);
-}
-function hashWord(w) {
-  return require('crypto').createHash('sha256').update(`vibe-said:${w}`, 'utf8').digest('hex').slice(0, 16);
-}
-function recordSaid(input) {
-  try {
-    // Beside the turn record, as <key>.said.json (turns.js only reads <key>.json).
-    const dir = process.env.VIBE_TURNS_DIR || path.join(__dirname, '..', 'turns');
-    const keys = new Set([process.env.CLAUDE_PROJECT_DIR, input.cwd].filter((d) => typeof d === 'string' && d.trim()).map(turnKey).filter(Boolean));
-    if (keys.size === 0) return;
-    const words = [...new Set(saidWords(typeof input.prompt === 'string' ? input.prompt : '').map(hashWord))].slice(0, 1000);
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const body = JSON.stringify({ at: Date.now(), words });
-    for (const k of keys) {
-      const file = path.join(dir, `${k}.said.json`);
-      const tmp = `${file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, body, { mode: 0o600 });
       fs.renameSync(tmp, file);
     }
   } catch {}

@@ -26,7 +26,7 @@ const USAGE = `slashvibe-mcp: telepathic messaging, inside your coding agent
   npx slashvibe-mcp mute @handle       one person stops surfacing (undo: unmute @handle)
   npx slashvibe-mcp invisible          be here without showing as here (undo: visible)
   npx slashvibe-mcp rapport            what this machine counts per teammate (also: forget [@handle], decline @handle)
-  npx slashvibe-mcp who @handle "..."  who someone is to you, for your agent only, never sent (list: who; remove: who @handle --clear)
+  npx slashvibe-mcp who @handle "..."  who someone is to you, for your agent only (list: who; remove: who @handle --clear)
   npx slashvibe-mcp operate @agent     say you run an agent, so people see "run by @you" (also: renew, revoke)
   npx slashvibe-mcp agent              for an agent signing in as itself, not a person
   npx slashvibe-mcp door https://...   leave a door: a link to what you are building (then: door share, door close)
@@ -427,35 +427,51 @@ if (['help', '--help', '-h'].includes(args[0])) {
   const who = require('./who');
   const say = (t) => process.stdout.write(`${t}\n`);
   try {
-    const flags = args.slice(1).filter((a) => /^--/.test(a));
-    const words = args.slice(1).filter((a) => !/^--/.test(a));
-    if (flags.some((f) => f !== '--clear')) throw new Error('The only option is --clear: npx slashvibe-mcp who @handle --clear');
-    if (!words.length) {
-      if (flags.length) throw new Error('Whose line? npx slashvibe-mcp who @handle --clear');
+    // who                          list
+    // who @h                       show one
+    // who @h --clear               remove (also: who --clear @h)
+    // who @h <note...>             set; everything after the handle is the note,
+    // who @h -- <note...>          so a note may begin with "--" (after -- always).
+    const rest = args.slice(1);
+    let target = null; let clearIt = false; let noteWords = [];
+    if (rest[0] === '--clear') {
+      clearIt = true;
+      if (rest.length !== 2) throw new Error('Whose line? npx slashvibe-mcp who @handle --clear');
+      target = rest[1];
+    } else if (rest.length) {
+      target = rest[0];
+      const after = rest.slice(1);
+      if (after[0] === '--') noteWords = after.slice(1);
+      else if (after.length === 1 && after[0] === '--clear') clearIt = true;
+      else if (after.length === 1 && /^--[a-z][a-z-]*$/.test(after[0])) {
+        // One bare word shaped like an option is far more likely a mistyped option than a note.
+        throw new Error(`The only option is --clear: npx slashvibe-mcp who @handle --clear (if "${after[0]}" is the note, put -- before it)`);
+      } else noteWords = after;
+    }
+    if (target !== null && /^--/.test(target)) throw new Error('The only option is --clear: npx slashvibe-mcp who @handle --clear');
+    if (target === null) {
       const all = who.all();
       if (!all.length) {
         say('No one noted yet.');
         say('Tell your agent who someone is to you, so it knows who to ask when the work needs them:');
         say('  npx slashvibe-mcp who @walt "my dad; owns Walt\'s Hauling, knows the trucks and prices"');
       } else {
-        for (const e of all) say(`@${e.handle}: "${e.line}"`);
+        for (const e of all) say(`@${e.handle}: "${who.quoted(e.line)}"`);
       }
-      say('Kept on this machine (who.json) for your agent only. Never sent; the person never sees it. Remove one: npx slashvibe-mcp who @handle --clear');
+      say('Kept on this machine (who.json) for your agent only. The package never sends it. Remove one: npx slashvibe-mcp who @handle --clear');
     } else {
-      const h = who.norm(words[0]);
-      if (!who.validHandle(h)) throw new Error(`"${words[0]}" is not a handle. A handle looks like @sam: letters, digits, - and _.`);
-      if (flags.includes('--clear')) {
-        if (words.length > 1) throw new Error(`To remove @${h}'s line: npx slashvibe-mcp who @${h} --clear`);
+      const h = who.norm(target);
+      if (!who.validHandle(h)) throw new Error(`"${target}" is not a handle. A handle looks like @sam: letters, digits, - and _.`);
+      if (clearIt) {
         say(who.clear(h) ? `Removed what you noted about @${h}.` : `You had not noted anything about @${h}.`);
-      } else if (words.length === 1) {
+      } else if (noteWords.length === 0) {
         const line = who.of(h);
-        say(line ? `@${h}: "${line}"` : `You have not noted who @${h} is to you. npx slashvibe-mcp who @${h} "my dad; owns the business"`);
+        say(line ? `@${h}: "${who.quoted(line)}"` : `You have not noted who @${h} is to you. npx slashvibe-mcp who @${h} "my dad; owns the business"`);
       } else {
-        const typed = words.slice(1).join(' ');
-        const got = who.set(h, typed);
-        say(`Noted, on this machine only: @${got.handle}: "${got.line}"`);
+        const got = who.set(h, noteWords.join(' '));
+        say(`Noted, on this machine only: @${got.handle}: "${who.quoted(got.line)}"`);
         if (got.line.endsWith('\u2026')) say(`(cut to ${who.MAX_LINE} characters)`);
-        say(`Your agent sees this when it thinks about who could help with the work. It is never sent, and @${got.handle} never sees it. Remove it: npx slashvibe-mcp who @${got.handle} --clear`);
+        say(`Your agent sees this when it thinks about who could help with the work. The package never sends it, and @${got.handle} never sees it. Remove it: npx slashvibe-mcp who @${got.handle} --clear`);
       }
     }
   } catch (error) {

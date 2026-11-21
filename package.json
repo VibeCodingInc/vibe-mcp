@@ -84,7 +84,6 @@
     "door.js",
     "tools/visit.js",
     "tools/bump.js",
-    "tools/note.js",
     "who.js",
     "agent-auth.js",
     "invite.js",

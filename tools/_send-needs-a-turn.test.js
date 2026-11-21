@@ -91,14 +91,9 @@ test('the turn record holds a time and nothing else: no prompt text, no path', (
   const files = fs.readdirSync(TURNS);
   assert.ok(files.length >= 1);
   for (const f of files) {
-    // Beside each turn, <key>.said.json (vibe_note, who.js): hashes of the
-    // latest prompt's words, never the words. Still no prompt text, no path.
-    assert.match(f, /^[0-9a-f]{32}(\.said)?\.json$/, 'named by a hash, not the path');
+    assert.match(f, /^[0-9a-f]{32}\.json$/, 'named by a hash, not the path');
     const raw = fs.readFileSync(path.join(TURNS, f), 'utf8');
-    if (f.endsWith('.said.json')) {
-      assert.deepEqual(Object.keys(JSON.parse(raw)), ['at', 'words']);
-      assert.ok(JSON.parse(raw).words.every((w) => /^[0-9a-f]{16}$/.test(w)));
-    } else assert.deepEqual(Object.keys(JSON.parse(raw)), ['at']);
+    assert.deepEqual(Object.keys(JSON.parse(raw)), ['at']);
     assert.doesNotMatch(raw, /send it|retry-after|vibe-turn-project|sess1/);
     assert.equal(fs.statSync(path.join(TURNS, f)).mode & 0o777, 0o600);
   }
