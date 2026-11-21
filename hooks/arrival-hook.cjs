@@ -150,17 +150,26 @@ const NOT_PERSON = [
   /^<system-reminder\b/i,   // one left after stripping is unclosed: not theirs either
 ];
 // Leading whitespace, zero-width characters and whole system-reminder blocks
-// are stripped, repeatedly, before the patterns are tried: a wrapper hidden
-// behind them is still a wrapper (review 2026-11-21).
-const LEADING = /^(?:[\s\u200B-\u200D\u2060\uFEFF]+|<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder>)/i;
+// are stripped before the patterns are tried: a wrapper hidden behind them is
+// still a wrapper (review 2026-11-21). A stripped block that carries Claude
+// Code's "[SYSTEM NOTIFICATION - NOT USER INPUT]" marks the whole prompt as
+// not the person's, whatever follows it. Scanned forward once (sticky
+// regexes), so a long prompt costs one pass, not one copy per block.
+const LEAD_WS = /[\s\u200B-\u200D\u2060\uFEFF]*/y;
+const REMINDER = /<system-reminder\b[^>]*>([\s\S]*?)<\/system-reminder>/iy;
+const NOTIFICATION = '[SYSTEM NOTIFICATION - NOT USER INPUT]';
 function personWrote(prompt) {
   if (typeof prompt !== 'string') return false;
-  let said = prompt;
-  for (let i = 0; i < 1000; i++) {
-    const next = said.replace(LEADING, '');
-    if (next === said) break;
-    said = next;
+  let i = 0;
+  for (;;) {
+    LEAD_WS.lastIndex = i; LEAD_WS.exec(prompt); i = LEAD_WS.lastIndex;
+    REMINDER.lastIndex = i;
+    const m = REMINDER.exec(prompt);
+    if (!m) break;
+    if (m[1].includes(NOTIFICATION)) return false;
+    i = REMINDER.lastIndex;
   }
+  const said = prompt.slice(i);
   if (!said.trim()) return false;
   return !NOT_PERSON.some((re) => re.test(said));
 }
