@@ -101,8 +101,10 @@ function main() {
   // Claude Code also runs UserPromptSubmit for a background subagent reporting
   // back, a message from another session, a scheduled task (hooks docs); the
   // input has no field saying who wrote it, so personWrote() decides, erring
-  // toward not counting.
+  // toward not counting. The person's answer in the question menu
+  // (AskUserQuestion) is their turn too, seen after that tool call.
   if (event === 'UserPromptSubmit' && personWrote(input.prompt)) recordTurn(input);
+  if (event === 'PostToolUse' && answeredMenu(input)) recordTurn(input);
 
   const dir = process.env.VIBE_ARRIVALS_DIR || path.join(__dirname, '..', 'arrivals');
   const session = String(input.session_id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
@@ -151,6 +153,22 @@ function personWrote(prompt) {
   // Only system-reminder blocks, nothing of the person's own.
   if (/^<system-reminder>/i.test(said) && !said.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '').trim()) return false;
   return true;
+}
+
+/**
+ * The person answered Claude Code's question menu (AskUserQuestion): their
+ * choice, made in front of the menu. Only that tool, and only a result that
+ * carries at least one answer; a refused or errored menu does not count.
+ * Shape from Claude Code transcripts (toolUseResult: {questions, answers:
+ * {question: label}, annotations}); the hooks reference leaves it unstated.
+ */
+function answeredMenu(input) {
+  if (!input || input.tool_name !== 'AskUserQuestion') return false;
+  const r = input.tool_response;
+  if (!r || typeof r !== 'object' || Array.isArray(r) || r.is_error === true || r.error) return false;
+  const a = r.answers;
+  if (!a || typeof a !== 'object' || Array.isArray(a)) return false;
+  return Object.values(a).some((v) => typeof v === 'string' && v.trim());
 }
 
 // ── a person's turn (turns.js) ──────────────────────────────────────────────
@@ -220,4 +238,4 @@ function stuckNudge(input, dir) {
 }
 
 if (require.main === module) { try { main(); } catch { quiet(); } }
-module.exports = { personWrote };
+module.exports = { personWrote, answeredMenu };
