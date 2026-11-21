@@ -100,8 +100,10 @@ function main() {
   // Only on a prompt, never after a tool call (the agent's own turn).
   // Claude Code also runs UserPromptSubmit for a background subagent reporting
   // back, a message from another session, a scheduled task (hooks docs); the
-  // input has no field saying who wrote it, so personWrote() decides, erring
-  // toward not counting. An answer in Claude Code's question menu
+  // input has no field saying who wrote it, so personWrote() decides by the
+  // wrappers those carry, erring toward not counting. A prompt the agent
+  // scheduled for itself carries no wrapper and still counts: a known gap
+  // (SECURITY.md). An answer in Claude Code's question menu
   // (AskUserQuestion) is never a turn: the agent opens a menu, about
   // anything, mid-run, and what it shows can differ from what is sent.
   if (event === 'UserPromptSubmit' && personWrote(input.prompt)) recordTurn(input);

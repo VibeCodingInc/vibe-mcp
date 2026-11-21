@@ -69,8 +69,8 @@ function atomicWrite(file, content, expect) {
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
   const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`);
-  fs.writeFileSync(tmp, content, { encoding: 'utf8', flag: 'wx', mode: 0o644 });
   try {
+    fs.writeFileSync(tmp, content, { encoding: 'utf8', flag: 'wx', mode: 0o644 });
     let ok;
     if (expect === 'absent') {
       try { fs.lstatSync(file); ok = false; } catch (e) { ok = e && e.code === 'ENOENT'; }
