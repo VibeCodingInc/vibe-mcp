@@ -98,15 +98,44 @@ function startFile(dir, env = process.env) {
   return k ? path.join(turnsDir(env), `${k}.start.json`) : null;
 }
 
-/** Record a session start for a project directory (the session-start hook's job). */
-function recordSessionStart(dir, at = Date.now(), env = process.env) {
+/** Session ids are hook input: only a safe, bounded form is stored. */
+const safeSession = (v) => (typeof v === 'string' ? v.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80) : '') || null;
+
+/** Record a session start for a project directory: {at, session}. */
+function recordSessionStart(dir, at = Date.now(), env = process.env, session = null) {
   const file = startFile(dir, env);
   if (!file) return false;
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.${crypto.randomBytes(3).toString('hex')}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ at }), { mode: 0o600 });
+  fs.writeFileSync(tmp, JSON.stringify({ at, session: safeSession(session) }), { mode: 0o600 });
   fs.renameSync(tmp, file);
   return true;
+}
+
+/**
+ * The session-start hook's decision: does this start move the floor?
+ *   compact (or any other source)        never
+ *   a session id equal to the recorded   no: a resume of the same conversation,
+ *                                        whose earlier previews are part of it
+ *                                        (and a host that runs one process per
+ *                                        turn resumes every turn)
+ *   a different session id               yes: a new conversation
+ *   no session id                        yes on startup, clear and fork; not on
+ *                                        resume (it cannot be told apart from
+ *                                        the same conversation)
+ * Returns whether it moved.
+ */
+function noteSessionStart(dir, { source, session, at = Date.now() } = {}, env = process.env) {
+  if (!['startup', 'resume', 'clear', 'fork'].includes(source)) return false;
+  const id = safeSession(session);
+  if (id) {
+    let recorded = null;
+    try { recorded = JSON.parse(fs.readFileSync(startFile(dir, env), 'utf8')).session || null; } catch {}
+    if (recorded === id) return false;
+    return recordSessionStart(dir, at, env, id);
+  }
+  if (source === 'resume') return false;
+  return recordSessionStart(dir, at, env, null);
 }
 
 /**
@@ -177,4 +206,4 @@ function judge(revAt, { env = process.env, cwd = process.cwd, host } = {}) {
   return { check: 'needs_turn', why: 'no_turn_since_shown' };
 }
 
-module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge, recordSessionStart, lastSessionStart, sessionFloor };
+module.exports = { turnsDir, key, projectDir, anyRecorded, lastTurn, record, judge, recordSessionStart, noteSessionStart, lastSessionStart, sessionFloor };

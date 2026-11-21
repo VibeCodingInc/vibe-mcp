@@ -570,14 +570,15 @@ function markTold(rows, session) {
 }
 
 /**
- * A new session is a new screen (turns.js): a draft shown before it must be
- * shown again before vibe_send will send it. Recorded first, before anything
- * that could time out, for the project directory (CLAUDE_PROJECT_DIR, and the
- * input cwd when it differs), on startup, resume and clear. Never on compact:
- * the person did see the text in this session. An input without a source
+ * A new conversation is a new screen (turns.js): a draft shown before it must
+ * be shown again before vibe_send will send it. Recorded first, before
+ * anything that could time out, for the project directory (CLAUDE_PROJECT_DIR,
+ * and the input cwd when it differs). Which starts move the floor is decided
+ * by turns.noteSessionStart from the source and the session id: a resume of
+ * the same conversation does not (its earlier previews are part of it); a
+ * different conversation does; compact never does. An input without a source
  * records nothing, because a compact cannot be told apart from a start.
  */
-// fork: a resume with --fork-session (hooks reference), a resume like any other.
 const NEW_SCREEN = new Set(['startup', 'resume', 'clear', 'fork']);
 function noteSessionStart(input, env = process.env) {
   try {
@@ -585,7 +586,7 @@ function noteSessionStart(input, env = process.env) {
     const turns = require('./turns');
     const dirs = new Set([env.CLAUDE_PROJECT_DIR, input.cwd].filter((d) => typeof d === 'string' && d.trim()));
     const at = Date.now();
-    for (const d of dirs) turns.recordSessionStart(d, at, env);
+    for (const d of dirs) turns.noteSessionStart(d, { source: input.source, session: input.session_id, at }, env);
   } catch {}
 }
 
