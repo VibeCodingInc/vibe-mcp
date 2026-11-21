@@ -100,3 +100,15 @@ test('a session-start record dated more than 5 seconds ahead is ignored; the ser
   assert.ok(turns.lastSessionStart(PROJECT), 'within 5 seconds: kept (clock skew)');
   fs.rmSync(startFile());
 });
+
+test('a server start more than 5 seconds ahead (the clock was set back) is ignored: a re-show then a prompt sends', () => {
+  const now = Date.now();
+  const ahead = now + 3600_000;
+  assert.equal(turns.sessionFloor(PROJECT, process.env, { processStart: ahead }), 0, 'no start record here, so no floor at all');
+  // A re-show just now, then the person's prompt.
+  const shown = Date.now(); tick(); turns.record(PROJECT, Date.now());
+  assert.deepEqual(turns.judge(shown, { processStart: ahead }), { check: 'passed' });
+  // Within the slack it still counts.
+  const near = Date.now() + 3000;
+  assert.equal(turns.sessionFloor(PROJECT, process.env, { processStart: near }), near);
+});

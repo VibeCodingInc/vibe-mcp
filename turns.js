@@ -168,8 +168,11 @@ function sessionFloor(dir, env = process.env, { processStart = PROCESS_STARTED_A
   const started = lastSessionStart(dir, env);
   if (started && started.unreadable) return null;
   // The server starts with its session (and again on a reconnect), so its own
-  // start is a floor even where the session-start hook recorded nothing.
-  return Math.max(started ? started.at : 0, Number.isFinite(processStart) ? processStart : 0);
+  // start is a floor even where the session-start hook recorded nothing. A
+  // start more than FUTURE_SLACK_MS ahead of now (the clock was set back) is
+  // ignored, like a future start record, so it cannot strand sending.
+  const proc = Number.isFinite(processStart) && processStart <= Date.now() + FUTURE_SLACK_MS ? processStart : 0;
+  return Math.max(started ? started.at : 0, proc);
 }
 
 /**
