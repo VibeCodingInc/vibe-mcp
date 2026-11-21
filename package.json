@@ -89,6 +89,7 @@
     "invite.js",
     "near.js",
     "unsent.js",
-    "showable.js"
+    "showable.js",
+    "host-command.js"
   ]
 }

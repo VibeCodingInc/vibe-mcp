@@ -165,6 +165,9 @@ class VibeMCPServer {
     try {
       if (!(require('./vibe-home').isIsolated() && !process.env.CLAUDE_CONFIG_DIR)) {
         require('./session-start-hook-settings').createHookSettingsManager().refresh();
+        // The /vibe command: an earlier release's copy is replaced with this
+        // one, so an upgrade reaches people without setup. Never creates it.
+        require('./host-command').refresh();
       }
     } catch {}
 

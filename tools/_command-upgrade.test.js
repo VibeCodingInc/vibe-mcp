@@ -106,3 +106,76 @@ test('the shipped list matches every tagged release, where the tags are present'
   }
   assert.deepEqual([...seen].sort(), [...SHIPPED_COMMAND_SHA256].sort());
 });
+
+// ── at server start (host-command.js refresh, called from index.js) ─────────
+
+function refresh(home, env = {}) {
+  const r = spawnSync(process.execPath, ['-e', "process.stdout.write(JSON.stringify(require('./host-command.js').refresh()))"], {
+    cwd: ROOT, encoding: 'utf8',
+    env: { PATH: process.env.PATH, HOME: home, VIBE_SETUP_NO_AUTORUN: '1', VIBE_API_URL: 'http://127.0.0.1:9', ...env },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+}
+
+test('refresh at start: an earlier release\'s vibe.md and vibe-moves.md are replaced; nothing is created', () => {
+  const home = machine();
+  fs.writeFileSync(cmd(home), V0917);
+  fs.writeFileSync(cmd(home, 'vibe-moves.md'), V0917);
+  assert.deepEqual(refresh(home).sort(), [cmd(home), cmd(home, 'vibe-moves.md')].sort());
+  assert.equal(fs.readFileSync(cmd(home), 'utf8'), CURRENT);
+  assert.equal(fs.readFileSync(cmd(home, 'vibe-moves.md'), 'utf8'), CURRENT);
+  assert.deepEqual(refresh(home), [], 'already current: nothing to do');
+  const empty = machine();
+  assert.deepEqual(refresh(empty), []);
+  assert.deepEqual(fs.readdirSync(path.join(empty, '.claude', 'commands')), [], 'refresh created a command');
+  const noClaude = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-cmd-none-'));
+  assert.deepEqual(refresh(noClaude), []);
+  assert.deepEqual(fs.readdirSync(noClaude), []);
+});
+
+test('refresh at start leaves the person\'s own command, and a link, alone; no temporary file is left', () => {
+  const home = machine();
+  const mine = Buffer.concat([V0917, Buffer.from('mine\n')]);
+  fs.writeFileSync(cmd(home), mine);
+  const target = path.join(home, 'elsewhere.md');
+  fs.writeFileSync(target, V0917);
+  fs.symlinkSync(target, cmd(home, 'vibe-moves.md'));
+  assert.deepEqual(refresh(home), []);
+  assert.ok(fs.readFileSync(cmd(home)).equals(mine));
+  assert.ok(fs.lstatSync(cmd(home, 'vibe-moves.md')).isSymbolicLink());
+  assert.ok(fs.readFileSync(target).equals(V0917), 'wrote through the link');
+  assert.deepEqual(fs.readdirSync(path.join(home, '.claude', 'commands')).sort(), ['vibe-moves.md', 'vibe.md']);
+});
+
+test('refresh honours CLAUDE_CONFIG_DIR', () => {
+  const home = machine();
+  const conf = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-cmd-conf-'));
+  fs.mkdirSync(path.join(conf, 'commands'));
+  fs.writeFileSync(path.join(conf, 'commands', 'vibe.md'), V0917);
+  fs.writeFileSync(cmd(home), V0917);
+  assert.deepEqual(refresh(home, { CLAUDE_CONFIG_DIR: conf }), [path.join(conf, 'commands', 'vibe.md')]);
+  assert.ok(fs.readFileSync(cmd(home)).equals(V0917), 'touched ~/.claude while CLAUDE_CONFIG_DIR named another');
+});
+
+test('the server runs the refresh at start, behind the lab-isolation guard', () => {
+  const initialize = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } }) + '\n';
+  const start = (env) => spawnSync(process.execPath, [path.join(ROOT, 'index.js')], {
+    input: initialize, encoding: 'utf8', timeout: 20_000,
+    env: { PATH: process.env.PATH, VIBE_API_URL: 'http://127.0.0.1:9', CI: '1', NODE_OPTIONS: process.env.NODE_OPTIONS || '', ...env },
+  });
+  // An isolated identity (VIBE_HOME) with the real Claude dir: never edited.
+  const home = machine();
+  fs.writeFileSync(cmd(home), V0917);
+  start({ HOME: home, VIBE_HOME: path.join(home, '.vibe-lab') });
+  assert.ok(fs.readFileSync(cmd(home)).equals(V0917), 'a lab identity edited the real command');
+  // Isolated, with its own Claude dir: that one is refreshed.
+  const conf = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-cmd-srv-'));
+  fs.mkdirSync(path.join(conf, 'commands'));
+  fs.writeFileSync(path.join(conf, 'commands', 'vibe.md'), V0917);
+  start({ HOME: home, VIBE_HOME: path.join(home, '.vibe-lab'), CLAUDE_CONFIG_DIR: conf });
+  assert.equal(fs.readFileSync(path.join(conf, 'commands', 'vibe.md'), 'utf8'), CURRENT);
+  // The everyday identity (no VIBE_HOME): ~/.claude is refreshed.
+  start({ HOME: home });
+  assert.equal(fs.readFileSync(cmd(home), 'utf8'), CURRENT);
+});
