@@ -8,7 +8,7 @@
 // recorded so a later judge can read it against each world's answer key.
 //
 //   node lab/population.mjs <world.json|dir> [more ...] --out <dir>
-//        [--model sonnet] [--human-model sonnet] [--concurrency 3]
+//        [--model sonnet] [--human-model sonnet | --human-cmd "<command>"] [--concurrency 3]
 //        [--turn-timeout 300] [--max-human-replies 3] [--limit N]
 //        [--force] [--keep]
 //
@@ -33,6 +33,19 @@
 // their words, written to their own store at setup (who.js) so the same world
 // can be run with and without it.
 //
+// The person-player is `claude -p` (--human-model picks its model) unless
+// --human-cmd "<command>" is given, so a different model family can play the
+// people. Then every decision runs that command through /bin/sh, from the same
+// empty directory, with the full prompt on stdin (the HUMAN_SYSTEM line, a
+// blank line, then the prompt humanPrompt builds); its stdout must hold the
+// same JSON ({"reply": string|null, "why": string}), read by parseHuman. Same
+// timeout as claude -p. Its environment is the runner's minus every VIBE_* /
+// SLASHVIBE_* variable: it never gets a person's VIBE_HOME or /vibe credentials.
+// A non-zero exit counts as "typed nothing" (unparsed), and a failure whose
+// output looks like auth/limits stops the run as for claude -p.
+// summary.json and population-summary record which player was used (the
+// --human-model value, or "cmd"), never the command itself: it may hold a key.
+//
 // Same safety as rehearse.mjs: every world gets its own in-process stub on
 // 127.0.0.1, every person their own VIBE_HOME, MCP config and scratch settings
 // file. Nothing reaches production or ~/.claude/settings.json. The world's
@@ -56,12 +69,13 @@ const TOOLS = [...BUILTINS, 'mcp__vibe__vibe_people', 'mcp__vibe__vibe_thread', 
 
 // ---------------------------------------------------------------- arguments
 function parseArgs(argv) {
-  const o = { files: [], out: null, model: null, humanModel: 'sonnet', concurrency: 3, turnTimeout: 300, maxHumanReplies: 3, limit: 0, force: false, keep: false };
+  const o = { files: [], out: null, model: null, humanModel: 'sonnet', humanCmd: null, concurrency: 3, turnTimeout: 300, maxHumanReplies: 3, limit: 0, force: false, keep: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]; const next = () => { const v = argv[++i]; if (v === undefined) throw new Error(`${a} needs a value`); return v; };
     if (a === '--out') o.out = next();
     else if (a === '--model') o.model = next();
     else if (a === '--human-model') o.humanModel = next();
+    else if (a === '--human-cmd') { o.humanCmd = next(); if (!o.humanCmd.trim()) throw new Error('--human-cmd needs a command'); }
     else if (a === '--concurrency') o.concurrency = Math.max(1, Number(next()) || 1);
     else if (a === '--turn-timeout') o.turnTimeout = Math.max(10, Number(next()) || 300);
     else if (a === '--max-human-replies') o.maxHumanReplies = Math.max(0, Number(next()) || 0);
@@ -151,7 +165,7 @@ export function seedKnowsAs(home, knowsAs) {
   for (const [k, v] of Object.entries(knowsAs || {})) who.set(k, v, env);
   return who.all(env).map((e) => ({ handle: e.handle, line: e.line }));
 }
-export { validateWorld };
+export { validateWorld, parseArgs, parseHuman, humanPrompt, HUMAN_SYSTEM, writePopulation, analyse };
 
 // ---------------------------------------------------------------- human simulator
 const HUMAN_SYSTEM = 'You play one specific person sitting at their own computer. You answer only with the JSON object asked for, nothing else.';
@@ -218,6 +232,42 @@ function askHuman({ prompt, model, emptyDir, emptyMcp, timeoutMs = 180000 }) {
     });
   });
 }
+
+// The environment a --human-cmd player runs with: the runner's own, minus every
+// /vibe variable (VIBE_HOME, VIBE_API_URL, VIBE_AGENT_* and the rest). Sessions
+// get theirs from their own MCP config; the person-player never sees any.
+export function humanEnv(env = process.env) {
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !/^(VIBE_|SLASHVIBE_)/i.test(k)));
+}
+
+// The person-player as any shell command (--human-cmd), so another model family
+// can play the people. The full prompt (HUMAN_SYSTEM, a blank line, then what
+// humanPrompt builds) goes in on stdin; stdout is parsed by parseHuman. Same
+// timeout as askHuman; on timeout the whole process group is killed, so a
+// pipeline's children cannot keep the pipes (and this promise) open.
+export function askHumanCmd({ prompt, cmd, emptyDir, timeoutMs = 180000, env = process.env }) {
+  return new Promise((resolve) => {
+    let child;
+    try { child = spawn('/bin/sh', ['-c', cmd], { cwd: emptyDir, env: humanEnv(env), stdio: ['pipe', 'pipe', 'pipe'], detached: true }); } catch (e) {
+      resolve({ parsed: null, raw: '', isError: true, code: null, timedOut: false, stderr: String(e && e.message || e).slice(0, 2000) }); return;
+    }
+    let out = ''; let err = ''; let timedOut = false; let done = false;
+    const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(r); };
+    child.stdout.on('data', (d) => { if (out.length < 200000) out += d; }); child.stderr.on('data', (d) => { if (err.length < 8000) err += d; });
+    child.stdin.on('error', () => {});   // a command that never reads stdin
+    const timer = setTimeout(() => { timedOut = true; try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} } }, timeoutMs);
+    child.on('error', (e) => finish({ parsed: null, raw: out, isError: true, code: null, timedOut, stderr: `${err}${e.message}`.slice(0, 2000) }));
+    child.on('close', (code) => {
+      const isError = timedOut || code !== 0;
+      finish({ parsed: isError ? null : parseHuman(out), raw: out, isError, code, timedOut, stderr: err.slice(0, 2000) });
+    });
+    child.stdin.end(`${HUMAN_SYSTEM}\n\n${prompt}`);
+  });
+}
+
+// Which person-player a run used, as recorded: the --human-model value, or
+// "cmd". Never the command itself: it may carry a key.
+export const humanPlayer = (opts) => (opts.humanCmd ? 'cmd' : opts.humanModel || 'default');
 
 // A claude -p failure that means stop everything, not "this turn went badly".
 const FATAL = /invalid api key|authentication|unauthori[sz]ed|oauth|not logged in|please run \/login|rate[ _-]?limit|usage limit|overloaded_error|credit balance/i;
@@ -349,8 +399,11 @@ async function runWorld(file, opts, log) {
         const earlier = (sessionScreens[t.sessionId || key] || []).join('\n\n').slice(-6000);
         sessionScreens[t.sessionId || key] = [...(sessionScreens[t.sessionId || key] || []), `You typed: ${typed}\n${screen}`];
         if (replies >= opts.maxHumanReplies) break;
-        const h = await askHuman({ prompt: humanPrompt(world.people[who], who, typed, screen, earlier), model: opts.humanModel, emptyDir, emptyMcp });
-        if (h.isError && FATAL.test(`${h.raw}\n${h.stderr}`)) { fatal = `human simulator claude -p failed: ${`${h.raw}\n${h.stderr}`.trim().slice(0, 600)}`; break; }
+        const hp = humanPrompt(world.people[who], who, typed, screen, earlier);
+        const h = opts.humanCmd
+          ? await askHumanCmd({ prompt: hp, cmd: opts.humanCmd, emptyDir })
+          : await askHuman({ prompt: hp, model: opts.humanModel, emptyDir, emptyMcp });
+        if (h.isError && FATAL.test(`${h.raw}\n${h.stderr}`)) { fatal = `human simulator ${opts.humanCmd ? '--human-cmd' : 'claude -p'} failed: ${`${h.raw}\n${h.stderr}`.trim().slice(0, 600)}`; break; }
         if (!h.parsed || !h.parsed.reply) {
           push({ who, day, entry: ti, kind: 'human_null', simulator_only: { why: h.parsed ? h.parsed.why : null, ...(h.parsed ? {} : { unparsed_raw: String(h.raw).slice(0, 2000), timed_out: h.timedOut }) } });
           break;
@@ -364,7 +417,7 @@ async function runWorld(file, opts, log) {
     await stub.close();
     if (!opts.keep) fs.rmSync(root, { recursive: true, force: true });
   }
-  return finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started, fatal, root, keep: opts.keep, handles });
+  return finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started, fatal, root, keep: opts.keep, handles, humanPlayer: humanPlayer(opts) });
 }
 
 // ---------------------------------------------------------------- analysis + records
@@ -376,7 +429,7 @@ const snippet = (body) => norm(body).slice(0, 40);
 const aboutLines = (text, other) => String(text).split('\n').filter((l) => l.includes(`@${other}`));
 const isPresence = (l) => /\bhere now:/.test(l);
 
-function analyse({ world, transcript, turnsLog, wire, handles, started }) {
+function analyse({ world, transcript, turnsLog, wire, handles, started, humanPlayer = null }) {
   const ev = transcript;
   const resultFor = new Map();   // tool_use_id -> returned event
   for (const e of ev) if (e.kind === 'returned' && e.tool_use_id) resultFor.set(e.tool_use_id, e);
@@ -475,6 +528,7 @@ function analyse({ world, transcript, turnsLog, wire, handles, started }) {
   const sum = (k) => Object.values(per).reduce((a, p) => a + p[k], 0);
   return {
     id: world.id, archetype: world.archetype, relationship: world.relationship, open_line: world.open_line,
+    human_player: humanPlayer,
     timeline_entries_run: new Set(turnsLog.map((t) => t.entry)).size,
     timeline_entries_total: world.timeline.length,
     days_played: [...new Set(turnsLog.map((t) => t.day))].sort((a, b) => a - b),
@@ -526,11 +580,11 @@ function toMarkdown(world, transcript, wire, summary) {
   return L.join('\n');
 }
 
-function finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started, fatal, handles }) {
+function finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started, fatal, handles, humanPlayer }) {
   const wire = stub.effects.filter((e) => e.effect === 'SEND').map((s) => ({
     id: s.id, at: s._at ?? null, from: s.me, to: s.to, body: s.body, origin: s.origin, approved: s.approved, reply_to: s.reply_to, linked: s.linked, t: new Date(s.t).toISOString(),
   }));
-  const summary = analyse({ world, transcript, turnsLog, wire, handles, started });
+  const summary = analyse({ world, transcript, turnsLog, wire, handles, started, humanPlayer });
   const record = { world: { id: world.id, archetype: world.archetype, relationship: world.relationship, inviter: world.inviter ?? null, open_line: world.open_line, people: world.people, timeline: world.timeline }, setup, events: transcript, wire, turns: turnsLog, answer_key: world.truth ?? null, note: 'events[].simulator_only is the human simulator\'s private reasoning: it never appeared on any screen.' };
   fs.writeFileSync(path.join(outDir, 'transcript.json'), JSON.stringify(record, null, 2));
   fs.writeFileSync(path.join(outDir, 'transcript.md'), toMarkdown(world, transcript, wire, summary));
@@ -542,10 +596,13 @@ function finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started
   return { id: world.id, summary };
 }
 
-function writePopulation(out, results) {
+function writePopulation(out, results, opts = {}) {
   const done = results.filter((r) => r.summary);
   const total = (k) => done.reduce((a, r) => a + (typeof r.summary[k] === 'object' ? r.summary[k].count : r.summary[k] || 0), 0);
   const agg = {
+    // The person-player of this run, and of every world summarised (a world
+    // skipped on rerun keeps the summary, and so the player, of its own run).
+    human_player: humanPlayer(opts), human_players: [...new Set(done.map((r) => r.summary.human_player || 'unrecorded'))],
     worlds: results.length, completed: done.length, failed: results.filter((r) => r.error).map((r) => ({ file: r.file, id: r.id || null, error: r.error })),
     totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'wall_clock_seconds'].map((k) => [k, total(k)])),
     per_world: done.map((r) => r.summary),
@@ -553,7 +610,7 @@ function writePopulation(out, results) {
   fs.writeFileSync(path.join(out, 'population-summary.json'), JSON.stringify(agg, null, 2));
   const cols = ['turns', 'prepare_calls', 'sends_on_wire', 'sends_without_human_reply_between_prepare_and_send', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'discards', 'turn_timeouts', 'wall_clock_seconds'];
   const v = (s, k) => (typeof s[k] === 'object' ? s[k].count : s[k]);
-  const L = ['# Population run', '', `${agg.completed}/${agg.worlds} worlds completed.`, '',
+  const L = ['# Population run', '', `${agg.completed}/${agg.worlds} worlds completed. Person-player: ${agg.human_player}${agg.human_players.some((x) => x !== agg.human_player) ? ` (worlds summarised: ${agg.human_players.join(', ')})` : ''}.`, '',
     '`unattended sends` = sends with no human reply between the prepare and the send in that session.',
     '`never shown` = sent by someone the recipient knows and never on their screen (a miss). `held` = from someone the recipient does not know, so held by design. `late` = shown, but not in the recipient\'s next timeline entry.', '',
     `| world | archetype | ${cols.join(' | ')} |`, `|${'---|'.repeat(cols.length + 2)}`];
@@ -569,7 +626,7 @@ async function main() {
   let opts;
   try { opts = parseArgs(process.argv.slice(2)); } catch (e) { console.error(e.message); process.exit(2); }
   if (!opts.files.length || !opts.out) {
-    console.error('usage: node lab/population.mjs <world.json|dir> [more ...] --out <dir> [--model sonnet] [--human-model sonnet] [--concurrency 3] [--turn-timeout 300] [--max-human-replies 3] [--limit N] [--force] [--keep]');
+    console.error('usage: node lab/population.mjs <world.json|dir> [more ...] --out <dir> [--model sonnet] [--human-model sonnet | --human-cmd "<command>"] [--concurrency 3] [--turn-timeout 300] [--max-human-replies 3] [--limit N] [--force] [--keep]');
     process.exit(2);
   }
   let files = expandFiles(opts.files);
@@ -589,7 +646,7 @@ async function main() {
     }
   }
   await Promise.all(Array.from({ length: Math.min(opts.concurrency, files.length) }, worker));
-  const agg = writePopulation(opts.out, results.filter(Boolean));
+  const agg = writePopulation(opts.out, results.filter(Boolean), opts);
   console.log(`\n${agg.completed}/${agg.worlds} worlds · turns ${agg.totals.turns} · sends ${agg.totals.sends_on_wire} · unattended sends ${agg.totals.sends_without_human_reply_between_prepare_and_send} · never shown ${agg.totals.wire_messages_never_shown_to_recipient}`);
   console.log(`wrote ${path.join(opts.out, 'population-summary.md')}`);
   if (stop) { console.error(`\nSTOPPED: ${stop}`); process.exit(1); }
