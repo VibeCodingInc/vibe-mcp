@@ -250,6 +250,11 @@ async function runWorld(file, opts, log) {
       const got = await invite.accept(world.inviter, invitee, { apiUrl: stub.url, env: { ...process.env, VIBE_HOME: ids[invitee].home } });
       setup.invite = { invitee, inviter: world.inviter, known: got.known, lines: got.lines };
       if (!got.known) throw new Error(`invite.accept did not mark @${world.inviter} as known for @${invitee}: ${got.lines.join(' ')}`);
+      // The invite line carries a code the inviter minted, and the invitee's
+      // sign-in redeems it (0.9.20): the platform then tells the inviter, and
+      // only the inviter, that this person joined with their invitation.
+      setup.invite.redeemed = stub.redeem(stub.mintCode(world.inviter), invitee);
+      if (!setup.invite.redeemed) throw new Error(`the stub did not redeem @${world.inviter}'s invitation for @${invitee}`);
     }
 
     const daySession = {};   // `${who}|${day}` -> session id
@@ -405,14 +410,14 @@ function analyse({ world, transcript, turnsLog, wire, handles, started }) {
   // output containing the start of the body.
   //
   // Not every unseen message is a miss. The product shows a message mid-work
-  // only from someone the recipient knows (has written to, accepted an invite
-  // from, or has an open line with); anyone else's waits, unread, and the next
+  // only from someone the recipient knows (has written to, invited or was
+  // invited by, or has an open line with); anyone else's waits, unread, and the next
   // new session says only that someone is waiting. Those are counted apart, as
   // held_sender_unknown, using the same rule. The rest are misses.
   // A message that was shown, but not during the recipient's first timeline
   // entry after it was sent, is counted as shown_late.
   const knew = (to, from) => world.relationship === 'established' || Boolean(world.open_line) ||
-    (world.relationship === 'fresh_invite' && from === world.inviter) ||
+    world.relationship === 'fresh_invite' ||
     wire.some((w) => w.from === to && w.to === from);
   const unseen = []; const held = []; const late = [];
   for (const s of wire) {
