@@ -426,7 +426,11 @@ async function draftHandler(args) {
 }
 
 function stampRev(d) {
-  d.revFor = revOf(d); d.revAt = Date.now();
+  const rev = revOf(d);
+  // The same text shown again (not a first showing, not a change): a refusal
+  // that follows says so in those words.
+  d.reshown = d.revFor === rev && Number.isFinite(d.revAt);
+  d.revFor = rev; d.revAt = Date.now();
 }
 /** When the stored text was prepared. A draft from before revAt existed: its creation (or now, if edited since). */
 function revPreparedAt(d) {
@@ -578,8 +582,9 @@ async function send(args, { byPerson }) {
       // The refusal shows the preview with its rev: that is a showing, and it
       // is stamped like one, so the next Send needs the person's next prompt.
       const why = turn.why || null;
+      const reshown = Boolean(d.reshown);   // how it was last shown, before this refusal shows it
       stampRev(d);
-      return { unseen: { ...d }, why };
+      return { unseen: { ...d, reshown }, why };
     }
     d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
     d.idempotencyKey = sendKey(d);
@@ -667,6 +672,9 @@ async function unseenRefusal(d, why = null) {
   } else if (why === 'session_start_unreadable') {
     lead = 'Not sent yet: this session\'s start could not be read on this machine, so it cannot be told whether the person has seen this draft here.';
     reason = 'session_start_unreadable';
+  } else if (d.reshown) {
+    lead = 'Not sent yet: the draft was shown again just now; it can go after their next message.';
+    reason = 'shown_again';
   } else if (changed) {
     lead = 'Not sent yet: the text changed, and the person has not seen this version. A changed draft must be shown again before it can be sent.';
     reason = 'changed_since_seen';

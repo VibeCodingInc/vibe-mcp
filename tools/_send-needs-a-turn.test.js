@@ -188,6 +188,7 @@ test('showing the same text again resets it: a send in the same turn as the re-s
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
     assert.equal(r.data.sent, false);
     assert.equal(r.data.turn_check, 'needs_turn');
+    assert.equal(r.data.reason, 'shown_again');
     assert.equal(sends.length, 0);
     personTurn({ prompt: 'yes, send' });
     const ok = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
@@ -220,9 +221,9 @@ test('unsent-reply reminder: shown, "send it", reopen + send in that turn is ref
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: shown.data.draft.rev });
     assert.equal(sends.length, 0, 'nothing went out unseen');
     assert.equal(r.data.sent, false);
-    assert.equal(r.data.reason, 'not_yet_seen');
+    assert.equal(r.data.reason, 'shown_again');
     assert.equal(r.data.turn_check, 'needs_turn');
-    assert.match(r.display, /^Not sent yet: the person has not seen this draft\./);
+    assert.match(r.display, /^Not sent yet: the draft was shown again just now; it can go after their next message\./);
     personTurn({ prompt: 'yes, send' });
     const ok = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: shown.data.draft.rev });
     assert.equal(ok.data.sent, true);
