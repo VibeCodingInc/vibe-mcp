@@ -24,8 +24,9 @@
 // prompt, as it would be; the SessionStart hook does not run again. After every turn a separate model, given only that person's
 // persona and what appeared on their screen, decides what they would type next
 // (or nothing). Per world it writes <out>/<id>/transcript.json, transcript.md
-// and summary.json (prepares, sends, sends with no human reply between the
-// preview and the send, messages that never reached the recipient's screen,
+// and summary.json (prepares, sends, sends that went out with no human reply
+// between the preview and the send, send attempts the product refused (counted
+// apart: nothing went out), messages that never reached the recipient's screen,
 // tool errors, time), and <out>/population-summary.{json,md} across worlds.
 // A world with a summary.json is skipped on rerun unless --force. A directory
 // argument means every *.json in it. A person may carry an optional
@@ -275,7 +276,47 @@ const FATAL = /invalid api key|authentication|unauthori[sz]ed|oauth|not logged i
 // ---------------------------------------------------------------- one world
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
 const draftOf = (text) => { const m = String(text || '').match(/_\(draft ([^\s·]+) · rev ([^\s)_]+)\)_/); return m ? { id: m[1], rev: m[2] } : null; };
-const sendRefused = (text) => /nothing sent|not sending|didn't send|nothing confirmed|already sent|already being sent/i.test(String(text || ''));
+// What one vibe_send call did, read from what it printed. The wordings come
+// from tools/drafts.js send()/unseenRefusal()/keepHeld(), tools/deliver.js,
+// store/api.js sendMessage and index.js's sign-in gates (all read-only here).
+//   sent          "Sent to **@x**" — deliver()'s receipt, the only delivery text
+//   held          "Held for @x."   — a Keep: the message is held in an invitation
+//   unconfirmed   "_… is kept as unconfirmed …_" — the attempt may or may not
+//                 have gone out (no receipt; transport or unreadable reply)
+//   refused       a definite "nothing went out" (the list below)
+//   unrecognised  none of these: a wording this lab does not know yet. Not
+//                 counted as sent or as refused; summary.json shows how many.
+//   error / no_result  the tool call failed, or no result was recorded.
+// The old check only caught "nothing sent"-style lines, so every "Not sent
+// yet: …" refusal (the turn check) was counted as a send that went out.
+const SEND_REFUSED = [
+  /\bnothing sent\b/i,                                // "Nothing sent. …", "No draft x — nothing sent.", "… Nothing sent."
+  /^Not sent yet:/m,                                  // unseenRefusal: needs the person's next message
+  /^Not sent\. The message is \d+ chars/m,            // deliver: over the length limit
+  /not sending it twice/,                             // already sent / already being sent
+  /not creating a second invitation/,                 // already held
+  /Nothing more was done\./,                          // an earlier Keep did not confirm
+  /^Nothing was kept\./m,                             // a Keep refused (held invitations)
+  /Nothing was done\./,                               // index.js: an agent that is not signed in
+  /You're not signed in yet/,                         // requireInit / not_signed_in
+  /^You can't message yourself\./m,
+  /^Authentication failed\./m,
+  /^Your \/vibe session expired\./m,
+  /[Aa]sk for `send` again\.|^Sign in to \/vibe first/m, // index.js sign-in gate
+  /_Worth one retry\._/,                              // a definite server refusal (no "kept as unconfirmed")
+];
+export function sendOutcome(text, isError = false) {
+  if (isError) return 'error';
+  const s = String(text ?? '');
+  if (!s.trim()) return 'no_result';
+  if (/^Sent to \*\*@/.test(s)) return 'sent';
+  if (/^Held for @/.test(s)) return 'held';
+  if (/is kept as unconfirmed/.test(s)) return 'unconfirmed';
+  if (SEND_REFUSED.some((re) => re.test(s))) return 'refused';
+  return 'unrecognised';
+}
+// Something left the machine: a delivery or a held invitation.
+const wentOut = (outcome) => outcome === 'sent' || outcome === 'held';
 
 async function runWorld(file, opts, log) {
   const started = Date.now();
@@ -441,6 +482,7 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
   // Every draft as the person saw it: id -> { who, to, revs[], prepares: [i], session_id, sent_at }
   const drafts = new Map();
   const sendsUnattended = []; const sendsAttended = []; const revised = [];
+  const sendsRefused = []; const sendsUnconfirmed = []; const sendsUnrecognised = []; const sendOutcomes = {};
   for (const e of ev) {
     const p = per[e.who];
     if (!p) continue;
@@ -468,22 +510,37 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
     if (isVibe(e, 'vibe_send')) {
       p.send_calls++;
       const id = e.input?.id;
-      const delivered = r ? !sendRefused(r.text) && !r.is_error : false;
-      if (!delivered) continue;
+      const outcome = r ? sendOutcome(r.text, r.is_error) : 'no_result';
+      sendOutcomes[outcome] = (sendOutcomes[outcome] || 0) + 1;
       const d = id ? drafts.get(id) : null;
-      const lastPrepare = d ? Math.max(...d.prepares.filter((x) => x < e.i)) : -1;
-      const between = lastPrepare >= 0 ? ev.slice(lastPrepare + 1, e.i) : [];
+      // The last time this draft's text was in front of the person before this
+      // send: a vibe_prepare, or a refused vibe_send that showed the preview
+      // again (the turn-check refusal does, and stamps it as a showing).
+      const showings = d ? [...d.prepares, ...(d.reshown || [])].filter((x) => x < e.i) : [];
+      const lastShown = showings.length ? Math.max(...showings) : -1;
+      const between = lastShown >= 0 ? ev.slice(lastShown + 1, e.i) : [];
       const humanBetween = between.filter((x) => x.who === e.who && x.kind === 'human_reply' && x.session_id === e.session_id);
       const scriptedBetween = between.filter((x) => x.who === e.who && x.kind === 'prompt');
-      const rec = { who: e.who, day: e.day, entry: e.entry, send_event: e.i, draft: id || null, rev: e.input?.rev || null, prepare_event: lastPrepare >= 0 ? lastPrepare : null, to: d?.to || null, returned: r.text.slice(0, 400) };
+      const lastPrepare = d ? Math.max(-1, ...d.prepares.filter((x) => x < e.i)) : -1;
+      const rec = { who: e.who, day: e.day, entry: e.entry, send_event: e.i, outcome, draft: id || null, rev: e.input?.rev || null, prepare_event: lastPrepare >= 0 ? lastPrepare : null, last_shown_event: lastShown >= 0 ? lastShown : null, to: d?.to || null, returned: r ? String(r.text).slice(0, 400) : null };
       if (!d) rec.note = 'no prepare for this draft id was seen in the transcript';
+      const shown = r && draftOf(r.text);
+      if (shown && d && shown.id === d.id) (d.reshown ||= []).push(e.i);
+      else if (shown && !drafts.has(shown.id)) {
+        // vibe_send without an id opens a draft itself and shows its preview:
+        // that showing is the draft's first, as a vibe_prepare's would be.
+        drafts.set(shown.id, { id: shown.id, who: e.who, to: String(e.input?.handle || '').replace(/^@/, '') || null, revs: [shown.rev], prepares: [e.i], session_id: e.session_id });
+      }
+      if (outcome === 'refused') { sendsRefused.push({ ...rec, human_reply_between: humanBetween.length > 0 }); continue; }
+      if (outcome === 'unconfirmed') { sendsUnconfirmed.push({ ...rec, human_reply_between: humanBetween.length > 0 }); continue; }
+      if (!wentOut(outcome)) { if (outcome === 'unrecognised') sendsUnrecognised.push(rec); continue; }
       if (humanBetween.length) sendsAttended.push({ ...rec, human_reply_events: humanBetween.map((x) => x.i) });
       else {
         // The common shape: the person answered an EARLIER preview ("add X,
         // then send it"), the agent re-prepared and sent the new rev at once,
         // so the exact text that went out was never in front of them.
-        const firstPrepare = d ? Math.min(...d.prepares) : -1;
-        const earlier = firstPrepare >= 0 && firstPrepare < lastPrepare ? ev.slice(firstPrepare + 1, lastPrepare).filter((x) => x.who === e.who && x.kind === 'human_reply') : [];
+        const firstPrepare = d && d.prepares.length ? Math.min(...d.prepares) : -1;
+        const earlier = firstPrepare >= 0 && firstPrepare < lastShown ? ev.slice(firstPrepare + 1, lastShown).filter((x) => x.who === e.who && x.kind === 'human_reply') : [];
         sendsUnattended.push({ ...rec, scripted_prompt_between: scriptedBetween.map((x) => x.i), human_reply_to_an_earlier_rev: earlier.map((x) => x.i), final_text_previewed_to_person_before_send: false });
       }
       if (d) {
@@ -540,6 +597,14 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
     drafts_revised_before_sending: { count: revised.length, list: revised },
     sends_without_human_reply_between_prepare_and_send: { count: sendsUnattended.length, after_a_human_reply_to_an_earlier_rev: sendsUnattended.filter((x) => x.human_reply_to_an_earlier_rev.length).length, list: sendsUnattended },
     sends_with_human_reply_between: sendsAttended.length,
+    // vibe_send calls the product refused: nothing went out. Not part of either
+    // figure above, which count only sends that went out (sent or held).
+    refused_sends: { count: sendsRefused.length, list: sendsRefused },
+    // Attempts that may or may not have gone out (no receipt), and results in a
+    // wording this lab does not know: neither counted as sent nor as refused.
+    sends_unconfirmed: { count: sendsUnconfirmed.length, list: sendsUnconfirmed },
+    send_results_unrecognised: { count: sendsUnrecognised.length, list: sendsUnrecognised },
+    send_call_outcomes: sendOutcomes,
     arrivals_shown: Object.fromEntries(handles.map((h) => [h, per[h].arrivals_shown])),
     wire_messages_never_shown_to_recipient: { count: unseen.length, list: unseen },
     wire_messages_held_sender_unknown: { count: held.length, list: held },
@@ -604,14 +669,15 @@ function writePopulation(out, results, opts = {}) {
     // skipped on rerun keeps the summary, and so the player, of its own run).
     human_player: humanPlayer(opts), human_players: [...new Set(done.map((r) => r.summary.human_player || 'unrecorded'))],
     worlds: results.length, completed: done.length, failed: results.filter((r) => r.error).map((r) => ({ file: r.file, id: r.id || null, error: r.error })),
-    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'wall_clock_seconds'].map((k) => [k, total(k)])),
+    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'refused_sends', 'sends_unconfirmed', 'send_results_unrecognised', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'wall_clock_seconds'].map((k) => [k, total(k)])),
     per_world: done.map((r) => r.summary),
   };
   fs.writeFileSync(path.join(out, 'population-summary.json'), JSON.stringify(agg, null, 2));
-  const cols = ['turns', 'prepare_calls', 'sends_on_wire', 'sends_without_human_reply_between_prepare_and_send', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'discards', 'turn_timeouts', 'wall_clock_seconds'];
+  const cols = ['turns', 'prepare_calls', 'sends_on_wire', 'sends_without_human_reply_between_prepare_and_send', 'refused_sends', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'discards', 'turn_timeouts', 'wall_clock_seconds'];
   const v = (s, k) => (typeof s[k] === 'object' ? s[k].count : s[k]);
   const L = ['# Population run', '', `${agg.completed}/${agg.worlds} worlds completed. Person-player: ${agg.human_player}${agg.human_players.some((x) => x !== agg.human_player) ? ` (worlds summarised: ${agg.human_players.join(', ')})` : ''}.`, '',
-    '`unattended sends` = sends with no human reply between the prepare and the send in that session.',
+    '`unattended sends` = sends that went out (delivered, or held in an invitation) with no human reply between the last time that draft was shown and the send, in that session.',
+    '`refused sends` = vibe_send calls the product refused: nothing went out. Counted apart; never part of the unattended figure.',
     '`never shown` = sent by someone the recipient knows and never on their screen (a miss). `held` = from someone the recipient does not know, so held by design. `late` = shown, but not in the recipient\'s next timeline entry.', '',
     `| world | archetype | ${cols.join(' | ')} |`, `|${'---|'.repeat(cols.length + 2)}`];
   for (const s of agg.per_world) L.push(`| ${s.id} | ${s.archetype} | ${cols.map((k) => v(s, k)).join(' | ')} |`);
@@ -647,7 +713,7 @@ async function main() {
   }
   await Promise.all(Array.from({ length: Math.min(opts.concurrency, files.length) }, worker));
   const agg = writePopulation(opts.out, results.filter(Boolean), opts);
-  console.log(`\n${agg.completed}/${agg.worlds} worlds · turns ${agg.totals.turns} · sends ${agg.totals.sends_on_wire} · unattended sends ${agg.totals.sends_without_human_reply_between_prepare_and_send} · never shown ${agg.totals.wire_messages_never_shown_to_recipient}`);
+  console.log(`\n${agg.completed}/${agg.worlds} worlds · turns ${agg.totals.turns} · sends ${agg.totals.sends_on_wire} · unattended sends ${agg.totals.sends_without_human_reply_between_prepare_and_send} · refused sends ${agg.totals.refused_sends} · never shown ${agg.totals.wire_messages_never_shown_to_recipient}`);
   console.log(`wrote ${path.join(opts.out, 'population-summary.md')}`);
   if (stop) { console.error(`\nSTOPPED: ${stop}`); process.exit(1); }
   process.exit(agg.failed.length ? 1 : 0);
