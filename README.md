@@ -295,7 +295,7 @@ unless you always launch with it.
 
 ## Manual setup
 
-If you'd rather wire it yourself, add to `~/.claude.json` (or your host's MCP config):
+If you'd rather wire it yourself, add to Claude Code's `~/.claude.json`:
 
 ```json
 {
