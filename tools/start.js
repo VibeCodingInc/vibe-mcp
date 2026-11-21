@@ -19,6 +19,7 @@ const reach = require('../reach');
 const { wroteLastPeople } = require('../arrival');
 const { isQaHandle } = require('./drafts');
 const line = require('../line');
+const invite = require('../invite');
 
 const definition = {
   name: 'vibe_start',
@@ -97,8 +98,14 @@ async function handler(args = {}) {
     if (unreadSenders.length > 5) display += `\n_+${unreadSenders.length - 5} more_`;
   } else if (inboxRead && threads.length === 0) {
     // /vibe takes two. A newcomer with nobody to talk to needs the one next
-    // step that makes it work, in words they can send as they are.
-    display += '\n\nno conversations yet. /vibe takes two: send the person you work with this, then message them.\n  npx slashvibe-mcp setup';
+    // step that makes it work, in words they can send as they are. The line
+    // comes from invite.js, the one place that builds it, so it names this
+    // person (--from): the friend who installs from it then knows them, and
+    // the message sent next reaches the friend while they work instead of
+    // waiting as "1 person you have not written to". Without a usable handle
+    // the bare install still works; it just cannot name anyone.
+    const bring = invite.line(myHandle);
+    display += `\n\nno conversations yet. /vibe takes two: send the person you work with this, then message them.\n  ${bring ? bring.command : 'npx slashvibe-mcp setup'}`;
   }
 
   // Conversations that ended on their words and were read: "unread" alone
