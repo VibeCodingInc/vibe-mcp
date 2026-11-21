@@ -458,7 +458,7 @@ async function setup() {
   try {
     // The callback listener is bound before beginOAuth returns, so the browser
     // cannot race a listener that does not exist yet.
-    oauth = await beginOAuth({ actorAware: true });
+    oauth = await beginOAuth({ actorAware: true, inviteCode: require('./invite').inviteArg() });
     openBrowser(oauth.loginUrl);
     console.log(`${colors.dim}     → Waiting for authentication...${colors.reset}`);
     // Always say where to go. The browser may have opened on a screen nobody is
@@ -518,7 +518,9 @@ async function setup() {
       for (const l of got.lines) console.log(`${colors.dim}  ${l}${colors.reset}`);
       if (got.lines.length) console.log('');
     }
-    const bring = invite.line(authResult.handle);
+    // The line carries a code minted on this account, so whoever installs from
+    // it is someone this person knows once they sign in (invite.codeFor).
+    const bring = invite.line(authResult.handle, await invite.codeFor(authResult.handle));
     if (bring) {
       invite.noteGiven();
       console.log(`${colors.bold}  /vibe takes two. Send this to the person you build with:${colors.reset}`);

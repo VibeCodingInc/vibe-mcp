@@ -118,20 +118,77 @@ async function accept(typed, me, opts = {}) {
   };
 }
 
+// ── the invitation code ─────────────────────────────────────────────────────
+// The line a person gives out carries an invitation code minted on THEIR
+// account. The newcomer's sign-in redeems it (the platform records who created
+// it and who used it, under its own lock), and from then on the inviter's
+// inbox serves `invited_by_you` for that one person, so their first message
+// reaches the inviter while they work instead of waiting as a stranger's.
+// The code is only a key to the platform's own record: this machine never
+// decides who invited whom, and a code the newcomer types cannot make them
+// known to anyone the platform did not record.
+const validCode = (c) => typeof c === 'string' && /^VIBE-[A-Z0-9]{2,16}(?:-[A-Z0-9]{1,16}){0,3}$/.test(c);
+
+/** `--invite CODE` / `--invite=CODE` out of an argv. null when absent or malformed. */
+function inviteArg(argv = process.argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const a = String(argv[i]);
+    const v = a === '--invite' ? argv[i + 1] : (a.startsWith('--invite=') ? a.slice(9) : null);
+    if (v == null) continue;
+    const c = String(v).trim().toUpperCase();
+    return validCode(c) ? c : null;
+  }
+  return null;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A code for this person's invite line: one of their own live, plain codes
+ * (not named for anyone, carrying no note or thought) with at least a day
+ * left, else a new one. At most one auto-made code is live at a time, so the
+ * three-code allowance is not spent by showing the line again. null on any
+ * failure: the line then goes out without a code, exactly as before.
+ */
+async function codeFor(me, { store = require('./store'), now = Date.now() } = {}) {
+  try {
+    if (!validHandle(reach.norm(me))) return null;
+    if (!store || typeof store.listMyInvites !== 'function' || typeof store.createInvite !== 'function') return null;
+    const mine = await store.listMyInvites();
+    if (!mine || mine.success === false) return null;
+    const plain = (Array.isArray(mine.codes) ? mine.codes : []).find((c) => c && c.status === 'available' &&
+      !c.named_for && !c.for_email_hash && !c.carries_thought && validCode(String(c.code || '')) &&
+      Date.parse(c.expires_at) - now > DAY_MS);
+    if (plain) return String(plain.code);
+    if (mine.can_generate === false) return null;
+    const made = await store.createInvite({});
+    const code = made && made.success !== false ? String(made.code || '') : '';
+    return validCode(code) ? code : null;
+  } catch {
+    return null;
+  }
+}
+
 /** What a person sends to whoever they build with. */
-function line(me) {
+function line(me, code = null) {
   const h = reach.norm(me);
   if (!validHandle(h)) return null;
-  return { command: `npx slashvibe-mcp setup --from @${h}`, link: `https://www.slashvibe.dev/join?from=${h}` };
+  const c = validCode(code) ? code : null;
+  return {
+    command: `npx slashvibe-mcp setup --from @${h}${c ? ` --invite ${c}` : ''}`,
+    link: `https://www.slashvibe.dev/join?from=${h}${c ? `&invite=${c}` : ''}`,
+  };
 }
 
 // ── the inviter's side ──────────────────────────────────────────────────────
-// `setup --from @sam` marks Sam as known on the NEWCOMER's machine only. The
-// platform is told nothing, so Sam's machine cannot know who accepted, and the
-// newcomer's first message reaches Sam as one from "a person you have not
-// written to" (lab 2026-11-20, p08 and p13). Until the platform can say who
-// accepted an invite of yours, the one true thing this machine knows is WHEN
-// it gave the person their invite line to pass on. The session-start line uses
+// `setup --from @sam` marks Sam as known on the NEWCOMER's machine only. A line
+// that also carries a code (`--invite`, codeFor above) lets the platform tell
+// Sam who accepted (`invited_by_you`, presence.js). A line WITHOUT a code (an
+// older line, or one made offline) tells the platform nothing, so Sam's
+// machine cannot know who accepted, and the newcomer's first message reaches
+// Sam as one from "a person you have not written to" (lab 2026-11-20, p08 and
+// p13). For those, the one true thing this machine knows is WHEN it gave the
+// person their invite line to pass on. The session-start line uses
 // that, and only that: someone you have not written to who first wrote after
 // that moment "may be someone you invited". It names nobody and quotes nothing.
 const GIVEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -161,4 +218,4 @@ function noteGiven(env = process.env, now = Date.now()) {
   } catch {}
 }
 
-module.exports = { fromArg, accept, line, lookup, resolveRecipient, noteGiven, givenAt, GIVEN_TTL_MS };
+module.exports = { fromArg, inviteArg, codeFor, validCode, accept, line, lookup, resolveRecipient, noteGiven, givenAt, GIVEN_TTL_MS };

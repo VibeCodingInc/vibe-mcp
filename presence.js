@@ -179,6 +179,23 @@ let waitingAtStart = null;
 const parked = new Map(); // sender (lowercase) -> { ids: Set, row }
 const lower = (h) => String(h || '').toLowerCase();
 
+/**
+ * The platform says this person redeemed an invitation the person here gave
+ * out (`invited_by_you`, served for the caller only; absent on an older
+ * platform). That makes them someone the person knows, the same way writing to
+ * them does: marked in reach.json (so `mute` undoes it) and returned true.
+ * Only for a row that is theirs: the conversation's other person is the sender.
+ * Returns whether this call is what made them known, so the arrival can say
+ * "you invited them" once, the first time, and not on every message after.
+ */
+function knownByInvite(t) {
+  if (!t || t.invitedByYou !== true || !t.lastFrom || lower(t.handle) !== lower(t.lastFrom)) return false;
+  if (reach.isMuted(t.lastFrom)) return false;
+  if (line.isOpen(t.lastFrom) || reach.isKnown(t.lastFrom)) return false;
+  reach.know(t.lastFrom);
+  return reach.isKnown(t.lastFrom);
+}
+
 function park(t) {
   const h = lower(t.lastFrom);
   const e = parked.get(h) || { ids: new Set(), row: null };
@@ -204,7 +221,9 @@ const isParked = (id) => { for (const e of parked.values()) if (e.ids.has(id)) r
 function releaseParked(me, threads) {
   const extra = [];
   for (const [h, e] of parked) {
-    if (!(line.isOpen(h) || reach.isKnown(h))) continue;
+    // Parked before the platform said they redeemed this person's invitation
+    // (a cached inbox, an older platform until now): that releases it too.
+    if (!(line.isOpen(h) || reach.isKnown(h)) && !knownByInvite(threads.find((t) => t && lower(t.handle) === h))) continue;
     const id = e.row.lastMessageId;
     if (reach.isMuted(h)) { for (const x of e.ids) waitingAtStart.add(x); parked.delete(h); continue; }
     const row = threads.find((t) => t && lower(t.handle) === h);
@@ -250,6 +269,9 @@ async function noteArrivals(handle, threads) {
     const unknown = arrival.pickArrivals(threads.filter((t) => waitingAtStart.has(t.lastMessageId) &&
       !reach.isMuted(t.lastFrom) && !line.isOpen(t.lastFrom) && !reach.isKnown(t.lastFrom)), handle);
     for (const t of unknown) {
+      // Someone they invited is known now; what they wrote stays waiting (the
+      // session-start line shows it), it is not parked.
+      if (knownByInvite(t)) continue;
       if (await knows(handle, t.lastFrom) === false) { waitingAtStart.delete(t.lastMessageId); park(t); }
     }
   }
@@ -267,6 +289,7 @@ async function noteArrivals(handle, threads) {
   const candidates = [];
   for (const t of wanted) {
     if (reach.isMuted(t.lastFrom)) { waitingAtStart.add(t.lastMessageId); continue; }
+    if (knownByInvite(t)) { t.introducedByInvite = true; candidates.push(t); continue; }
     const known = await knows(handle, t.lastFrom);
     if (known === true) candidates.push(t);
     else if (known === false) park(t);

@@ -148,7 +148,10 @@ test('your line is set only from words given to vibe_start, and nothing is deriv
   assert.doesNotMatch(src, /_work-context|gatherWithTimeout|recentCommits|branch:/);
   assert.equal(fs.existsSync(path.join(__dirname, '_work-context.js')), false);
   const beats = [];
-  const orig = { heartbeat: store.heartbeat, getActiveUsersResult: store.getActiveUsersResult, getInboxResult: store.getInboxResult, getIdentityKind: store.getIdentityKind };
+  const orig = { heartbeat: store.heartbeat, getActiveUsersResult: store.getActiveUsersResult, getInboxResult: store.getInboxResult, getIdentityKind: store.getIdentityKind, listMyInvites: store.listMyInvites, createInvite: store.createInvite };
+  // The empty-inbox screen asks for an invite code (invite.codeFor): never the network here.
+  store.listMyInvites = async () => ({ success: false, error: 'offline' });
+  store.createInvite = async () => { throw new Error('this test mints nothing'); };
   store.heartbeat = async (h, l, ctx) => { beats.push([h, l, ctx]); return {}; };
   store.getActiveUsersResult = async () => ({ ok: true, users: [] });
   store.getInboxResult = async () => ({ ok: true, threads: [] });

@@ -3,7 +3,15 @@
 // handle. Nothing here can reach a real person.
 import http from 'node:http';
 
-export function startStub({ people = {}, agentMints = {} } = {}) {
+export function startStub({ people = {}, agentMints = {}, servesInvitedByYou = true } = {}) {
+  // Invitations, as the platform keeps them: a code minted on the inviter's
+  // account, redeemed once by a newly signed-in person (redeem() stands in for
+  // that sign-in). The inbox then says invited_by_you on the inviter's row for
+  // that person, and on nobody else's. servesInvitedByYou: false models a
+  // platform that predates the field.
+  const invites = new Map();     // code -> { code, created_by, used_by, status, expires_at }
+  let codeSeq = 0;
+  const invitedBy = (me) => new Set([...invites.values()].filter((i) => i.created_by === me && i.status === 'used' && i.used_by).map((i) => i.used_by));
   const messages = [];            // { id, seq, from, to, body, created_at, reply_to }
   const effects = [];             // every request, for the report
   const cursors = new Map();      // `${me}|${peer}` -> seq read up to
@@ -36,9 +44,23 @@ export function startStub({ people = {}, agentMints = {} } = {}) {
         unread: ms.filter((m) => m.from === p && m.seq > read).length,
         last_message: { id: last.id, from: last.from, body: last.body, created_at: last.created_at, actor: shape(last).actor },
         preferences: { archived: false, muted: false, pinned: false },
+        ...(servesInvitedByYou ? { invited_by_you: invitedBy(me).has(p) } : {}),
       };
     });
   };
+  function mintCode(by) {
+    const code = `VIBE-LAB${String(++codeSeq).padStart(6, '0')}-${by.toUpperCase().slice(0, 4)}`;
+    invites.set(code, { code, created_by: by, used_by: null, status: 'available', expires_at: new Date(Date.now() + 30 * 86400000).toISOString() });
+    return code;
+  }
+  /** The newcomer's sign-in with ?invite_code: one redemption per code, never by its creator. */
+  function redeem(code, handle) {
+    const i = invites.get(String(code || '').toUpperCase());
+    if (!i || i.status !== 'available' || i.created_by === handle) return false;
+    i.status = 'used'; i.used_by = handle;
+    effects.push({ t: Date.now(), me: handle, effect: 'REDEEM', code: i.code, inviter: i.created_by });
+    return true;
+  }
   function post(from, to, body, replyTo = null) {
     const parent = replyTo ? messages.find((m) => m.id === replyTo) : null;
     const m = { id: `msg_lab_${++seq}`, seq, from, to, body: String(body), created_at: iso(), reply_to: parent || null };
@@ -106,6 +128,20 @@ export function startStub({ people = {}, agentMints = {} } = {}) {
           return send(200, { success: true, grant_id: g.grant_id, agent_handle: agent, scope: g.scope, expires_at: g.expires_at });
         }
       }
+      if (p === '/api/invites/my' && req.method === 'GET') {
+        if (!me) return send(401, { success: false, error: 'unauthorized' });
+        rec('read_invites');
+        const codes = [...invites.values()].filter((i) => i.created_by === me).map((i) => ({ code: i.code, named_for: null, for_email_hash: null, carries_thought: false, status: i.status, expires_at: i.expires_at, used_by: i.used_by }));
+        const unused = codes.filter((c) => c.status === 'available').length;
+        return send(200, { success: true, codes, unused, max_codes: 3, can_generate: unused < 3 });
+      }
+      if (p === '/api/invites' && req.method === 'POST' && (!body || Object.keys(body).length === 0)) {
+        if (!me) return send(401, { success: false, error: 'unauthorized' });
+        if ([...invites.values()].filter((i) => i.created_by === me && i.status === 'available').length >= 3) return send(400, { success: false, error: 'No invite codes remaining' });
+        const code = mintCode(me);
+        rec('MINT_INVITE', { code });
+        return send(200, { success: true, code, expires_at: invites.get(code).expires_at, share_url: `https://www.slashvibe.dev/join/${code}` });
+      }
       if (p === '/api/v2/threads' && req.method === 'GET') { rec('read_threads'); const ts = threadsFor(me); return send(200, { success: true, threads: ts, total_unread: ts.reduce((a, t) => a + t.unread, 0) }); }
       if (p === '/api/messages' && req.method === 'GET') {
         if (q.with) { rec('read_thread', { with: q.with }); const ms = between(me, q.with); return send(200, { success: true, thread_id: tid(me, q.with), messages: ms.map(shape), last_message_id: ms.at(-1)?.id || null }); }
@@ -129,7 +165,7 @@ export function startStub({ people = {}, agentMints = {} } = {}) {
     });
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({
-    url: `http://127.0.0.1:${server.address().port}`, messages, effects, post, grants, agentPrincipals,
+    url: `http://127.0.0.1:${server.address().port}`, messages, effects, post, grants, agentPrincipals, invites, mintCode, redeem,
     close: () => new Promise((r) => server.close(r)),
   })));
 }

@@ -492,6 +492,33 @@ export const scenarios = {
     },
   },
 
+  invitedwrites: {
+    title: 'you invite someone, they sign in with your code and write first: it reaches you while you work',
+    people: {
+      ada: { says: 'retry queue for webhook delivery; picking backoff and dead-letter rules', files: { 'notes.md': WEBHOOKS } },
+      nell: { says: '' },
+    },
+    async run(lab) {
+      // Ada's invite line carried a code minted on her account; Nell's sign-in
+      // redeemed it (the stub's redeem() stands in for that sign-in). Ada has
+      // never written to Nell.
+      const code = lab.stub.mintCode('ada');
+      const redeemed = lab.stub.redeem(code, 'nell');
+      const s = lab.session('ada', BUSY('notes.md'));
+      await lab.sleep(24_000);
+      lab.stub.post('nell', 'ada', 'made it in! what backoff did you land on for the retry queue? asking before I copy it.');
+      return { redeemed, sessions: { ada: await s.done } };
+    },
+    checks: ({ redeemed, sessions: { ada } }, lab) => [
+      { what: 'the invitation was redeemed once, by Nell', ok: redeemed && lab.stub.effects.filter((e) => e.effect === 'REDEEM').length === 1 },
+      { what: 'while working, Ada was shown that @nell, whom she invited, wrote', ok: ada.shown.some((l) => l.includes('@nell (you invited them) wrote you')) },
+      { what: 'it was not held as a stranger\'s', ok: !ada.shown.some((l) => /have not written to/.test(l)) },
+      { what: 'the session told her what Nell asked', ok: said(ada, /backoff/i) && said(ada, /nell/i) },
+      { what: 'nothing was sent', ok: !lab.stub.effects.some((e) => e.effect === 'SEND') },
+      { what: 'nothing was marked read', ok: !lab.stub.effects.some((e) => e.effect === 'READ_CURSOR') },
+    ],
+  },
+
   agent: {
     title: 'an agent as itself: signs in with its own credential, is named as run by a person, and answers as an agent',
     people: {

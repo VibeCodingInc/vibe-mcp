@@ -305,6 +305,10 @@ async function fetchLive() {
   for (const row of rows) {
     const from = row && row.from;
     if (!from || reach.isMuted(from)) continue;
+    // The platform says they redeemed an invitation this person gave out
+    // (served for this person only; absent on an older platform): known, as
+    // if written to, and remembered so `mute` undoes it.
+    if (row.invitedByYou === true && !line.isOpen(from) && !reach.isKnown(from)) reach.know(from);
     let known = line.isOpen(from) || reach.isKnown(from);
     // "Never written to" is a claim about the conversation, so it is made only
     // when the conversation was actually read. A read that failed comes back
