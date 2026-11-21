@@ -384,7 +384,6 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
 }
 
 async function fetchLive() {
-  const startedAt = Date.now();
   const authStore = require('./auth-store');
   const store = require('./store');
 
@@ -463,7 +462,9 @@ async function fetchLive() {
   try { noted = pickNoted(require('./who').all(), { me, muted: reach.muted(), here: here.map((p) => p.handle) }); } catch {}
   // Whatever time is left inside the deadline, less a margin; if it has not
   // answered by then, only the reminder is lost.
-  const left = boundedDeadline(process.env.VIBE_SESSION_START_DEADLINE_MS) - (Date.now() - startedAt) - 400;
+  // Measured from this reader's own process start (the parent's deadline
+  // covers its whole life, module loading included), not from this function.
+  const left = boundedDeadline(process.env.VIBE_SESSION_START_DEADLINE_MS) - Math.ceil(process.uptime() * 1000) - 400;
   const unsent = await within(unsentP, left);
   return { messages: normalizeMessages(messages), here, doors, strangers: unknown.size, invited: invited.size, noted, unsent };
 }
