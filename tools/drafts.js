@@ -742,8 +742,11 @@ async function unseenRefusal(d, why = null) {
     lead = 'Not sent yet: the text changed, and the person has not seen this version. A changed draft must be shown again before it can be sent.';
     reason = 'changed_since_seen';
   } else {
-    lead = 'Not sent yet: the person has not seen this draft. A draft must be shown before it can be sent.';
-    reason = 'not_yet_seen';
+    // No typed message since it was last shown (turns.js why
+    // 'no_turn_since_shown'). They may well have seen it; what is missing is a
+    // message they typed after it.
+    lead = 'Not sent yet: they have not typed a message since it was shown (a pick in a question menu does not count).';
+    reason = 'no_turn_since_shown';
   }
   const ask = `Show them the preview below exactly as it is and wait for their choice. If they choose ${d.held ? 'Keep' : 'Send'}, call vibe_send again with this id and rev.`;
   return {

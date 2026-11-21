@@ -107,9 +107,10 @@ test('prepare then send in the same turn: refused, nothing sent, and the preview
     assert.equal(sends.length, 0, 'nothing reached the wire');
     assert.equal(r.data.sent, false);
     assert.equal(r.data.definite, true);
-    assert.equal(r.data.reason, 'not_yet_seen');
+    assert.equal(r.data.reason, 'no_turn_since_shown');
     assert.equal(r.data.turn_check, 'needs_turn');
-    assert.match(r.display, /^Not sent yet: the person has not seen this draft\./);
+    assert.match(r.display, /^Not sent yet: they have not typed a message since it was shown \(a pick in a question menu does not count\)\./);
+    assert.doesNotMatch(r.display, /has not seen this draft/);
     assert.match(r.display, /\*\*Message \(exact\):\*\*\nsend it, and it is not live yet/);
     assert.match(r.display, new RegExp(`rev ${p.data.draft.rev}`));
     assert.equal(r.data.draft.rev, p.data.draft.rev);
