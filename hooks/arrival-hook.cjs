@@ -169,18 +169,27 @@ function personWrote(prompt) {
 // Claude Code's question menu (AskUserQuestion) is a choice the person makes,
 // but a menu can be about anything, and the agent opens it mid-run: counted
 // as a turn, "Run the tests now?" -> Yes unlocked a send (review 2026-11-21).
-// So a menu answer approves ONE draft, and only when:
-//   - the menu put that draft in front of the person: the question, or the
-//     chosen option's description or preview, holds the draft's exact current
-//     text (whitespace normalised) and its recipient's @handle;
-//   - the chosen option's label starts with "Send" (not Other free text, not
-//     a multi-select, not Edit or Cancel);
-//   - exactly one open draft matches.
-// It is recorded as {id, rev, at}; vibe_send accepts it for that id and rev
-// only (turns.js menuApproved). Result shape from Claude Code transcripts
-// (toolUseResult: {questions, answers: {question: label}, annotations}); the
-// hooks reference does not document it.
+// So a menu answer approves ONE draft, and only when the option the person
+// picked carried it, exactly:
+//   - its label, trimmed and case-insensitive, is exactly "Send to @<to>";
+//   - its preview field, whitespace collapsed, EQUALS the draft's full
+//     composed text (body and any "title: url" lines) as vibe_prepare showed
+//     it, whitespace collapsed: one field, whole-field equality;
+//   - the draft text holds no control characters or escape sequences other
+//     than newline and tab (nothing the menu could render differently);
+//   - single-select, the answer is a real option, and no other option in that
+//     question has the same label;
+//   - exactly one open, non-held draft matches.
+// Recorded as {id, rev, at}; vibe_send accepts it for that id and rev only
+// (turns.js menuApproved). Result shape from Claude Code transcripts
+// (toolUseResult: {questions: [{question, options: [{label, description,
+// preview}], multiSelect}], answers: {question: label}}); option previews
+// there are multi-line (92 of 98 seen, up to 1219 chars). The hooks reference
+// does not document it.
 const ws = (t) => String(t == null ? '' : t).replace(/\s+/g, ' ').trim();
+// C0 controls except tab and newline, DEL, C1 (ESC starts every escape
+// sequence), and the bidirectional overrides and isolates.
+const UNSHOWABLE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/;
 /** = tools/drafts.js compose() and textHash(): what is sent, and the rev that binds it. */
 function composeDraft(d) {
   const refs = Array.isArray(d.refs) && d.refs.length ? '\n' + d.refs.map((r) => `${r.title}: ${r.url}`).join('\n') : '';
@@ -198,22 +207,30 @@ function menuApproval(input, draftsFile = path.join(process.env.VIBE_ARRIVALS_DI
     const answers = r.answers;
     if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return null;
     const questions = Array.isArray(r.questions) ? r.questions : (Array.isArray(input.tool_input && input.tool_input.questions) ? input.tool_input.questions : []);
-    const menus = [];
+    const picked = [];   // { label, preview } of each chosen option that could approve
     for (const q of questions) {
       if (!q || typeof q.question !== 'string' || q.multiSelect === true) continue;
       const label = answers[q.question];
-      if (typeof label !== 'string' || !/^\s*send\b/i.test(label)) continue;
-      const opt = (Array.isArray(q.options) ? q.options : []).find((o) => o && o.label === label);
-      if (!opt) continue;   // "Other": the person's own words, not this option
-      menus.push(ws([q.question, opt.description, opt.preview].filter((x) => typeof x === 'string').join(' ')));
+      if (typeof label !== 'string') continue;
+      const options = (Array.isArray(q.options) ? q.options : []).filter((o) => o && typeof o.label === 'string');
+      const opt = options.find((o) => o.label === label);
+      if (!opt || typeof opt.preview !== 'string') continue;   // "Other": the person's own words; no preview: nothing shown
+      const norm = label.trim().toLowerCase();
+      if (options.filter((o) => o.label.trim().toLowerCase() === norm).length !== 1) continue;
+      picked.push({ label: norm, preview: ws(opt.preview) });
     }
-    if (menus.length === 0) return null;
+    if (picked.length === 0) return null;
     const drafts = JSON.parse(fs.readFileSync(draftsFile, 'utf8'));
     if (!Array.isArray(drafts)) return null;
     const now = Date.now();
-    const hits = drafts.filter((d) => d && d.status === 'previewed' && !d.held && typeof d.id === 'string' &&
-      Number.isFinite(d.createdAt) && now - d.createdAt < TTL_MS && ws(composeDraft(d)) &&
-      menus.some((m) => m.includes(ws(composeDraft(d))) && m.toLowerCase().includes(`@${String(d.to || '').toLowerCase()}`)));
+    const hits = drafts.filter((d) => {
+      if (!d || d.status !== 'previewed' || d.held || typeof d.id !== 'string' || typeof d.to !== 'string') return false;
+      if (!Number.isFinite(d.createdAt) || now - d.createdAt >= TTL_MS) return false;
+      const text = composeDraft(d);
+      if (!ws(text) || UNSHOWABLE.test(text)) return false;
+      const want = `send to @${d.to.trim().toLowerCase()}`;
+      return picked.some((p) => p.label === want && p.preview === ws(text));
+    });
     if (hits.length !== 1) return null;
     return { id: hits[0].id, rev: revOfDraft(hits[0]) };
   } catch { return null; }
