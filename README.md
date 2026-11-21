@@ -218,6 +218,9 @@ opened a line with. Anyone else waits where `vibe start` lists what is waiting.
 You are still told when that happens. When a session opens, one line says how many people
 you have not written to are waiting, and how to ask: `what's waiting on /vibe`. It says
 nothing about who they are or what they wrote, to you or to your agent, until you ask.
+If one of them first wrote after you were given your invite line (`setup --from @you`), it
+says it may be someone you invited: that is from timing on your machine alone, since /vibe
+does not yet tell you who accepted an invite.
 
 ```bash
 npx slashvibe-mcp quiet            # nothing surfaces until: unquiet
@@ -285,7 +288,9 @@ npx slashvibe-mcp hook uninstall
 ```
 
 Two Claude Code hooks: one shows what was waiting when a session opens, one brings a
-message in at your next prompt or after the next tool call. Set `VIBE_ARRIVALS=off` in the
+message in at your next prompt or after the next tool call. A conversation you have answered
+is not waiting, even while their message is still unread; it is waiting again when they
+write again. Set `VIBE_ARRIVALS=off` in the
 server's env to turn arrival off.
 
 **Live push (optional, Claude Code research preview).** To have a message arrive while a

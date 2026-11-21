@@ -1,7 +1,8 @@
 'use strict';
 // 2026-09-02, the day of the invite: the session-start hook showed Seth his OWN
 // reply as "MESSAGE from @brightseth". getRawInbox took each unread thread's
-// last_message regardless of direction. "Waiting" means THEIR words.
+// last_message regardless of direction. "Waiting" means THEIR words, and (since
+// 2026-11-20) only while nothing of mine has come after them.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
@@ -51,12 +52,23 @@ test('a waiting message is always THEIR words, never my own last send', async ()
   const store = require('../store/api.js');
   const rows = await store.getRawInbox('me');
   const byThread = Object.fromEntries(rows.map((r) => [r.thread_id, r]));
-  assert.equal(byThread.thread_A.from, 'them', 'my reply must not be presented as waiting');
-  assert.equal(byThread.thread_A.text, 'what are you building?');
   assert.equal(byThread.thread_B.from, 'other');
+  assert.equal(byThread.thread_B.text, 'hello?');
   assert.equal(byThread.thread_C, undefined, 'a thread with nothing of theirs is not a waiting message');
-  assert.equal(byThread.thread_D.text, 'the newest thing they said', 'a long thread reads its TAIL, not its first page');
   assert.ok(rows.every((r) => r.from !== 'me'), 'no row is from me');
+});
+
+// 2026-11-20 lab, p01 twice: the person answered, and the next session still
+// said "1 message waiting" and offered to answer again. Replying does not mark
+// read (by design), so the summary decides: their message is waiting only
+// while it is the newest word in the conversation.
+test('a conversation the person has answered is not waiting, however long it is', async () => {
+  const store = require('../store/api.js');
+  const rows = await store.getRawInbox('me');
+  const byThread = Object.fromEntries(rows.map((r) => [r.thread_id, r]));
+  assert.equal(byThread.thread_A, undefined, 'I replied after their message: answered, not waiting');
+  assert.equal(byThread.thread_D, undefined, 'a long thread that ends on my reply is answered too');
+  assert.deepEqual(rows.map((r) => r.thread_id), ['thread_B']);
 });
 
 test('handles keep their dashes: GitHub logins allow them', () => {

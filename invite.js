@@ -14,7 +14,10 @@
 
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const reach = require('./reach');
+const { vibeHome } = require('./vibe-home');
 
 const validHandle = (h) => /^[a-z0-9][a-z0-9_-]{1,38}$/.test(h);
 
@@ -122,4 +125,40 @@ function line(me) {
   return { command: `npx slashvibe-mcp setup --from @${h}`, link: `https://www.slashvibe.dev/join?from=${h}` };
 }
 
-module.exports = { fromArg, accept, line, lookup, resolveRecipient };
+// ── the inviter's side ──────────────────────────────────────────────────────
+// `setup --from @sam` marks Sam as known on the NEWCOMER's machine only. The
+// platform is told nothing, so Sam's machine cannot know who accepted, and the
+// newcomer's first message reaches Sam as one from "a person you have not
+// written to" (lab 2026-11-20, p08 and p13). Until the platform can say who
+// accepted an invite of yours, the one true thing this machine knows is WHEN
+// it gave the person their invite line to pass on. The session-start line uses
+// that, and only that: someone you have not written to who first wrote after
+// that moment "may be someone you invited". It names nobody and quotes nothing.
+const GIVEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const givenFile = (env) => path.join(vibeHome(env), 'invite-given.json');
+
+/** When this machine last started showing the person their invite line, or null. */
+function givenAt(env = process.env, now = Date.now()) {
+  try {
+    const at = Number(JSON.parse(fs.readFileSync(givenFile(env), 'utf8')).at);
+    return Number.isFinite(at) && at > 0 && at <= now && now - at <= GIVEN_TTL_MS ? at : null;
+  } catch { return null; }
+}
+
+/**
+ * The person was shown their invite line. Keeps the EARLIEST moment that is
+ * still recent, so a line shown again does not hide someone who already came.
+ * Local, a timestamp only; never sent anywhere. Never throws.
+ */
+function noteGiven(env = process.env, now = Date.now()) {
+  try {
+    if (givenAt(env, now) !== null) return;
+    const target = givenFile(env);
+    fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+    const tmp = `${target}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ at: now }), { mode: 0o600 });
+    fs.renameSync(tmp, target);
+  } catch {}
+}
+
+module.exports = { fromArg, accept, line, lookup, resolveRecipient, noteGiven, givenAt, GIVEN_TTL_MS };

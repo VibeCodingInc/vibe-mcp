@@ -151,6 +151,9 @@ test('a genuinely new arrival is told it takes two and given the line to send â€
   assert.ok(text.split('\n').includes(`  ${require('../invite').line('ada').command}`),
     'the exact line invite.js builds, not a second copy of it');
   assert.ok(!text.includes('@zoe') && !text.includes('@kai'), 'no online stranger is offered instead');
+  // When it was shown is remembered locally (invite.js), so a first message
+  // from whoever installs from it can be called "may be someone you invited".
+  assert.ok(require('../invite').givenAt() !== null, 'the moment the line was given is noted on this machine');
 }));
 
 test('the newcomer line degrades to the bare install when there is no usable handle to name', withStore({
