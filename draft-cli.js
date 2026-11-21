@@ -64,7 +64,9 @@ async function main() {
 
   if (verb === 'send') {
     if (!id || !rev) return out({ error: 'usage', message: 'vibe-draft send <id> <rev>' }, 2);
-    const r = await moves.vibe_send.handler({ id, rev });
+    // The person chose Send here, themselves: that choice is their turn, so the
+    // agent-side check (a person-turn after the rev was prepared) does not apply.
+    const r = await moves.sendByPerson({ id, rev });
     const data = (r && r.data) || {};
     const stored = storedStatus(id);
     return out({ id, sent: Boolean(data.sent), message_id: data.message_id || null, status: stored.status, unconfirmed: stored.unconfirmed, display: r && r.display ? String(r.display) : null, definite: Boolean(data.definite) });

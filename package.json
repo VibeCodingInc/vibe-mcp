@@ -70,6 +70,7 @@
     "store/api.js",
     "store/index.js",
     "store/local.js",
+    "turns.js",
     "tools/_shared.js",
     "tools/deliver.js",
     "tools/drafts.js",

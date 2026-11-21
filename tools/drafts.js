@@ -19,6 +19,9 @@
  *    never leave the machine.
  *  - The approval is bound to bytes: Send names the rev of the preview the
  *    person saw; a draft changed since is refused.
+ *  - Seen, not just bound: Send goes only if the person has had a turn (a
+ *    prompt, recorded by the arrival hook) after the rev was prepared, so an
+ *    agent cannot prepare and send in one turn (turns.js).
  *  - Exactly once: Send claims the draft under a whole-file lock, sends with
  *    an idempotency key derived from the exact text, and finalizes against
  *    the latest stored state. A draft whose delivery could not be confirmed
@@ -270,7 +273,7 @@ function compose(d) { return `${d.body || ''}${refLines(d.refs)}`; }
 
 const draftDefinition = {
   name: 'vibe_prepare',
-  description: "Prepare a message to a person for review. Sends NOTHING. Use this whenever YOU wrote the words (from the work in this session, or as an answer to a message that arrived): pass handle + message, and reply_to when it answers a specific message. Returns the exact preview and the three choices: Send / Edit / Cancel. To edit, call again with the draft id and the new message. If the handle is not on /vibe yet, the preview says so and the message is held for that GitHub account instead.",
+  description: "Prepare a message to a person for review. Sends NOTHING. Use this whenever YOU wrote the words (from the work in this session, or as an answer to a message that arrived): pass handle + message, and reply_to when it answers a specific message. Returns the exact preview and the three choices: Send / Edit / Cancel. To edit, call again with the draft id and the new message. A changed draft must be shown again before it can be sent: show the person the new preview and wait for their next message. If the handle is not on /vibe yet, the preview says so and the message is held for that GitHub account instead.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -399,11 +402,25 @@ async function draftHandler(args) {
     if (compose(d).length > 2000) return { display: `Not ready — the message is ${compose(d).length} chars and the limit is 2000. Edit it shorter; nothing was sent.` };
     // The first preview actually shown fixes the rev that "unchanged" is measured against.
     if (d.firstRev === null) d.firstRev = revOf(d);
+    // When THIS text was prepared: Send needs a person's turn after it (turns.js).
+    // Re-showing the same text keeps the time; any change, even back to an
+    // earlier text, starts it again.
+    stampRev(d);
     return { draft: { ...d } };
   });
   if (out.display) return out;
   if (out.draft.held) return heldPreview(out.draft);
   return preview(out.draft, await findPerson(out.draft.to));
+}
+
+function stampRev(d) {
+  const rev = revOf(d);
+  if (d.revFor !== rev || !Number.isFinite(d.revAt)) { d.revFor = rev; d.revAt = Date.now(); }
+}
+/** When the stored text was prepared. A draft from before revAt existed: its creation (or now, if edited since). */
+function revPreparedAt(d) {
+  if (d.revFor === revOf(d) && Number.isFinite(d.revAt)) return d.revAt;
+  return d.edited ? Date.now() : (d.createdAt || Date.now());
 }
 
 function heldPreview(d) {
@@ -470,7 +487,7 @@ async function discardHandler(args) {
 
 const sendDefinition = {
   name: 'vibe_send',
-  description: "Send a prepared draft: pass id AND rev from the preview vibe_prepare showed. Call this only when the person chose Send; that choice is the approval, do not ask again. It sends exactly the previewed text, once. There is no other way to send: to write to someone, even in words the person dictated, open a draft with vibe_prepare first.",
+  description: "Send a prepared draft: pass id AND rev from the preview vibe_prepare showed. Call this only when the person chose Send; that choice is the approval, do not ask again. It sends exactly the previewed text, once. A changed draft must be shown again before it can be sent: a rev prepared after the person's last message is not sent, and the preview comes back to show them. There is no other way to send: to write to someone, even in words the person dictated, open a draft with vibe_prepare first.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -479,7 +496,16 @@ const sendDefinition = {
     },
   },
 };
-async function sendHandler(args) {
+/** The MCP tool: an agent's call. Sends only a rev the person has had a turn to see. */
+async function sendHandler(args) { return send(args, { byPerson: false }); }
+/**
+ * The person's own Send from a surface they act in directly (draft-cli: Buddy,
+ * or a terminal command they type). Their act IS the turn, so the turn check
+ * does not apply. Not reachable from a tool call: the MCP handler takes args only.
+ */
+async function sendByPerson(args) { return send(args, { byPerson: true }); }
+
+async function send(args, { byPerson }) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
   const id = args && args.id;
@@ -504,6 +530,7 @@ async function sendHandler(args) {
   // 1. Claim under the lock: nothing leaves the machine until this draft is
   //    marked 'sending' with a key derived from the exact text — and the
   //    text is the one the person SAW (rev), not one edited since (codex P1).
+  let turn = null;
   const claim = transact(drafts => {
     const d = drafts.find(x => x.id === id);
     if (!d) return { display: `No draft ${id} — nothing sent. Open it with vibe_prepare first.` };
@@ -529,6 +556,10 @@ async function sendHandler(args) {
       // honest options are to cancel (with the warning) or write anew.
       return { display: `Draft ${d.id}: the earlier Send to @${d.to} did not confirm, and this transport cannot deduplicate a retry. Cancel it (the earlier attempt may have reached them) and open a new draft if you still want to say it. Nothing sent.` };
     }
+    // The person must have had a turn since THIS text was prepared (turns.js):
+    // an agent cannot prepare a new rev and send it inside one turn.
+    turn = turnCheck(d, byPerson);
+    if (turn.check === 'needs_turn') return { unseen: { ...d } };
     d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
     d.idempotencyKey = sendKey(d);
     const message = compose(d).trim();
@@ -538,8 +569,9 @@ async function sendHandler(args) {
     return { snapshot: { id: d.id, to: d.to, body: d.body, refs: d.refs, context: d.context, replyTo: d.replyTo || null, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, held: Boolean(d.held), unchanged } };
   });
   if (claim.display) return claim;
+  if (claim.unseen) return unseenRefusal(claim.unseen);
   const s = claim.snapshot;
-  if (s.held) return keepHeld(s, me);
+  if (s.held) return withTurn(await keepHeld(s, me), turn);
 
   // 2. Deliver, outside the lock.
   let result;
@@ -578,7 +610,44 @@ async function sendHandler(args) {
     result = { ...result, display: `${result.display}\n\n_Draft ${s.id} is kept as unconfirmed: Send again retries exactly this text (delivers once), or Cancel._` };
   }
   if (sent) result = withRapport(result, s);
-  return result;
+  return withTurn(result, turn);
+}
+
+/**
+ * Whether this send may go without a recorded person-turn, and why. Every case
+ * that sends without one is named here:
+ *   by_person      the person's own Send (draft-cli), not an agent's call;
+ *   agent_identity an agent signed in as ITSELF sends in its own name: there is
+ *                  no person whose words these are;
+ *   unavailable    the arrival hook has never recorded a turn under this
+ *                  VIBE_HOME, or the host is not Claude Code (no hook there).
+ */
+function turnCheck(d, byPerson) {
+  if (byPerson) return { check: 'by_person' };
+  try { if (require('../agent-auth').isAgent()) return { check: 'agent_identity' }; } catch {}
+  return require('../turns').judge(revPreparedAt(d));
+}
+function withTurn(result, turn) {
+  if (!result || !turn) return result;
+  return { ...result, data: { ...(result.data || {}), turn_check: turn.check } };
+}
+/**
+ * Not sent: this text was prepared after the person's last turn, so they have
+ * not seen it. Normal, not an error: the preview is shown again, and the next
+ * Send after their answer goes. Nothing reached the network on this path.
+ */
+async function unseenRefusal(d) {
+  const changed = typeof d.firstRev === 'string' && d.firstRev !== revOf(d);
+  const p = d.held ? heldPreview(d) : preview(d, await findPerson(d.to));
+  const lead = changed
+    ? 'Not sent yet: the text changed, and the person has not seen this version. A changed draft must be shown again before it can be sent.'
+    : 'Not sent yet: the person has not seen this draft. A draft must be shown before it can be sent.';
+  const ask = `Show them the preview below exactly as it is and wait for their choice. If they choose ${d.held ? 'Keep' : 'Send'}, call vibe_send again with this id and rev.`;
+  return {
+    ...p,
+    display: `${lead} ${ask}\n\n${p.display}`,
+    data: { ...(p.data || {}), sent: false, definite: true, reason: changed ? 'changed_since_seen' : 'not_yet_seen', turn_check: 'needs_turn' },
+  };
 }
 
 /**
@@ -719,6 +788,8 @@ module.exports = {
   vibe_prepare: { definition: draftDefinition, handler: draftHandler },
   vibe_send: { definition: sendDefinition, handler: sendHandler },
   vibe_discard: { definition: discardDefinition, handler: discardHandler },
+  // the person's own Send (draft-cli), never a tool
+  sendByPerson,
   // for the arrival path, the thread view, and Buddy's `vibe-draft` CLI
   isQaHandle, getReturnBinding, clearReturnBinding, loadDrafts, transact, DRAFTS_FILE, BINDINGS_FILE,
   compose, revOf, reconcileAbandoned,
