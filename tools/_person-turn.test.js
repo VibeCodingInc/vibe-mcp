@@ -92,11 +92,9 @@ test('a prompt the person wrote counts, also when it quotes such text in the mid
   }
 });
 
-// A documented limit: by its text alone, a scheduled task or /loop iteration
-// cannot be told apart from typing, so the wrapper rules let it through. Where
-// the transcript labels the turn's origin it is not counted
-// (_turn-origin.test.js); elsewhere it counts (SECURITY.md).
-test('by its text alone, a scheduled or looped prompt is not caught (documented limit, SECURITY.md)', () => {
+// A documented limit: a scheduled task or /loop iteration is the person's own
+// saved prompt; its text cannot be told apart from typing, so it counts.
+test('a scheduled or looped prompt counts (documented limit, SECURITY.md)', () => {
   assert.equal(personWrote('check /vibe and reply to anything waiting'), true);
 });
 

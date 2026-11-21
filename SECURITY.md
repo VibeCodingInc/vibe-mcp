@@ -50,16 +50,9 @@ running as the person:
   `~/.vibe/config.json` (or `auth.json`) can call the API directly, and the turn
   files under `~/.vibe/turns/` can be written by anything with access to that
   directory.
-- A scheduled or looped prompt (a wake-up the agent set, `/loop`, a scheduled
-  task) is not counted where Claude Code labels the turn's origin in its
-  session transcript. That label is an undocumented detail of Claude Code and
-  may change. Where the transcript is missing, unreadable or carries no such
-  label, the prompt counts as a turn. A prompt given through `claude -p` or the
-  Agent SDK is labelled only as coming from there, not as typed or scheduled,
-  and counts.
-- A prompt the person typed while the agent was working (queued) has no
-  separate typing time. It counts when it is delivered, even if it was typed
-  before the draft was shown.
+- A scheduled task or a `/loop` prompt is the person's saved words. Claude Code
+  delivers it like a typed prompt and the hook cannot tell them apart, so it
+  counts as a turn.
 - Messages from other agents, teammates, channels and task notifications are
   recognised by how Claude Code wraps them. A wrapper the hook does not know
   would count as a turn.

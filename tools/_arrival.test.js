@@ -193,12 +193,7 @@ test('the hook names a node path that survives an upgrade, and refresh repairs a
 test('the hook script has no dependencies and touches no network or credential', () => {
   const src = fs.readFileSync(HOOK, 'utf8');
   const required = [...src.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
-  // crypto: hashing the project directory for a turn record (turns.js), and a
-  // prompt for the detached turn check; child_process: starting that check
-  // (a copy of this same file, with no network either).
-  assert.deepEqual([...new Set(required)].sort(), ['child_process', 'crypto', 'fs', 'path']);
-  assert.match(src, /\[__filename, '--confirm-turn'/);
-  assert.match(src, /spawn\(process\.execPath, args, \{ detached: true, stdio: 'ignore'/);
+  assert.deepEqual([...new Set(required)].sort(), ['crypto', 'fs', 'path']); // crypto: hashing the project directory for a turn record (turns.js)
   assert.doesNotMatch(src, /fetch\(|https?:\/\/|auth\.json|token/i);
 });
 

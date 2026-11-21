@@ -16,8 +16,6 @@
  *
  * Presentation only: writes no receipt and no read state. The one thing it
  * records is that the person prompted, and when (recordTurn, for vibe_send).
- * When Claude Code has not yet written who started the turn, a detached copy
- * of this file finishes that check (confirmTurn) and exits within seconds.
  *
  * One more thing it does on a prompt: when the person says they are stuck, it
  * reminds the agent, once per session, that vibe_bump exists (see stuckNudge).
@@ -102,15 +100,11 @@ function main() {
   // Only on a prompt, never after a tool call (the agent's own turn).
   // Claude Code also runs UserPromptSubmit for a background subagent reporting
   // back, a message from another session, a scheduled task (hooks docs); the
-  // input has no field saying who wrote it, so personPrompt() decides from the
-  // wrapper rules and then the session transcript, erring toward not counting.
-  // An answer in Claude Code's question menu (AskUserQuestion) is never a
-  // turn: the agent opens a menu, about anything, mid-run, and what it shows
-  // can differ from what is sent.
-  const submittedAt = Date.now();
-  const person = event === 'UserPromptSubmit' ? personPrompt(input) : 'no';
-  if (person === 'yes') recordTurn(input, submittedAt);
-  if (person === 'pending') startConfirm(input, submittedAt);
+  // input has no field saying who wrote it, so personWrote() decides, erring
+  // toward not counting. An answer in Claude Code's question menu
+  // (AskUserQuestion) is never a turn: the agent opens a menu, about
+  // anything, mid-run, and what it shows can differ from what is sent.
+  if (event === 'UserPromptSubmit' && personWrote(input.prompt)) recordTurn(input);
 
   const dir = process.env.VIBE_ARRIVALS_DIR || path.join(__dirname, '..', 'arrivals');
   const session = String(input.session_id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
@@ -119,9 +113,7 @@ function main() {
     try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); fs.closeSync(fs.openSync(path.join(dir, `near-${session}.done`), 'wx', 0o600)); } catch {}
   }
   const rows = take(dir, Date.now(), session);
-  // The nudge only reminds the agent a tool exists, and it cannot wait for
-  // the detached check: shown unless the transcript already said no.
-  const nudge = person !== 'no' ? stuckNudge(input, dir) : '';
+  const nudge = event === 'UserPromptSubmit' && personWrote(input.prompt) ? stuckNudge(input, dir) : '';
   if (rows.length === 0 && !nudge) return quiet();
 
   const context = rows.map((r) => r.context);
@@ -180,186 +172,6 @@ function personWrote(prompt) {
   return !NOT_PERSON.some((re) => re.test(said));
 }
 
-// ── who started this turn, as Claude Code's transcript says ─────────────────
-// The wrapper rules above cannot catch a wake-up the agent scheduled for
-// itself (ScheduleWakeup, /loop, cron): it fires UserPromptSubmit, and its text
-// is whatever the agent chose (seen live 2026-11-21: recorded as the person's
-// turn). Claude Code's session transcript (hook input transcript_path, JSONL)
-// labels the type:"user" entry that starts each turn: turnOrigin "human"
-// (promptSource typed, queued or suggestion_accepted), "scheduled", "peer"
-// (subagent hand-back, another session), "task_notification". A prompt given
-// through `claude -p` or the Agent SDK is labelled "sdk" (promptSource and
-// turnOrigin): that says how it came in, not who wrote it, so it is treated as
-// no label at all. These fields are undocumented, observed 2026-11-21 (Claude
-// Code 2.1.330), and may change.
-//
-// After the wrapper rules have not said no:
-//   1. the newest user entry in the transcript's tail whose text equals this
-//      prompt decides. With a turnOrigin, or failing that origin.kind or
-//      promptSource: a turn only if human; "sdk" is today's behaviour, a turn.
-//   2. this transcript labels origins (some user entry in the tail has a
-//      turnOrigin other than "sdk") and the matching entry has no label: no
-//      turn.
-//   3. no transcript, an unreadable one, or no labels anywhere in the tail (an
-//      older Claude Code, another host, `claude -p`): today's behaviour, a turn.
-//
-// THE ENTRY MAY NOT BE THERE YET. Claude Code 2.1.330 writes a prompt's entry
-// only after its UserPromptSubmit hooks finish (seen with `claude -p --resume`:
-// absent for 650 ms of waiting, the whole time the hook ran). So the hook reads
-// for up to ~100 ms; if labels exist and the entry has not appeared, it hands
-// the decision to a detached copy of itself (confirmTurn) and exits. That copy
-// waits up to CONFIRM_MS for the entry and records the turn, dated to the
-// prompt, only if the entry is labelled human; otherwise, or if it never
-// appears, nothing is recorded. It is given a hash of the prompt, never the
-// text.
-//
-// Only the last TAIL_BYTES are read. Nothing from the transcript is written or
-// printed anywhere.
-const TAIL_BYTES = 256 * 1024;
-const ORIGIN_TRIES = 3;
-const ORIGIN_WAIT_MS = 50;          // 2 waits: about 100 ms in the hook itself
-const CONFIRM_MS = 5000;
-const CONFIRM_POLL_MS = 100;
-const HUMAN_SOURCES = new Set(['typed', 'queued', 'suggestion_accepted']);
-
-function sleepMs(ms) {
-  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch {}
-}
-
-const promptHash = (text) => require('crypto').createHash('sha256').update(String(text).trim(), 'utf8').digest('hex');
-
-/** The complete lines in the last TAIL_BYTES of a file (a line cut by the start is dropped). */
-function tailLines(file) {
-  const fd = fs.openSync(file, 'r');
-  try {
-    const size = fs.fstatSync(fd).size;
-    // One byte before the window says whether the window starts on a line.
-    const from = Math.max(0, size - TAIL_BYTES - 1);
-    const buf = Buffer.alloc(size - from);
-    const got = fs.readSync(fd, buf, 0, buf.length, from);
-    let text = buf.subarray(0, got);
-    let cut = false;
-    if (from > 0) {
-      if (text[0] === 0x0a) text = text.subarray(1);
-      else cut = true;
-    }
-    // '\n' never occurs inside a UTF-8 sequence, so a character split by the
-    // window's start can only damage the first line, which is dropped.
-    const lines = text.toString('utf8').split('\n');
-    if (cut) lines.shift();
-    return lines;
-  } finally { fs.closeSync(fd); }
-}
-
-function entryTexts(entry) {
-  const c = entry && entry.message && entry.message.content;
-  if (typeof c === 'string') return [c];
-  if (!Array.isArray(c)) return [];
-  const parts = c.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text);
-  return parts.length ? [parts.join('\n'), parts.join('')] : [];
-}
-
-/** 'human' | 'sdk' | 'other' | null (the entry carries no origin field). */
-function entryOrigin(e) {
-  const label = (v) => (v === 'human' ? 'human' : v === 'sdk' ? 'sdk' : 'other');
-  if (typeof e.turnOrigin === 'string') return label(e.turnOrigin);
-  if (e.origin && typeof e.origin.kind === 'string') return label(e.origin.kind);
-  if (typeof e.promptSource === 'string') return HUMAN_SOURCES.has(e.promptSource) ? 'human' : label(e.promptSource);
-  return null;
-}
-
-/**
- * One read of the tail, for the prompt whose trimmed text hashes to `want`:
- * { labelled, match: 'human' | 'sdk' | 'other' | 'unlabelled' | null }.
- * Throws if the file cannot be read.
- */
-function scanTail(file, want) {
-  const lines = tailLines(file);
-  let labelled = false;
-  let match = null;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (!line || !line.includes('"user"')) continue;
-    let e;
-    try { e = JSON.parse(line); } catch { continue; }
-    if (!e || e.type !== 'user') continue;
-    if (typeof e.turnOrigin === 'string' && e.turnOrigin !== 'sdk') labelled = true;
-    if (match === null && entryTexts(e).some((t) => promptHash(t) === want)) match = entryOrigin(e) || 'unlabelled';
-    if (match !== null && labelled) break;
-  }
-  return { labelled, match };
-}
-
-/** What one read decides: 'human' | 'other' | 'unknown' | null (labels exist, entry not there yet). */
-function decide(r) {
-  if (r.match === 'human') return 'human';
-  if (r.match === 'sdk') return 'unknown';
-  if (r.match === 'other') return 'other';
-  if (r.match === 'unlabelled') return r.labelled ? 'other' : 'unknown';
-  return r.labelled ? null : 'unknown';
-}
-
-/**
- * Did the transcript say a person started this turn?
- *   'human'    the matching entry is labelled human
- *   'other'    labelled otherwise, or unlabelled in a transcript that labels
- *   'unknown'  no usable transcript, or no labels: today's rule
- *   'pending'  the transcript labels origins and this prompt's entry is not
- *              written yet (decided later by confirmTurn)
- */
-function transcriptOrigin(prompt, file, { tries = ORIGIN_TRIES, waitMs = ORIGIN_WAIT_MS } = {}) {
-  if (typeof file !== 'string' || !file || typeof prompt !== 'string') return 'unknown';
-  const want = promptHash(prompt);
-  for (let t = 0; t < tries; t++) {
-    if (t > 0) sleepMs(waitMs);
-    let r;
-    try { r = scanTail(file, want); } catch { return 'unknown'; }
-    const d = decide(r);
-    if (d) return d;
-  }
-  return 'pending';
-}
-
-/**
- * The detached copy's job: wait for the entry, record the turn only if it is
- * labelled human (or carries no label in a transcript without labels).
- * Arguments: the prompt's hash, the transcript, when the prompt was submitted,
- * and the input cwd.
- */
-function confirmTurn([want, file, at, cwd], { budgetMs = CONFIRM_MS, pollMs = CONFIRM_POLL_MS } = {}) {
-  const until = Date.now() + budgetMs;
-  for (;;) {
-    let d = null;
-    try { d = decide(scanTail(file, want)); } catch { return false; }
-    if (d === 'human' || d === 'unknown') { recordTurn({ cwd }, Number(at)); return true; }
-    if (d === 'other') return false;
-    if (Date.now() >= until) return false;
-    sleepMs(pollMs);
-  }
-}
-
-function startConfirm(input, at) {
-  try {
-    const args = [__filename, '--confirm-turn', promptHash(input.prompt), String(input.transcript_path), String(at), typeof input.cwd === 'string' ? input.cwd : ''];
-    const child = require('child_process').spawn(process.execPath, args, { detached: true, stdio: 'ignore', env: process.env });
-    child.unref();
-    return true;
-  } catch { return false; }
-}
-
-/**
- * The person wrote this prompt: 'yes' | 'no' | 'pending' (a detached check
- * decides). The wrapper rules, then the transcript's own label.
- */
-function personPrompt(input) {
-  if (!input || !personWrote(input.prompt)) return 'no';
-  let origin;
-  try { origin = transcriptOrigin(input.prompt, input.transcript_path); } catch { origin = 'unknown'; }
-  if (origin === 'other') return 'no';
-  if (origin === 'pending') return 'pending';
-  return 'yes';
-}
-
 // ── a person's turn (turns.js) ──────────────────────────────────────────────
 // vibe_send sends a draft revision only if the person has prompted since that
 // revision was prepared. This records the prompt: a timestamp in a file named
@@ -374,20 +186,17 @@ function turnKey(dir) {
   return require('crypto').createHash('sha256').update(real, 'utf8').digest('hex').slice(0, 32);
 }
 
-function recordTurn(input, when = Date.now()) {
+function recordTurn(input) {
   try {
     const dir = process.env.VIBE_TURNS_DIR || path.join(__dirname, '..', 'turns');
     const keys = new Set([process.env.CLAUDE_PROJECT_DIR, input.cwd].filter((d) => typeof d === 'string' && d.trim()).map(turnKey).filter(Boolean));
-    if (keys.size === 0 || !Number.isFinite(when)) return;
+    if (keys.size === 0) return;
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const at = JSON.stringify({ at: Date.now() });
     for (const k of keys) {
       const file = path.join(dir, `${k}.json`);
-      // A confirmed turn can land after a later prompt's: never move back.
-      let prev = null;
-      try { prev = JSON.parse(fs.readFileSync(file, 'utf8')).at; } catch {}
-      if (Number.isFinite(prev) && prev >= when) continue;
       const tmp = `${file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify({ at: when }), { mode: 0o600 });
+      fs.writeFileSync(tmp, at, { mode: 0o600 });
       fs.renameSync(tmp, file);
     }
   } catch {}
@@ -429,8 +238,5 @@ function stuckNudge(input, dir) {
   } catch { return ''; }
 }
 
-if (require.main === module) {
-  if (process.argv[2] === '--confirm-turn') { try { confirmTurn(process.argv.slice(3)); } catch {} }
-  else { try { main(); } catch { quiet(); } }
-}
-module.exports = { personWrote, personPrompt, transcriptOrigin, confirmTurn, TAIL_BYTES, CONFIRM_MS };
+if (require.main === module) { try { main(); } catch { quiet(); } }
+module.exports = { personWrote };
