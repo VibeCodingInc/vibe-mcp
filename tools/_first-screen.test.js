@@ -144,8 +144,26 @@ test('a genuinely new arrival is told it takes two and given the line to send â€
 }, async () => {
   const { text, res, all } = await run();
   assert.match(text, /takes two: send the person you work with this/);
-  assert.match(text, /^  npx slashvibe-mcp setup$/m);
+  // The line names the person who sends it, built by invite.js (the same
+  // line setup prints): the friend who installs from it then knows them, so
+  // the first message reaches the friend mid-work instead of waiting.
+  assert.match(text, /^  npx slashvibe-mcp setup --from @ada$/m);
+  assert.ok(text.split('\n').includes(`  ${require('../invite').line('ada').command}`),
+    'the exact line invite.js builds, not a second copy of it');
   assert.ok(!text.includes('@zoe') && !text.includes('@kai'), 'no online stranger is offered instead');
+}));
+
+test('the newcomer line degrades to the bare install when there is no usable handle to name', withStore({
+  getInbox: async () => [],
+}, async () => {
+  const config = require('../config');
+  const orig = config.getHandle;
+  config.getHandle = () => 'not a handle!';
+  try {
+    const { text } = await run();
+    assert.match(text, /^  npx slashvibe-mcp setup$/m, 'still the one command that installs');
+    assert.ok(!/--from/.test(text), 'never a --from naming nobody, or a malformed handle');
+  } finally { config.getHandle = orig; }
 }));
 
 test('the screen names the person and the room, and nothing else', withStore({

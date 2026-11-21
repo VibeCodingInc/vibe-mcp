@@ -96,10 +96,14 @@ const tools = {
   vibe_bump: require('./tools/bump'),
 };
 
-// Before sign-in the whole surface is visible except the draft plumbing, so a
-// newcomer's first request ("message @sam ...") meets the sign-in gate instead
-// of a missing tool. After sign-in, tools/list_changed reveals the rest.
-const PRE_AUTH_TOOLS = new Set(['vibe_start', 'vibe_init', 'vibe_token', 'vibe_people', 'vibe_thread', 'vibe_send']);
+// Before sign-in a newcomer's first request ("message @sam ...") must meet the
+// sign-in gate instead of a missing tool. Every gated call does the same thing
+// (sign in, send nothing), so this list only decides which verb the model
+// reaches for. The messaging verb listed is vibe_prepare, the start of every
+// send (prepare, preview, Send): vibe_send alone would offer only its no-preview
+// form, since a draft id cannot exist while prepare is hidden. After sign-in,
+// tools/list_changed reveals the rest, vibe_send (both forms) included.
+const PRE_AUTH_TOOLS = new Set(['vibe_start', 'vibe_init', 'vibe_token', 'vibe_people', 'vibe_thread', 'vibe_prepare']);
 const NO_AUTH_REQUIRED = new Set(['vibe_start', 'vibe_init', 'vibe_token']);
 
 // "Is this session signed in": the credential answers, not a file on disk.

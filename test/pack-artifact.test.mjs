@@ -228,7 +228,7 @@ test('the installed artifact exposes exactly the surface: six tools, the open li
   assert.deepEqual(registered, ['vibe_answer', 'vibe_ask', 'vibe_bump', 'vibe_discard', 'vibe_init', 'vibe_people', 'vibe_prepare', 'vibe_send', 'vibe_start', 'vibe_thread', 'vibe_token', 'vibe_visit']);
   const r = await rpc([INIT, INITED, { jsonrpc: '2.0', id: 2, method: 'tools/list' }]);
   assert.deepEqual((r[2]?.result?.tools || []).map((t) => t.name).sort(),
-    ['vibe_init', 'vibe_people', 'vibe_send', 'vibe_start', 'vibe_thread', 'vibe_token']);
+    ['vibe_init', 'vibe_people', 'vibe_prepare', 'vibe_start', 'vibe_thread', 'vibe_token']);
 });
 
 test('the installed artifact ships the arrival hook, and it runs with no dependencies', () => {
