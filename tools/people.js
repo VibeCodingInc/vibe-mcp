@@ -103,6 +103,10 @@ async function handler() {
   else {
     // A reply the person drafted and never chose about, to someone who wrote last (unsent.js).
     let drafted = new Map();
+    // The draft id only where vibe_send checks the person has seen it here
+    // (turns.js): without that check an id is all an agent needs to send.
+    let idShown = false;
+    try { idShown = require('../turns').judge(Date.now()).check !== 'unavailable'; } catch { idShown = false; }
     try { drafted = new Map(require('../unsent').openReplies(require('../unsent').readDrafts(), inbox0, me, { now, isMuted: (h) => reach.isMuted(h) }).map((r) => [r.to, r.id])); } catch {}
     lines.push('your conversations:');
     for (const t of threads) {
@@ -113,7 +117,7 @@ async function handler() {
       if (line.isOpen(t.handle)) bits.push('open line');
       if (reach.isMuted(t.handle)) bits.push('muted');
       if (door.of(t.handle)) { bits.push('\u{1F6AA} door open'); anyDoor = true; }
-      if (drafted.has(normalizeHandle(t.handle))) bits.push(`your reply is drafted but not sent (draft ${drafted.get(normalizeHandle(t.handle))})`);
+      if (drafted.has(normalizeHandle(t.handle))) bits.push(`your reply is drafted but not sent${idShown ? ` (draft ${drafted.get(normalizeHandle(t.handle))})` : ''}`);
       lines.push(`@${inertField(t.handle, 39)} · ${bits.filter(Boolean).join(' · ')}${toThem(t.handle)}`);
     }
   }
