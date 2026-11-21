@@ -288,6 +288,21 @@ test('mid-session: the hook re-checks the draft itself before saying anything', 
   assert.deepEqual(arrivalHook(vh, 'UserPromptSubmit', 'sess1'), { suppressOutput: true }, 'another account signed in');
 });
 
+test('mid-session: a row spooled before the draft was shown again does not fire; a fresh one comes later', () => {
+  const vh = homeFor('oren', ['mira']);
+  const env = { VIBE_HOME: vh };
+  const old = Date.now() - 40 * 60e3;
+  writeDrafts(vh, [draft({ revAt: old })]);
+  assert.equal(unsent.spool(threadsWaiting, 'oren', { env }).length, 1);
+  // Shown again just now (vibe_prepare {id} stamps revAt).
+  writeDrafts(vh, [draft({ revAt: Date.now(), createdAt: old })]);
+  assert.deepEqual(arrivalHook(vh, 'UserPromptSubmit', 'sess1'), { suppressOutput: true }, 'not right after a re-show');
+  assert.ok(!fs.existsSync(path.join(vh, 'arrivals', 'unsent-w1a2b3c4d.shown')), 'not claimed: it may be said later');
+  unsent.spool(threadsWaiting, 'oren', { env });
+  assert.ok(!fs.existsSync(path.join(vh, 'arrivals', 'unsent-w1a2b3c4d.json')), 'the poll drops the stale row');
+  assert.equal(unsent.spool(threadsWaiting, 'oren', { env, now: Date.now() + 31 * 60e3 }).length, 1, 'and queues a fresh one 30 minutes after the re-show');
+});
+
 test('mid-session: not repeated in a session already told at start', () => {
   const vh = homeFor('oren', ['mira']);
   const env = { VIBE_HOME: vh };

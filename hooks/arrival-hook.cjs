@@ -48,7 +48,10 @@ function take(dir, now, session) {
     if (typeof row.session === 'string' && row.session !== session) continue;
     // A reply the person drafted and left unchosen (unsent.js): said only if
     // the draft is still open now, and not to a session already told at start.
-    const unsent = row.kind === 'unsent' ? unsentState(dir, row, session) : null;
+    const unsent = row.kind === 'unsent' ? unsentState(dir, row, session, now) : null;
+    // Shown again since it was spooled: not this row's to say, and not claimed,
+    // so the server can spool a fresh one once that showing is old enough.
+    if (unsent && unsent.later) continue;
     try { fs.closeSync(fs.openSync(path.join(dir, `${id}.shown`), 'wx', 0o600)); } catch { continue; }
     if (unsent && !unsent.say) continue;
     if (unsent && unsent.mark) { try { fs.closeSync(fs.openSync(path.join(dir, `${unsent.mark}.shown`), 'wx', 0o600)); } catch {} }
@@ -59,7 +62,8 @@ function take(dir, now, session) {
 
 // ── a reply drafted and not sent (unsent.js) ────────────────────────────────
 // The session mark's name must match unsent.js sessionMark (a test pins it).
-function unsentState(dir, row, session) {
+const UNSENT_AFTER_MS = 30 * 60 * 1000;   // = unsent.js MID_SESSION_AFTER_MS
+function unsentState(dir, row, session, now = Date.now()) {
   try {
     const draft = typeof row.draft === 'string' && /^w[0-9a-f]{4,32}$/.test(row.draft) ? row.draft : null;
     if (!draft) return { say: false };
@@ -76,8 +80,14 @@ function unsentState(dir, row, session) {
     const d = Array.isArray(drafts) ? drafts.find((x) => x && x.id === draft) : null;
     const open = Boolean(d && d.status === 'previewed' && !d.held &&
       String(d.from || '').toLowerCase() === me &&
-      Number.isFinite(d.createdAt) && Date.now() - d.createdAt < TTL_MS);
-    return { say: open, mark };
+      Number.isFinite(d.createdAt) && now - d.createdAt < TTL_MS);
+    if (!open) return { say: false };
+    // When it was last shown, as spooled: a showing since (or a row that does
+    // not say) means the person may be looking at it right now.
+    const shownAt = Number.isFinite(d.revAt) ? d.revAt : d.createdAt;
+    if (!Number.isFinite(row.shownAt) || shownAt !== row.shownAt) return { say: false, later: true };
+    if (now - shownAt < UNSENT_AFTER_MS) return { say: false, later: true };
+    return { say: true, mark };
   } catch { return { say: false }; }
 }
 

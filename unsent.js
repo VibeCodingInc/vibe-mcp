@@ -194,11 +194,16 @@ function markTold(draftId, session, env = process.env) {
 function spool(threads, me, { env = process.env, now = Date.now(), isMuted = () => false } = {}) {
   const drafts = readDrafts(env, now);
   const dir = spoolDir(env);
-  const stillOpen = new Set(openReplies(drafts, threads, me, { now, minAgeMs: 0, isMuted }).map((r) => rowId(r.id)));
+  // rowId -> when that draft was last shown; a queued row for a draft no
+  // longer open, or shown again since it was queued, is removed.
+  const stillOpen = new Map(openReplies(drafts, threads, me, { now, minAgeMs: 0, isMuted }).map((r) => [rowId(r.id), r.at]));
   try {
     for (const name of fs.readdirSync(dir)) {
       const m = /^(unsent-w[0-9a-f]{4,32})\.json$/.exec(name);
-      if (m && !stillOpen.has(m[1])) { try { fs.unlinkSync(path.join(dir, name)); } catch {} }
+      if (!m) continue;
+      let shownAt = null;
+      try { shownAt = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')).shownAt; } catch {}
+      if (!stillOpen.has(m[1]) || stillOpen.get(m[1]) !== shownAt) { try { fs.unlinkSync(path.join(dir, name)); } catch {} }
     }
   } catch {}
   const items = openReplies(drafts, threads, me, { now, minAgeMs: MID_SESSION_AFTER_MS, isMuted });
@@ -207,7 +212,7 @@ function spool(threads, me, { env = process.env, now = Date.now(), isMuted = () 
     const id = rowId(item.id);
     if (fs.existsSync(path.join(dir, `${id}.shown`)) || fs.existsSync(path.join(dir, `${id}.json`))) continue;
     const r = render(item, now, { withAge: false });
-    const row = { id, kind: 'unsent', draft: item.id, to: lower(me), from: lower(me), at: now, context: r.context, line: r.line };
+    const row = { id, kind: 'unsent', draft: item.id, shownAt: item.at, to: lower(me), from: lower(me), at: now, context: r.context, line: r.line };
     try {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       const file = path.join(dir, `${id}.json`);
