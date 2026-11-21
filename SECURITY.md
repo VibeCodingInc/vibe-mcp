@@ -49,6 +49,8 @@ the agent's tool calls. It does not bind anything else running as the person:
   `~/.vibe/config.json` (or `auth.json`) can call the API directly, and the turn
   files under `~/.vibe/turns/` can be written by anything with access to that
   directory.
+- A menu approval proves that the option the person picked carried the exact
+  text, not that they read it.
 - A scheduled task or a `/loop` prompt is the person's saved words. Claude Code
   delivers it like a typed prompt and the hook cannot tell them apart, so it
   counts as a turn.
