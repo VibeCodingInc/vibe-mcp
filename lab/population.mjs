@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Population runner: many fictional PAIRS of people, each pair doing two
-// "days" of ordinary work in separate REAL Claude Code sessions (`claude -p`),
+// Population runner: many fictional PAIRS of people, each pair doing up to a
+// week ("days" 1..7) of ordinary work in separate REAL Claude Code sessions (`claude -p`),
 // with a simulated human at each keyboard deciding what to type next. Nothing
 // is scripted to approve anything: whether a message is offered, what it says,
 // whether the person sends it, and whether it arrives and is answered is all
@@ -15,7 +15,8 @@
 // In plain words: each world file describes two fictional people (who they
 // are, how they talk, the files in their project folder), whether they already
 // know each other or one just invited the other, and a timeline of what each
-// of them types on day 1 and day 2. The runner plays that timeline: a person's
+// of them types on each day (a whole number 1..7; the timeline is listed in day
+// order and played in that order). The runner plays that timeline: a person's
 // first prompt on a day opens a new Claude Code session, later prompts that day
 // continue it. A continued session is what a person who left Claude Code open
 // sees when they come back and type: that day's /vibe server is kept running
@@ -85,6 +86,8 @@ function expandFiles(files) {
 
 // ---------------------------------------------------------------- validation
 const HANDLE = /^[a-z0-9][a-z0-9_-]{1,38}$/;
+// A story may run up to a week: timeline days are whole numbers 1..MAX_DAY.
+export const MAX_DAY = 7;
 function validateWorld(w) {
   const errs = [];
   const str = (v) => typeof v === 'string' && v.trim().length > 0;
@@ -125,9 +128,19 @@ function validateWorld(w) {
   else w.timeline.forEach((t, i) => {
     if (!t || typeof t !== 'object') { errs.push(`timeline[${i}] must be an object`); return; }
     if (!handles.includes(t.who)) errs.push(`timeline[${i}].who must be one of ${handles.join(', ')}`);
-    if (t.day !== 1 && t.day !== 2) errs.push(`timeline[${i}].day must be 1 or 2`);
+    if (!Number.isInteger(t.day) || t.day < 1 || t.day > MAX_DAY) errs.push(`timeline[${i}].day must be a whole number from 1 to ${MAX_DAY}`);
     if (!str(t.prompt)) errs.push(`timeline[${i}].prompt must be a non-empty string`);
   });
+  // The timeline is played in file order, so it must already be in day order:
+  // a day-3 entry after a day-4 one would open a session "back in time".
+  if (Array.isArray(w.timeline)) {
+    let last = 0;
+    w.timeline.forEach((t, i) => {
+      if (!t || !Number.isInteger(t.day)) return;
+      if (t.day < last) errs.push(`timeline[${i}].day is ${t.day} after a day-${last} entry: list the timeline in day order`);
+      else last = t.day;
+    });
+  }
   return errs;
 }
 
@@ -464,6 +477,7 @@ function analyse({ world, transcript, turnsLog, wire, handles, started }) {
     id: world.id, archetype: world.archetype, relationship: world.relationship, open_line: world.open_line,
     timeline_entries_run: new Set(turnsLog.map((t) => t.entry)).size,
     timeline_entries_total: world.timeline.length,
+    days_played: [...new Set(turnsLog.map((t) => t.day))].sort((a, b) => a - b),
     turns: turnsLog.length,
     turn_timeouts: turnsLog.filter((t) => t.timedOut).length,
     sessions: [...new Set(turnsLog.map((t) => t.session_id).filter(Boolean))].length,
