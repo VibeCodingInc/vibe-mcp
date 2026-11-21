@@ -56,6 +56,9 @@ To write to someone they already know:
 message @sam: ship it
 ```
 
+Even dictated words go through `vibe_prepare` first: the person sees exactly those words and
+chooses Send. `vibe_send` sends only a draft they approved.
+
 Or type `/vibe`, and the agent finds the question or result in the session, picks who it is
 for, writes it, and shows the exact message with Send · Edit · Cancel.
 
@@ -70,7 +73,7 @@ These are the tools the server registers. They are for the agent; the person jus
 - `vibe_people` — the people they know who are in a session now (everyone else is only counted), and who they have a conversation with
 - `vibe_thread` — one conversation in full (opening it marks it read)
 - `vibe_prepare` — the agent's words, previewed; sends nothing
-- `vibe_send` — the person's approval of a preview, or their own exact words
+- `vibe_send` — the person's approval of a preview (draft `id` + `rev`); it sends nothing else
 - `vibe_discard` — cancel a draft
 - `vibe_ask` — ask a person's agent a question, over an open line
 - `vibe_answer` — answer a person's agent, over an open line

@@ -6,7 +6,7 @@
  * inbox is read. The platform accepts a send to "rae-lin" (its existence check
  * folds the dash) but stores it under "rae-lin", where rae_lin never sees it.
  * So the client asks the identity lookup and addresses the spelling it
- * answers: in the draft (to, rev, digest) and in a typed send. A login the
+ * answers: in the draft (to, rev, digest), however the draft was opened. A login the
  * platform really stores with the dash keeps it; one that is not on /vibe is
  * still held for the GitHub login as typed.
  *
@@ -117,7 +117,11 @@ test('a lookup that fails keeps the handle as typed, and the message still sends
 
   identity['net-down2'] = 'throw';
   const typed = await drafts.vibe_send.handler({ handle: 'net-down2', message: 'my own words' });
-  assert.equal(typed.data.sent, true);
+  assert.equal(typed.data.sent, false, 'a handle + message opens a draft; it never sends');
+  assert.equal(typed.data.draft.to, 'net-down2');
+  assert.equal(posts.length, 1);
+  const r2 = await drafts.vibe_send.handler({ id: typed.data.draft.id, rev: typed.data.draft.rev });
+  assert.equal(r2.data.sent, true);
   assert.equal(posts[1].to, 'net-down2');
 });
 
@@ -129,24 +133,25 @@ test('only a dash-for-underscore answer changes the spelling; anything else leav
   }
 });
 
-test('a handle with no dash makes no identity request from the resolver, and a typed send to it makes none at all', async () => {
+test('a handle with no dash makes no identity request from the resolver', async () => {
   const r = await invite.resolveRecipient('linus');
   assert.deepEqual(r, { handle: 'linus', who: null });
   assert.equal(lookups.length, 0);
-  const sent = await drafts.vibe_send.handler({ handle: 'linus', message: 'plain' });
-  assert.equal(sent.data.sent, true);
-  assert.equal(lookups.length, 0);
-  assert.equal(posts[0].to, 'linus');
 });
 
-test('the person\'s own words to rae-lin go to rae_lin', async () => {
+test('dictated words to rae-lin are previewed to rae_lin, then sent there', async () => {
   identity['rae-lin'] = 'rae_lin';
-  const r = await drafts.vibe_send.handler({ handle: ' @Rae-Lin ', message: 'shipping now' });
+  const p = await drafts.vibe_send.handler({ handle: ' @Rae-Lin ', message: 'shipping now' });
+  assert.equal(p.data.sent, false);
+  assert.equal(posts.length, 0, 'nothing leaves before Send');
+  assert.equal(p.data.draft.to, 'rae_lin');
+  assert.equal(lookups.length, 1);
+  const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
   assert.equal(r.data.sent, true);
   assert.match(r.display, /Sent to \*\*@rae_lin\*\*/);
-  assert.equal(lookups.length, 1);
   assert.equal(posts[0].to, 'rae_lin');
   assert.equal(posts[0].body, 'shipping now');
+  assert.equal(posts[0].approved_sha256, digest('rae_lin', 'shipping now'));
   assert.equal(require('../reach').isKnown('rae_lin'), true, 'their answer arrives from rae_lin, so that is who is known');
 });
 
@@ -160,7 +165,7 @@ test('yourself under the other spelling is still yourself', async () => {
     const p = await drafts.vibe_prepare.handler({ handle: 'ada-b', message: 'note' });
     assert.match(p.display, /can't draft to yourself/);
     const s = await drafts.vibe_send.handler({ handle: 'ada-b', message: 'note' });
-    assert.match(s.display, /can't message yourself/);
+    assert.match(s.display, /can't draft to yourself/);
     assert.equal(posts.length, 0);
   } finally { config.getHandle = orig; }
 });

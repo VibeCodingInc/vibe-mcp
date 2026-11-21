@@ -8,7 +8,10 @@
  *                  recipient, exact message, what it answers. NOTHING is
  *                  sent. Edit = call it again with new text.
  *   vibe_send      with a draft id + rev: the Send choice IS the approval.
- *                  Sends exactly the previewed text, once.
+ *                  Sends exactly the previewed text, once. It is the only
+ *                  way a tool call sends (apart from vibe_ask / vibe_answer
+ *                  over an open line, tools/line.js): without a draft it
+ *                  opens one, exactly as vibe_prepare would, and sends nothing.
  *   vibe_discard   cancel. NOTHING is sent.
  *
  * Rules this file keeps:
@@ -354,7 +357,7 @@ async function draftHandler(args) {
       if (to === me) return { display: "You can't draft to yourself." };
       // @echo is the feedback line with its own path and no receipt shape;
       // it is not a person to draft to (codex P2).
-      if (to === 'echo') return { display: '@echo is the feedback line. To write to it, send the person\'s own words with vibe_send (handle + message). Nothing drafted.' };
+      if (to === 'echo') return { display: '@echo is the feedback line, not a person to draft to. Nothing drafted, nothing sent.' };
       // An approval-bound send targets a durable conversation; the live
       // session route stores nothing and the platform refuses it (CB-007).
       if (to.endsWith('/claude')) return { display: `Drafts go to a person's durable conversation, not a live session — use @${to.replace(/\/claude$/, '')} instead. Nothing drafted.` };
@@ -461,15 +464,12 @@ async function discardHandler(args) {
 
 const sendDefinition = {
   name: 'vibe_send',
-  description: "Send a message to a person. Two forms. (1) A prepared draft: pass id AND rev from the preview. Call this only when the person chose Send; that choice is the approval, do not ask again. (2) Words the person themselves stated, verbatim: pass handle + message (and reply_to when answering a specific message). Never use form 2 for words you wrote: prepare those with vibe_prepare so the person sees them first.",
+  description: "Send a prepared draft: pass id AND rev from the preview vibe_prepare showed. Call this only when the person chose Send; that choice is the approval, do not ask again. It sends exactly the previewed text, once. There is no other way to send: to write to someone, even in words the person dictated, open a draft with vibe_prepare first.",
   inputSchema: {
     type: 'object',
     properties: {
-      id: { type: 'string', description: 'Draft id (form 1)' },
-      rev: { type: 'string', description: 'The rev from the preview the person approved (form 1)' },
-      handle: { type: 'string', description: 'Recipient (form 2)' },
-      message: { type: 'string', description: "The person's own words, exactly (form 2)" },
-      reply_to: { type: 'string', description: 'The id of the message this answers (form 2)' },
+      id: { type: 'string', description: 'The draft id from the preview' },
+      rev: { type: 'string', description: 'The rev from the preview the person approved' },
     },
   },
 };
@@ -480,23 +480,19 @@ async function sendHandler(args) {
   const rev = typeof (args && args.rev) === 'string' ? args.rev.trim() : '';
   const me = config.getHandle();
 
-  // Form 2: the person's own words. Their saying them is the approval.
+  // No draft id: nothing is sent, ever. Every send from a tool call goes
+  // through a preview the person approved (owner decision, 2026-11-20): a
+  // handle + message here would otherwise let an injected instruction or an
+  // overeager turn send workspace text with no human choice. A call in the
+  // old shape is handed to vibe_prepare itself (one code path: the same
+  // recipient resolution, held handling and checks), so the person lands on
+  // the preview instead of an error.
   if (!id) {
-    if (!args || !args.handle || typeof args.message !== 'string' || !args.message.trim()) {
-      return { display: 'Nothing sent. Pass a draft id and rev, or a handle and the exact message.' };
-    }
-    // Addressed by the platform's spelling when the handle has a '-'
-    // (invite.resolveRecipient). Done here, not in deliver: a draft's digest
-    // is computed over its `to` before deliver runs, so deliver must not
-    // change the recipient.
-    let to = canonicalHandle(args.handle);
-    if (to && to !== canonicalHandle(me || '') && !to.endsWith('/claude')) {
-      try { to = (await invite.resolveRecipient(to)).handle; } catch (e) {}
-    }
-    const result = await deliver({ to: to || args.handle, message: args.message, replyTo: cleanId(args.reply_to) });
-    // The thread has moved on: what they say next answers THIS.
-    if (result.data && result.data.sent) { try { clearReturnBinding(to || args.handle); } catch (e) {} }
-    return result;
+    const asked = args && typeof args.handle === 'string' && args.handle.trim() && typeof args.message === 'string' && args.message.trim();
+    if (!asked) return { display: 'Nothing sent. vibe_send sends only a draft the person approved: pass its id and rev. To write to someone, open a draft with vibe_prepare (handle + message).', data: { sent: false, definite: true } };
+    const p = await draftHandler({ handle: args.handle, message: args.message, reply_to: args.reply_to });
+    const lead = 'Nothing sent. vibe_send sends only a draft the person approved, so this opened one instead. Show the person this preview and send it only if they choose Send.';
+    return { ...p, display: `${lead}\n\n${p.display}`, data: { ...(p.data || {}), sent: false, definite: true } };
   }
 
   // 1. Claim under the lock: nothing leaves the machine until this draft is

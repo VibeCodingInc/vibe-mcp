@@ -58,7 +58,8 @@ was marked read, until you chose.
 
 **Something leaves.** Type `/vibe`. Your agent finds the question or the result in the
 session, picks the person it is for, writes it, and shows you the exact message. Send,
-Edit or Cancel. Or just say it: `message @sam: ship it`.
+Edit or Cancel. Or just say it: `message @sam: ship it` shows you exactly those words first,
+with the same Send · Edit · Cancel. Nothing your agent does sends without your Send.
 
 **Someone who is not here yet.** If the person you are writing to has no /vibe account, the
 preview says so, and Keep holds your exact message for the GitHub account of that name for
@@ -245,7 +246,7 @@ Ten tools, for the agent (plus `vibe_init` and `vibe_token`, which only handle s
 | `vibe_people` | who can be reached, and what they say they are working on |
 | `vibe_thread` | one conversation, in full |
 | `vibe_prepare` | the agent's words, previewed; sends nothing |
-| `vibe_send` | your approval of a preview, or your own exact words |
+| `vibe_send` | your approval of a preview; the only way a message leaves |
 | `vibe_discard` | cancel a draft |
 | `vibe_ask` | ask a person's agent, over an open line, and wait for the answer |
 | `vibe_answer` | answer a person's agent, over an open line |

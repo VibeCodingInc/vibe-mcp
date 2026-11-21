@@ -151,15 +151,27 @@ test('a session that is the agent: never the people\'s sign-in, never a pasted i
     assert.match(replies[3], /This session is the agent @sol\. It signs in with its agent credential/);
     assert.match(replies[4], /This session is the agent @sol/);
     assert.match(replies[5], /in a session|nobody (else|you know)/);
+    // An agent's words are previewed too: a handle + message opens a draft and sends nothing.
+    assert.match(replies[6], /^Nothing sent\./, replies[6]);
+    assert.equal(stub.effects.filter((e) => e.effect === 'SEND').length, 0);
+    const [, draftId, rev] = replies[6].match(/draft (w[0-9a-f]+) · rev ([0-9a-f]+)/) || [];
+    assert.ok(draftId && rev, replies[6]);
+    const confirm = [
+      JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } }),
+      JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+      rpc(7, 'vibe_send', { id: draftId, rev }),
+    ].join('\n') + '\n';
+    const r2 = await run(d.vh, stub.url, [], agentEnv(d), { stdin: confirm, waitMs: 4000 });
+    const sentReply = r2.out.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } }).find((m) => m.id === 7);
     // What an agent sends as itself is recorded as that: no person chose Send.
-    assert.match(replies[6], /Sent to \*\*@nell\*\*/, replies[6]);
+    assert.match(sentReply?.result?.content?.[0]?.text || '', /Sent to \*\*@nell\*\*/, r2.all);
     const sent = stub.effects.filter((e) => e.effect === 'SEND');
     assert.equal(sent.length, 1);
     assert.deepEqual([sent[0].me, sent[0].to, sent[0].origin], ['sol', 'nell', 'agent_self']);
     const cfg = JSON.parse(fs.readFileSync(path.join(d.vh, 'config.json'), 'utf8'));
     assert.equal(JSON.parse(Buffer.from(cfg.authToken.split('.')[1], 'base64url')).handle, 'sol', 'a pasted token changed who this agent is');
     assert.ok(!stub.effects.some((e) => e.effect === 'heartbeat' && e.register), 'the agent registered a second session over its own');
-    assert.ok(!r.all.includes(SECRET) && !everyFile(d.vh).includes(SECRET));
+    assert.ok(!r.all.includes(SECRET) && !r2.all.includes(SECRET) && !everyFile(d.vh).includes(SECRET));
 
     // The same session with a credential the service refuses: every tool says so and does nothing.
     const bad = dirFor();
