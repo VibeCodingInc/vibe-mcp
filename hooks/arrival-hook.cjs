@@ -143,18 +143,26 @@ const NOT_PERSON = [
   /^Another Claude session sent a message\b/i,
   /^The coordinator sent a message\b/i,
   /^<agent-message\b/i,
+  /^<teammate-message\b/i,
+  /^<channel\b/i,
   /^<task-notification\b/i,
   /^\[SYSTEM NOTIFICATION\b/i,
-  /^<system-reminder>[\s\S]*?\[SYSTEM NOTIFICATION - NOT USER INPUT\]/i,
+  /^<system-reminder\b/i,   // one left after stripping is unclosed: not theirs either
 ];
+// Leading whitespace, zero-width characters and whole system-reminder blocks
+// are stripped, repeatedly, before the patterns are tried: a wrapper hidden
+// behind them is still a wrapper (review 2026-11-21).
+const LEADING = /^(?:[\s\u200B-\u200D\u2060\uFEFF]+|<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder>)/i;
 function personWrote(prompt) {
   if (typeof prompt !== 'string') return false;
-  const said = prompt.trim();
-  if (!said) return false;
-  if (NOT_PERSON.some((re) => re.test(said))) return false;
-  // Only system-reminder blocks, nothing of the person's own.
-  if (/^<system-reminder>/i.test(said) && !said.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '').trim()) return false;
-  return true;
+  let said = prompt;
+  for (let i = 0; i < 1000; i++) {
+    const next = said.replace(LEADING, '');
+    if (next === said) break;
+    said = next;
+  }
+  if (!said.trim()) return false;
+  return !NOT_PERSON.some((re) => re.test(said));
 }
 
 // ── a Send chosen in the question menu ──────────────────────────────────────
