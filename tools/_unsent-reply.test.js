@@ -119,7 +119,7 @@ test('render: asks whether to see it again, never invites a blind send', () => {
   assert.equal(r.context, [
     '/vibe: the person has a reply to @mira drafted but not sent (draft w1a2b3c4d, last shown 3 hours ago), and @mira wrote last in that conversation, so @mira may still be waiting.',
     'The person has been shown this one line, not the draft.',
-    'If they want to see it, show it with vibe_prepare {id: "w1a2b3c4d"} and wait for their choice: Send, Edit or Cancel. A draft shown again can be sent only after their next message, or after Send in a question menu that shows its full text. If they want to drop it, call vibe_discard {id: "w1a2b3c4d"}.',
+    'If they want to see it, show it with vibe_prepare {id: "w1a2b3c4d"} and ask in words: Send, Edit or Cancel. A draft shown again can be sent only after their next typed message; a pick in a question menu does not count. If they want to drop it, call vibe_discard {id: "w1a2b3c4d"}.',
     'Do not send, change or drop it on your own, and do not bring it up again.',
   ].join('\n'));
   assert.ok(!/!/.test(r.line + r.context), 'no exclamation marks');

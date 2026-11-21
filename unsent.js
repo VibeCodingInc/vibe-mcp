@@ -133,7 +133,7 @@ function render(item, now = Date.now(), { withAge = true } = {}) {
     context: [
       `/vibe: the person has a reply to @${to} drafted but not sent (draft ${id}${when ? `, ${when.slice(2, -1)}` : ''}), and @${to} wrote last in that conversation, so @${to} may still be waiting.`,
       'The person has been shown this one line, not the draft.',
-      `If they want to see it, show it with vibe_prepare {id: "${id}"} and wait for their choice: Send, Edit or Cancel. A draft shown again can be sent only after their next message, or after Send in a question menu that shows its full text. If they want to drop it, call vibe_discard {id: "${id}"}.`,
+      `If they want to see it, show it with vibe_prepare {id: "${id}"} and ask in words: Send, Edit or Cancel. A draft shown again can be sent only after their next typed message; a pick in a question menu does not count. If they want to drop it, call vibe_discard {id: "${id}"}.`,
       'Do not send, change or drop it on your own, and do not bring it up again.',
     ].join('\n'),
   };

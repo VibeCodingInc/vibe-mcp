@@ -39,9 +39,10 @@ This policy covers the `slashvibe-mcp` npm package and the [VibeCodingInc/vibe-m
 ## What the turn check does not cover
 
 `vibe_send` sends a draft only after the person has had a turn since it was last
-shown in this session: a prompt they wrote (recorded by the arrival hook), or Send
-chosen in a question menu that showed that draft's exact text. That check binds
-the agent's tool calls. It does not bind anything else running as the person:
+shown in this session: a prompt they wrote, recorded by the arrival hook. A pick
+in the host's question menu (AskUserQuestion) does not count as the person's
+choice. That check binds the agent's tool calls. It does not bind anything else
+running as the person:
 
 - An agent that can run shell commands as the person can send without it:
   `vibe-draft send <id> <rev>` sends as the person with no turn check (it is the
@@ -49,8 +50,6 @@ the agent's tool calls. It does not bind anything else running as the person:
   `~/.vibe/config.json` (or `auth.json`) can call the API directly, and the turn
   files under `~/.vibe/turns/` can be written by anything with access to that
   directory.
-- A menu approval proves that the option the person picked carried the exact
-  text, not that they read it.
 - A scheduled task or a `/loop` prompt is the person's saved words. Claude Code
   delivers it like a typed prompt and the hook cannot tell them apart, so it
   counts as a turn.

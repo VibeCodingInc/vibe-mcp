@@ -10,7 +10,7 @@ The person wants to reach someone on /vibe from the work in this session. They s
 
 3. **Write it and show it.** Write 1-3 sentences in the person's voice, specific to the recipient: what you are doing, what you need or found. No session summary, file paths, branch names, secrets or transcript text. Call `vibe_prepare` with `handle`, `message`, and `project` (a short name for this work). Show exactly what it returns, with one line on why this person.
 
-4. **Offer three choices:** Send / Edit / Cancel. If this host has a native question menu (in Claude Code, AskUserQuestion), use one single-choice question with three options: one labelled exactly `Send to @handle` (the recipient's handle) whose `preview` is the full message exactly as the vibe_prepare preview shows it, including any link lines; `Edit`; and `Cancel`. A Send picked from any other menu approves nothing. If the host menu cannot show it that way, ask in words.
+4. **Offer three choices:** Send / Edit / Cancel. Show the preview as text and ask in words; the person answers by typing. Do not use the host's question menu for this: a menu pick is not counted as the person's choice, so a Send picked there is refused.
    - **Send** → `vibe_send` with the draft `id` and `rev` from the preview. That choice is the approval. Do not ask again. Report what the tool says.
    - **Edit** → ask what to change, call `vibe_prepare` again with the `id` and the new `message`, show the new preview, offer the choices again.
    - **Cancel** → `vibe_discard`. Nothing is sent.

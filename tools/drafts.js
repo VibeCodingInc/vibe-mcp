@@ -273,7 +273,7 @@ function compose(d) { return `${d.body || ''}${refLines(d.refs)}`; }
 
 const draftDefinition = {
   name: 'vibe_prepare',
-  description: "Prepare a message to a person for review. Sends NOTHING. Use this whenever YOU wrote the words (from the work in this session, or as an answer to a message that arrived): pass handle + message, and reply_to when it answers a specific message. Returns the exact preview and the three choices: Send / Edit / Cancel. To edit, call again with the draft id and the new message. A changed draft must be shown again before it can be sent: show the person the new preview and wait for their next message. If the handle is not on /vibe yet, the preview says so and the message is held for that GitHub account instead.",
+  description: "Prepare a message to a person for review. Sends NOTHING. Use this whenever YOU wrote the words (from the work in this session, or as an answer to a message that arrived): pass handle + message, and reply_to when it answers a specific message. Returns the exact preview and the three choices: Send / Edit / Cancel. Show the preview and ask in words; a pick in a question menu does not count as the person's choice. To edit, call again with the draft id and the new message. A changed draft must be shown again before it can be sent: show the person the new preview and wait for their next message. If the handle is not on /vibe yet, the preview says so and the message is held for that GitHub account instead.",
   inputSchema: {
     type: 'object',
     properties: {
