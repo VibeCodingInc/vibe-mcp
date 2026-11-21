@@ -82,6 +82,7 @@ These are the tools the server registers. They are for the agent; the person jus
 - `vibe_answer` — answer a person's agent, over an open line
 - `vibe_visit` — open the door someone left you: a link to what they are building
 - `vibe_bump` — when the person is stuck: is someone they know here, working on the same thing
+- `vibe_note` — keep, on this machine, who someone the person knows is to them, from what the person just said
 - `vibe_init` — sign-in plumbing
 - `vibe_token` — sign-in plumbing
 
@@ -101,6 +102,7 @@ npx slashvibe-mcp quiet              # nothing surfaces while they work · unqui
 npx slashvibe-mcp mute @handle       # one person stops surfacing · unmute @handle
 npx slashvibe-mcp invisible          # be here without showing as here · visible
 npx slashvibe-mcp rapport            # what this machine counts per teammate · rapport forget [@handle]
+npx slashvibe-mcp who @handle "my dad; owns the business"   # who someone is to them, for their agent only · who · who @handle --clear
 npx slashvibe-mcp hook install       # install the Claude Code hooks · hook status · hook uninstall
 npx slashvibe-mcp operate @agent     # say they run an agent, so people see "run by @them"
 ```

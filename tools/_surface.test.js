@@ -13,6 +13,7 @@ const { spawnSync } = require('node:child_process');
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-surface-'));
 process.env.VIBE_HOME = HOME;
+process.env.VIBE_API_URL = 'http://127.0.0.1:9';   // never production, even for a call nobody stubbed
 const jwt = (h) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Math.floor(Date.now() / 1000) + 86400 })).toString('base64url')}.sig`;
 fs.writeFileSync(path.join(HOME, 'config.json'), JSON.stringify({ username: 'ada', authMethod: 'github', authToken: jwt('ada') }));
 
@@ -56,7 +57,7 @@ test('the surface is six tools, the two open-line tools, the visit and sign-in p
     'signed out: a first request can hit every listed tool, and the one messaging verb is vibe_prepare (prepare, preview, Send), never a send with no preview');
   const src = fs.readFileSync(INDEX, 'utf8');
   const registered = [...src.matchAll(/^\s{2}(vibe_[a-z]+):/gm)].map((m) => m[1]).sort();
-  assert.deepEqual(registered, ['vibe_answer', 'vibe_ask', 'vibe_bump', 'vibe_discard', 'vibe_init', 'vibe_people', 'vibe_prepare', 'vibe_send', 'vibe_start', 'vibe_thread', 'vibe_token', 'vibe_visit']);
+  assert.deepEqual(registered, ['vibe_answer', 'vibe_ask', 'vibe_bump', 'vibe_discard', 'vibe_init', 'vibe_note', 'vibe_people', 'vibe_prepare', 'vibe_send', 'vibe_start', 'vibe_thread', 'vibe_token', 'vibe_visit']);
   assert.match(get(1).result.instructions, /Never send without the person's explicit choice/);
   // Measured: an agent told its person "she hasn't answered yet" while her reply sat unread in the conversation.
   assert.match(get(1).result.instructions, /Before you tell them someone has not replied .*vibe_thread/);

@@ -14,7 +14,7 @@
 
 const args = process.argv.slice(2);
 
-const COMMANDS = ['setup', 'hook', 'trust', 'untrust', 'lines', 'quiet', 'unquiet', 'mute', 'unmute', 'door', 'invisible', 'visible', 'agent', 'operate', 'rapport'];
+const COMMANDS = ['setup', 'hook', 'trust', 'untrust', 'lines', 'quiet', 'unquiet', 'mute', 'unmute', 'door', 'invisible', 'visible', 'agent', 'operate', 'rapport', 'who'];
 const USAGE = `slashvibe-mcp: telepathic messaging, inside your coding agent
 
   npx slashvibe-mcp setup              install: configure your coding agent and sign in with GitHub
@@ -26,6 +26,7 @@ const USAGE = `slashvibe-mcp: telepathic messaging, inside your coding agent
   npx slashvibe-mcp mute @handle       one person stops surfacing (undo: unmute @handle)
   npx slashvibe-mcp invisible          be here without showing as here (undo: visible)
   npx slashvibe-mcp rapport            what this machine counts per teammate (also: forget [@handle], decline @handle)
+  npx slashvibe-mcp who @handle "..."  who someone is to you, for your agent only, never sent (list: who; remove: who @handle --clear)
   npx slashvibe-mcp operate @agent     say you run an agent, so people see "run by @you" (also: renew, revoke)
   npx slashvibe-mcp agent              for an agent signing in as itself, not a person
   npx slashvibe-mcp door https://...   leave a door: a link to what you are building (then: door share, door close)
@@ -416,6 +417,47 @@ if (['help', '--help', '-h'].includes(args[0])) {
     else if (args[0] === 'mute' && args[1]) { const h = reach.mute(args[1]); say(`Muted @${h}. Their messages will not surface in your sessions; they stay in the conversation. Undo: npx slashvibe-mcp unmute @${h}`); }
     else if (args[0] === 'unmute' && args[1]) { say(reach.unmute(args[1]) ? `Unmuted @${reach.norm(args[1])}.` : `@${reach.norm(args[1])} was not muted.`); }
     else { const m = reach.muted(); say(`${reach.isQuiet() ? 'Quiet is on.' : 'Quiet is off.'} ${m.length ? `Muted: ${m.map((h) => `@${h}`).join(', ')}` : 'Nobody is muted.'}`); say('npx slashvibe-mcp quiet | unquiet | mute @handle | unmute @handle'); }
+  } catch (error) {
+    process.stderr.write(`${error?.message || error}\n`);
+    process.exitCode = 1;
+  }
+} else if (args[0] === 'who') {
+  // Who someone is to you (who.js): one line in your words, for your agent,
+  // kept on this machine. Never sent, never shown to them.
+  const who = require('./who');
+  const say = (t) => process.stdout.write(`${t}\n`);
+  try {
+    const flags = args.slice(1).filter((a) => /^--/.test(a));
+    const words = args.slice(1).filter((a) => !/^--/.test(a));
+    if (flags.some((f) => f !== '--clear')) throw new Error('The only option is --clear: npx slashvibe-mcp who @handle --clear');
+    if (!words.length) {
+      if (flags.length) throw new Error('Whose line? npx slashvibe-mcp who @handle --clear');
+      const all = who.all();
+      if (!all.length) {
+        say('No one noted yet.');
+        say('Tell your agent who someone is to you, so it knows who to ask when the work needs them:');
+        say('  npx slashvibe-mcp who @walt "my dad; owns Walt\'s Hauling, knows the trucks and prices"');
+      } else {
+        for (const e of all) say(`@${e.handle}: "${e.line}"`);
+      }
+      say('Kept on this machine (who.json) for your agent only. Never sent; the person never sees it. Remove one: npx slashvibe-mcp who @handle --clear');
+    } else {
+      const h = who.norm(words[0]);
+      if (!who.validHandle(h)) throw new Error(`"${words[0]}" is not a handle. A handle looks like @sam: letters, digits, - and _.`);
+      if (flags.includes('--clear')) {
+        if (words.length > 1) throw new Error(`To remove @${h}'s line: npx slashvibe-mcp who @${h} --clear`);
+        say(who.clear(h) ? `Removed what you noted about @${h}.` : `You had not noted anything about @${h}.`);
+      } else if (words.length === 1) {
+        const line = who.of(h);
+        say(line ? `@${h}: "${line}"` : `You have not noted who @${h} is to you. npx slashvibe-mcp who @${h} "my dad; owns the business"`);
+      } else {
+        const typed = words.slice(1).join(' ');
+        const got = who.set(h, typed);
+        say(`Noted, on this machine only: @${got.handle}: "${got.line}"`);
+        if (got.line.endsWith('\u2026')) say(`(cut to ${who.MAX_LINE} characters)`);
+        say(`Your agent sees this when it thinks about who could help with the work. It is never sent, and @${got.handle} never sees it. Remove it: npx slashvibe-mcp who @${got.handle} --clear`);
+      }
+    }
   } catch (error) {
     process.stderr.write(`${error?.message || error}\n`);
     process.exitCode = 1;
