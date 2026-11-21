@@ -96,3 +96,15 @@ test('a link title or address with hidden characters is refused', async () => {
     assert.equal(r.display, 'Not prepared: a link title or address contains characters that do not show; remove them. Nothing was sent.');
   }
 });
+
+test('more than two blank lines in a row is refused; two are fine', async () => {
+  for (const text of ['top\n\n\n\nbottom', 'top\n \n\t\n  \nbottom', 'top' + '\n'.repeat(400) + 'bottom']) {
+    const r = await drafts.vibe_prepare.handler({ handle: 'linus', message: text });
+    assert.equal(r.display, 'Not prepared: the message has more than two blank lines in a row; remove the extra ones. Nothing was sent.');
+  }
+  const ok = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'top\n\n\nbottom' });
+  assert.ok(ok.data && ok.data.draft, ok.display);
+  const p = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'short' });
+  const e = await drafts.vibe_prepare.handler({ id: p.data.draft.id, message: 'short\n\n\n\n\nhidden below' });
+  assert.match(e.display, /more than two blank lines/, 'an edit too');
+});
