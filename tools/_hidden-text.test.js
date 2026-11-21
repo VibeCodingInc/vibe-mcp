@@ -199,3 +199,20 @@ test('the refusal names the first hidden character and its position, counting ch
   const r = await drafts.vibe_prepare.handler({ handle: 'linus', message: '\u{1F600}abc def gh\u200Cij' });
   assert.equal(r.display, 'Not prepared: the message contains a character that does not show (U+200C at character 12); remove it. Nothing was sent.');
 });
+
+test('layout: blank-looking lines count as blank; link titles are one line; link addresses have no spaces; trailing spaces are trimmed', async () => {
+  for (const ch of ['\u2800', '\u3000', '\u00A0', '\u2003']) {
+    const r = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'see below' + `\n${ch}`.repeat(40) + '\nhidden line' });
+    assert.equal(r.display, 'Not prepared: the message has more than two blank lines in a row; remove the extra ones. Nothing was sent.', `U+${ch.codePointAt(0).toString(16)}`);
+  }
+  const t = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'see doc', refs: [{ title: 'doc' + '\n'.repeat(60) + 'HIDDEN', url: 'https://example.com' }] });
+  assert.equal(t.display, 'Not prepared: a link title has a line break; keep it to one line. Nothing was sent.');
+  for (const url of ['https://example.com/' + '\n'.repeat(200) + 'HIDDEN', 'https://example.com/ ' + ' '.repeat(200) + 'HIDDEN', 'https://example.com/a\u3000b']) {
+    const u = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'see doc', refs: [{ title: 'doc', url }] });
+    assert.equal(u.display, 'Not prepared: a link address contains a space or a line break; remove it. Nothing was sent.');
+  }
+  const p = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'line one   \nline two\t\t\n\nend  ' });
+  assert.equal(p.data.draft.body, 'line one\nline two\n\nend');
+  assert.ok(p.display.includes('**Message (exact):**\nline one\nline two\n\nend\n'), 'the preview is the stored text');
+  await drafts.vibe_discard.handler({ id: p.data.draft.id });
+});

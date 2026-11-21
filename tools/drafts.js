@@ -329,6 +329,21 @@ async function findPerson(handle) {
   } catch { return null; }
 }
 
+/**
+ * More than two blank lines in a row could push the rest of the text out of
+ * view in the preview. Judged on the full composed text (body and link
+ * lines); a line of only whitespace or U+2800 (braille blank) is blank.
+ */
+const BLANK_LINES = 'Not prepared: the message has more than two blank lines in a row; remove the extra ones. Nothing was sent.';
+function tooManyBlankLines(text) {
+  let run = 0;
+  for (const line of String(text).split('\n')) {
+    run = /^[\s\u2800]*$/u.test(line) ? run + 1 : 0;
+    if (run > 2) return true;
+  }
+  return false;
+}
+
 async function draftHandler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
@@ -336,7 +351,9 @@ async function draftHandler(args) {
   // CRLF is one line break written two ways: stored as LF, so what is checked,
   // previewed and sent is the same text. A lone CR stays a hidden character.
   const rawMessage = typeof (args && args.message) === 'string' ? args.message.replace(/\r\n/g, '\n') : '';
-  const message = rawMessage.trim();
+  // Trailing spaces on a line are trimmed and the trimmed text is stored, so
+  // the preview is exactly what is sent.
+  const message = rawMessage.split('\n').map((l) => l.replace(/\s+$/u, '')).join('\n').trim();
   const wantId = args && args.id;
   // What the person approves must show what it is (showable.js): a body, link
   // title or link address with a character that does not show is refused,
@@ -345,14 +362,14 @@ async function draftHandler(args) {
   const said = (what, h) => `Not prepared: ${what} contains a character that does not show (${h.codePoint} at character ${h.position}); remove it. Nothing was sent.`;
   const hiddenInMessage = message ? firstHidden(rawMessage) : null;
   if (hiddenInMessage) return { display: said('the message', hiddenInMessage) };
-  // More than two blank lines in a row could push the rest of the text out of
-  // view in the preview.
-  if (message && /\n(?:[ \t]*\n){3,}/.test(message)) return { display: 'Not prepared: the message has more than two blank lines in a row; remove the extra ones. Nothing was sent.' };
   for (const r of (args && Array.isArray(args.refs) ? args.refs : [])) {
     const t = r && firstHidden(r.title);
     if (t) return { display: said('a link title', t) };
     const u = r && firstHidden(r.url);
     if (u) return { display: said('a link address', u) };
+    // Layout: a link is one line, and its address has no spaces to hide text behind.
+    if (r && typeof r.title === 'string' && /[\n\r]/.test(r.title)) return { display: 'Not prepared: a link title has a line break; keep it to one line. Nothing was sent.' };
+    if (r && typeof r.url === 'string' && /\s/u.test(r.url)) return { display: 'Not prepared: a link address contains a space or a line break; remove it. Nothing was sent.' };
   }
 
   // A recipient is a canonical ASCII handle (protocol/handle.js): a look-alike
@@ -408,6 +425,7 @@ async function draftHandler(args) {
       // version that tracks it; drafts already on disk lack the key and are
       // never judged "unchanged" (rapport.js).
       d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), from: me, to, body: message, replyTo: cleanId(args.reply_to), refs: cleanContext({ refs: args.refs }).refs, context: { project }, firstRev: null };
+      if (tooManyBlankLines(compose(d))) return { display: BLANK_LINES };
       // Nothing to answer in a conversation that does not exist yet.
       if (absent) { d.held = true; d.replyTo = null; }
       drafts.push(d);
@@ -425,14 +443,14 @@ async function draftHandler(args) {
       if (d.status === 'sending') return { display: `Draft ${d.id} is being sent right now — nothing to edit.` };
       if (d.status === 'unknown' && (message || args.refs)) return { display: `Draft ${d.id}: the last Send to @${d.to} did not confirm, so the text is frozen — Send again to retry exactly that text (it delivers once), or Cancel. To say something different, cancel and open a new draft.` };
       if (d.status !== 'unknown') {
-        if (message) {
-          // The preview's `message` already ends with the attachment lines;
-          // an edit that pastes it back must not double them (codex P2).
-          const tail = refLines(d.refs);
-          d.body = tail && message.endsWith(tail) ? message.slice(0, -tail.length) : message;
-          d.edited = true;
-        }
-        if (args.refs) { d.refs = cleanContext({ refs: args.refs }).refs; }
+        // The preview's `message` already ends with the attachment lines;
+        // an edit that pastes it back must not double them (codex P2).
+        const tail = refLines(d.refs);
+        const body = message ? (tail && message.endsWith(tail) ? message.slice(0, -tail.length) : message) : d.body;
+        const refs = args.refs ? cleanContext({ refs: args.refs }).refs : d.refs;
+        if (tooManyBlankLines(compose({ body, refs }))) return { display: BLANK_LINES };
+        if (message) { d.body = body; d.edited = true; }
+        if (args.refs) d.refs = refs;
         if (args.reply_to !== undefined && !d.held) d.replyTo = cleanId(args.reply_to);
         d.status = 'previewed';
       }
