@@ -1,5 +1,5 @@
 {
-  "version": "0.9.16",
+  "version": "0.9.17",
   "updated": "2026-11-20",
   "changelog": "Fixes from an outside read of 0.9.15. A message to a GitHub name with a hyphen now reaches that person, and /vibe no longer says \"Sent\" or \"not in a session\" when it could not confirm it.",
   "features": [
