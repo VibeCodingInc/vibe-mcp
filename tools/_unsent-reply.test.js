@@ -61,7 +61,7 @@ function arrivalHook(vh, event, session) {
 const draftLine = (out) => String(out.systemMessage || '').split('\n').filter((l) => /drafted but not sent/.test(l)).join('\n');
 const startStub = async (people) => (await import(path.join(ROOT, 'lab', 'stub.mjs'))).startStub({ people });
 const sends = (stub) => stub.effects.filter((e) => ['SEND', 'READ_CURSOR', 'MINT_INVITE'].includes(e.effect));
-const LINE = '/vibe · your reply to @mira is drafted but not sent (prepared 3 hours ago) · want to see it again?';
+const LINE = '/vibe · your reply to @mira is drafted but not sent (last shown 3 hours ago) · want to see it again?';
 const MID_LINE = '/vibe · your reply to @mira is drafted but not sent · want to see it again?';
 
 // ── which drafts count ──────────────────────────────────────────────────────
@@ -117,9 +117,9 @@ test('render: asks whether to see it again, never invites a blind send', () => {
   const r = unsent.render({ id: 'w1a2b3c4d', to: 'mira', at: Date.now() - 3 * HOUR });
   assert.equal(r.line, LINE);
   assert.equal(r.context, [
-    '/vibe: the person has a reply to @mira drafted but not sent (draft w1a2b3c4d, prepared 3 hours ago), and @mira wrote last in that conversation, so @mira may still be waiting.',
+    '/vibe: the person has a reply to @mira drafted but not sent (draft w1a2b3c4d, last shown 3 hours ago), and @mira wrote last in that conversation, so @mira may still be waiting.',
     'The person has been shown this one line, not the draft.',
-    'If they want to see it, show it with vibe_prepare {id: "w1a2b3c4d"} and wait for their next message: Send, Edit or Cancel. A draft shown again cannot be sent in the same turn. If they want to drop it, call vibe_discard {id: "w1a2b3c4d"}.',
+    'If they want to see it, show it with vibe_prepare {id: "w1a2b3c4d"} and wait for their choice: Send, Edit or Cancel. A draft shown again can be sent only after their next message, or after Send in a question menu that shows its full text. If they want to drop it, call vibe_discard {id: "w1a2b3c4d"}.',
     'Do not send, change or drop it on your own, and do not bring it up again.',
   ].join('\n'));
   assert.ok(!/!/.test(r.line + r.context), 'no exclamation marks');
@@ -139,7 +139,7 @@ test('session start: said once per session per draft, and never sends', async ()
     writeDrafts(vh, [draft()]);
     const first = await sitDown(vh, stub.url, 'sessA');
     assert.equal(draftLine(first.out), LINE);
-    assert.match(first.out.hookSpecificOutput.additionalContext, /draft w1a2b3c4d, prepared 3 hours ago/);
+    assert.match(first.out.hookSpecificOutput.additionalContext, /draft w1a2b3c4d, last shown 3 hours ago/);
     assert.ok(!draftLine(first.out).includes('scheduled_at'), 'their words are not in the draft line');
 
     assert.equal(draftLine((await sitDown(vh, stub.url, 'sessA')).out), '', 'a resume of the same session: not again');

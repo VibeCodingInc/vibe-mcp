@@ -127,13 +127,13 @@ function ago(at, now = Date.now()) {
 function render(item, now = Date.now(), { withAge = true } = {}) {
   const to = inertField(item.to, 40);
   const id = safeDraftId(item.id);
-  const when = withAge && Number.isFinite(item.at) ? ` (prepared ${ago(item.at, now)})` : '';
+  const when = withAge && Number.isFinite(item.at) ? ` (last shown ${ago(item.at, now)})` : '';
   return {
     line: `/vibe · your reply to @${to} is drafted but not sent${when} · want to see it again?`,
     context: [
       `/vibe: the person has a reply to @${to} drafted but not sent (draft ${id}${when ? `, ${when.slice(2, -1)}` : ''}), and @${to} wrote last in that conversation, so @${to} may still be waiting.`,
       'The person has been shown this one line, not the draft.',
-      `If they want to see it, show it with vibe_prepare {id: "${id}"} and wait for their next message: Send, Edit or Cancel. A draft shown again cannot be sent in the same turn. If they want to drop it, call vibe_discard {id: "${id}"}.`,
+      `If they want to see it, show it with vibe_prepare {id: "${id}"} and wait for their choice: Send, Edit or Cancel. A draft shown again can be sent only after their next message, or after Send in a question menu that shows its full text. If they want to drop it, call vibe_discard {id: "${id}"}.`,
       'Do not send, change or drop it on your own, and do not bring it up again.',
     ].join('\n'),
   };
