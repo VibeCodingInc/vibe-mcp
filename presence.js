@@ -165,15 +165,70 @@ async function knows(me, them) {
 const startedAt = Date.now();
 let lastPruneAt = 0;
 let waitingAtStart = null;
+
+// ---- Parked: held back because the sender was not known ---------------------
+// A message from someone knows() says the person has never written to waits,
+// unread, instead of arriving mid-work. That is a hold, not a verdict: the
+// moment the person comes to know them (writes to them, accepts their invite
+// with setup --from, or opens a line; whichever process does it, it lands in
+// reach.json or lines.json), the next look releases what was parked through
+// the ordinary arrival path below, so the first exchange between two new
+// people works both ways. Kept per sender: every parked id, and the newest
+// parked thread row, because the inbox has one row per conversation and once
+// the person writes back that row names their message, not the parked one.
+const parked = new Map(); // sender (lowercase) -> { ids: Set, row }
+const lower = (h) => String(h || '').toLowerCase();
+
+function park(t) {
+  const h = lower(t.lastFrom);
+  const e = parked.get(h) || { ids: new Set(), row: null };
+  e.ids.add(t.lastMessageId);
+  e.row = { ...t };
+  parked.set(h, e);
+}
+const isParked = (id) => { for (const e of parked.values()) if (e.ids.has(id)) return true; return false; };
+
+/**
+ * Release what was parked for senders the person now knows. Returns thread
+ * rows to consider as arrivals in addition to the inbox's own.
+ *
+ * Per conversation, ONE message surfaces: the newest of theirs that is still
+ * unread, carrying the unread count, so earlier parked ones show as "+N more
+ * unread", not one by one. When the newest message in the conversation is
+ * still theirs, the inbox row itself is that message, and releasing simply
+ * stops excluding its id. When the person has written since (the usual way
+ * they come to know someone), the row now names their own message, so the
+ * parked row stands in for it. Nothing is released for a conversation that has
+ * been read since, or for a muted person; quiet never reaches this (noteArrivals).
+ */
+function releaseParked(me, threads) {
+  const extra = [];
+  for (const [h, e] of parked) {
+    if (!(line.isOpen(h) || reach.isKnown(h))) continue;
+    const id = e.row.lastMessageId;
+    if (reach.isMuted(h)) { for (const x of e.ids) waitingAtStart.add(x); parked.delete(h); continue; }
+    const row = threads.find((t) => t && lower(t.handle) === h);
+    if (!row || !(row.unread > 0)) { parked.delete(h); continue; }
+    if (lower(row.lastFrom) !== lower(me)) { parked.delete(h); continue; }
+    if (waitingAtStart.has(id) || arrival.isClaimed(id) || arrival.isSpooled(id)) { parked.delete(h); continue; }
+    // Kept until it is spooled (MAX_PER_SWEEP may defer it to a later look).
+    extra.push({ ...e.row, unread: row.unread });
+  }
+  return extra;
+}
+
 async function noteArrivals(handle, threads) {
   if (!authStore.isVerified?.()) return;
   if (['0', 'off', 'false'].includes(String(process.env.VIBE_ARRIVALS || '').toLowerCase())) return;
   if (Date.now() - lastPruneAt > 60 * 60 * 1000) { lastPruneAt = Date.now(); arrival.prune(handle); }
   // Quiet: nothing surfaces. What comes in meanwhile is remembered as waiting,
-  // so turning quiet off does not release a burst of old arrivals.
+  // so turning quiet off does not release a burst of old arrivals. What was
+  // parked counts as waiting too: quiet is not undone by a release.
   if (reach.isQuiet()) {
     if (waitingAtStart === null) waitingAtStart = new Set();
     for (const t of threads) if (t.unread > 0 && t.lastMessageId) waitingAtStart.add(t.lastMessageId);
+    for (const e of parked.values()) for (const x of e.ids) waitingAtStart.add(x);
+    parked.clear();
     return;
   }
   // What was already unread on the FIRST look is "waiting" (shown when the
@@ -185,8 +240,21 @@ async function noteArrivals(handle, threads) {
     const early = new Set(arrival.pickArrivals(threads, handle, { since: startedAt }).map((t) => t.lastMessageId));
     waitingAtStart = new Set(threads.filter((t) => t.unread > 0 && t.lastMessageId && !early.has(t.lastMessageId))
       .map((t) => t.lastMessageId));
+    // The session-start hook shows what was waiting only from people the
+    // person knows; from anyone else it says "someone is waiting" and nothing
+    // more. Those are parked, not waiting, so that coming to know the sender
+    // later in this session releases them (asked once each, at most
+    // MAX_PER_SWEEP lookups, and only for senders not already known here).
+    const unknown = arrival.pickArrivals(threads.filter((t) => waitingAtStart.has(t.lastMessageId) &&
+      !reach.isMuted(t.lastFrom) && !line.isOpen(t.lastFrom) && !reach.isKnown(t.lastFrom)), handle);
+    for (const t of unknown) {
+      if (await knows(handle, t.lastFrom) === false) { waitingAtStart.delete(t.lastMessageId); park(t); }
+    }
   }
-  const fresh = threads.filter((t) => !waitingAtStart.has(t.lastMessageId));
+  // Released rows stay in `parked` until spooled, so they are added after the
+  // exclusion, not filtered by it.
+  const released = releaseParked(handle, threads);
+  const fresh = threads.filter((t) => !waitingAtStart.has(t.lastMessageId) && !isParked(t.lastMessageId)).concat(released);
   const wanted = arrival.pickArrivals(fresh, handle)
     .filter((t) => !arrival.isClaimed(t.lastMessageId) && !arrival.isSpooled(t.lastMessageId));
   // Only someone you know reaches you mid-work (reach.js). A muted person, or
@@ -199,7 +267,7 @@ async function noteArrivals(handle, threads) {
     if (reach.isMuted(t.lastFrom)) { waitingAtStart.add(t.lastMessageId); continue; }
     const known = await knows(handle, t.lastFrom);
     if (known === true) candidates.push(t);
-    else if (known === false) waitingAtStart.add(t.lastMessageId);
+    else if (known === false) park(t);
   }
   if (candidates.length === 0) return;
   const allowed = new Set(candidates.map((t) => t.lastMessageId));

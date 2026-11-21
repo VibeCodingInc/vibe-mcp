@@ -107,6 +107,9 @@ async function deliver(m) {
 
   // Writing to someone is what lets their answer reach you mid-work (reach.js).
   require('../reach').know(them);
+  // A message the person just answered has been seen: it must never then be
+  // announced as arriving (presence.js releases parked messages on a send).
+  if (m.replyTo) { try { require('../arrival').claim(m.replyTo); } catch (e) {} }
 
   return { display, data: { sent: true, message_id: result.id || null } };
 }
