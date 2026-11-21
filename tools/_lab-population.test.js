@@ -250,3 +250,51 @@ test('the population summary carries refused sends and the person-player', async
     assert.ok(!/SECRET|my-player/.test(md + json), 'the command string was recorded');
   } finally { fs.rmSync(out, { recursive: true, force: true }); }
 });
+
+// ── three people ────────────────────────────────────────────────────────────
+
+const trio = (extra = {}) => ({ ...world([1, 1, 2]), people: { ada: person('Ada'), ben: person('Ben'), cara: person('Cara') },
+  timeline: [{ who: 'ada', day: 1, prompt: 'a' }, { who: 'cara', day: 1, prompt: 'c' }, { who: 'ben', day: 2, prompt: 'b' }], ...extra });
+
+test('a world of three people is accepted; one or four are not', async () => {
+  const { validateWorld } = await lab();
+  assert.deepEqual(validateWorld(trio()), []);
+  assert.deepEqual(validateWorld(trio({ relationship: 'fresh_invite', inviter: 'cara' })), []);
+  const four = trio(); four.people.dan = person('Dan');
+  assert.ok(validateWorld(four).some((e) => /two or three handles \(got 4\)/.test(e)));
+  const one = world([1]); delete one.people.ben; one.timeline = [{ who: 'ada', day: 1, prompt: 'a' }];
+  assert.ok(validateWorld(one).some((e) => /two or three handles \(got 1\)/.test(e)));
+  assert.ok(validateWorld(trio({ relationship: 'fresh_invite', inviter: 'zed' })).some((e) => /inviter: one of the handles/.test(e)));
+});
+
+test('three people: wire figures are per recipient, and two invitees do not know each other', async () => {
+  const { analyse } = await lab();
+  const ev = [];
+  const at = (e) => { const x = { i: ev.length, day: 1, session_id: `s-${e.who}`, ...e }; ev.push(x); return x; };
+  at({ who: 'ada', entry: 0, kind: 'prompt', text: 'a' });                                   // 0: ada sends to ben and cara; ben sends to cara
+  at({ who: 'cara', entry: 1, kind: 'prompt', text: 'c' });                                  // 1
+  at({ who: 'cara', entry: 1, kind: 'shown', text: '@ada and @ben are here now: ok\n/vibe: a message from @ada and @ben' }); // 2
+  at({ who: 'ben', entry: 2, kind: 'prompt', text: 'b', day: 2 });                           // 3
+  at({ who: 'ben', entry: 2, kind: 'shown', text: '/vibe: @ada wrote: limits are 60/min', day: 2 }); // 4
+  const wire = [
+    { id: 'm1', at: 0, from: 'ada', to: 'ben', body: 'limits are 60/min' },
+    { id: 'm2', at: 0, from: 'ada', to: 'cara', body: 'docs need the new numbers' },
+    { id: 'm3', at: 0, from: 'ben', to: 'cara', body: 'can you check retry copy' },
+    { id: 'm4', at: 3, from: 'cara', to: 'ada', body: 'done' },
+  ];
+  const handles = ['ada', 'ben', 'cara'];
+  const est = analyse({ world: trio(), transcript: ev, turnsLog: [], wire: wire.map((w) => ({ ...w })), handles, started: Date.now() });
+  assert.equal(est.per_person.cara.arrivals_shown, 1, 'a line naming two people is one arrival');
+  assert.equal(est.per_person.cara.presence_lines_shown, 1);
+  assert.deepEqual(est.wire_messages_by_recipient.ben, { received: 1, shown: 1, never_shown: 0, held_sender_unknown: 0, shown_late: 0, from: { ada: 1, cara: 0 } });
+  assert.deepEqual(est.wire_messages_by_recipient.cara, { received: 2, shown: 2, never_shown: 0, held_sender_unknown: 0, shown_late: 0, from: { ada: 1, ben: 1 } });
+  assert.deepEqual(est.wire_messages_by_recipient.ada, { received: 1, shown: 0, never_shown: 1, held_sender_unknown: 0, shown_late: 0, from: { ben: 0, cara: 1 } });
+  assert.deepEqual(est.wire_messages_never_shown_to_recipient.by_recipient, { ada: 1, ben: 0, cara: 0 });
+  // fresh_invite, inviter ada: cara -> ada was known (pair with the inviter);
+  // a message between the two invitees that never showed is held, not a miss.
+  const ev2 = ev.filter((e) => e.i !== 2).map((e, i) => ({ ...e, i }));
+  const wire2 = [{ id: 'm3', at: 0, from: 'ben', to: 'cara', body: 'can you check retry copy' }, { id: 'm4', at: 0, from: 'cara', to: 'ada', body: 'done' }];
+  const fresh = analyse({ world: trio({ relationship: 'fresh_invite', inviter: 'ada' }), transcript: ev2, turnsLog: [], wire: wire2, handles, started: Date.now() });
+  assert.deepEqual(fresh.wire_messages_held_sender_unknown.by_recipient, { ada: 0, ben: 0, cara: 1 });
+  assert.deepEqual(fresh.wire_messages_never_shown_to_recipient.by_recipient, { ada: 1, ben: 0, cara: 0 });
+});

@@ -12,9 +12,11 @@
 //        [--turn-timeout 300] [--max-human-replies 3] [--limit N]
 //        [--force] [--keep]
 //
-// In plain words: each world file describes two fictional people (who they
+// In plain words: each world file describes two or three fictional people (who they
 // are, how they talk, the files in their project folder), whether they already
-// know each other or one just invited the other, and a timeline of what each
+// know each other or one just invited the others (with three people, all know
+// each other when "established"; in a fresh_invite only pairs with the inviter
+// start out known), and a timeline of what each
 // of them types on each day (a whole number 1..7; the timeline is listed in day
 // order and played in that order). The runner plays that timeline: a person's
 // first prompt on a day opens a new Claude Code session, later prompts that day
@@ -103,6 +105,8 @@ function expandFiles(files) {
 const HANDLE = /^[a-z0-9][a-z0-9_-]{1,38}$/;
 // A story may run up to a week: timeline days are whole numbers 1..MAX_DAY.
 export const MAX_DAY = 7;
+// A world is a pair, or three people who all work near each other.
+export const MAX_PEOPLE = 3;
 function validateWorld(w) {
   const errs = [];
   const str = (v) => typeof v === 'string' && v.trim().length > 0;
@@ -114,7 +118,7 @@ function validateWorld(w) {
   const people = w.people && typeof w.people === 'object' && !Array.isArray(w.people) ? w.people : null;
   const handles = people ? Object.keys(people) : [];
   if (!people) errs.push('people must be an object keyed by handle');
-  else if (handles.length !== 2) errs.push(`people must name exactly two handles (got ${handles.length})`);
+  else if (handles.length < 2 || handles.length > MAX_PEOPLE) errs.push(`people must name two or three handles (got ${handles.length})`);
   for (const h of handles) {
     const p = people[h];
     if (!HANDLE.test(h)) errs.push(`people.${h}: handle must match ${HANDLE}`);
@@ -137,8 +141,8 @@ function validateWorld(w) {
     }
   }
   if (w.relationship === 'fresh_invite') {
-    if (!handles.includes(w.inviter)) errs.push('fresh_invite needs inviter: one of the two handles');
-  } else if (w.inviter !== undefined && !handles.includes(w.inviter)) errs.push('inviter, when given, must be one of the two handles');
+    if (!handles.includes(w.inviter)) errs.push('fresh_invite needs inviter: one of the handles');
+  } else if (w.inviter !== undefined && !handles.includes(w.inviter)) errs.push('inviter, when given, must be one of the handles');
   if (!Array.isArray(w.timeline) || w.timeline.length === 0) errs.push('timeline must be a non-empty array');
   else w.timeline.forEach((t, i) => {
     if (!t || typeof t !== 'object') { errs.push(`timeline[${i}] must be an object`); return; }
@@ -329,7 +333,7 @@ async function runWorld(file, opts, log) {
   fs.mkdirSync(outDir, { recursive: true });
 
   const handles = Object.keys(world.people);
-  const other = (h) => handles.find((x) => x !== h);
+  const others = (h) => handles.filter((x) => x !== h);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `vibe-pop-${world.id}-`));
   const emptyDir = path.join(root, '_human'); fs.mkdirSync(emptyDir);
   const emptyMcp = path.join(root, '_human.mcp.json'); fs.writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
@@ -345,15 +349,16 @@ async function runWorld(file, opts, log) {
   let keepers = {};
   const setup = {};
   try {
-    // Identities. established: each knows the other. fresh_invite: only the
-    // invitee knows the inviter, marked by the same code `setup --from @inviter`
-    // runs (invite.accept, against the stub's identity lookup). open_line: each
-    // trusts the other.
+    // Identities. established: each knows every other person in the world.
+    // fresh_invite: the inviter invited each of the others; only each invitee
+    // knows the inviter, marked by the same code `setup --from @inviter` runs
+    // (invite.accept, against the stub's identity lookup), and two invitees do
+    // not know each other. open_line: each trusts every other.
     const ids = {};
     for (const h of handles) {
       const p = world.people[h];
-      const knows = world.relationship === 'established' ? [other(h)] : [];
-      const trusts = world.open_line ? [other(h)] : [];
+      const knows = world.relationship === 'established' ? others(h) : [];
+      const trusts = world.open_line ? others(h) : [];
       ids[h] = identity(root, h, p.says, stub.url, trusts, knows, { startHook: true, tokenDays: 30 });
       // A person's follow-up in the same interactive session does not start a
       // session, so a resumed turn here runs without the SessionStart hook
@@ -375,16 +380,21 @@ async function runWorld(file, opts, log) {
       }
     }
     if (world.relationship === 'fresh_invite') {
-      const invitee = other(world.inviter);
       const invite = require(path.join(REPO, 'invite.js'));
-      const got = await invite.accept(world.inviter, invitee, { apiUrl: stub.url, env: { ...process.env, VIBE_HOME: ids[invitee].home } });
-      setup.invite = { invitee, inviter: world.inviter, known: got.known, lines: got.lines };
-      if (!got.known) throw new Error(`invite.accept did not mark @${world.inviter} as known for @${invitee}: ${got.lines.join(' ')}`);
-      // The invite line carries a code the inviter minted, and the invitee's
-      // sign-in redeems it (0.9.20): the platform then tells the inviter, and
-      // only the inviter, that this person joined with their invitation.
-      setup.invite.redeemed = stub.redeem(stub.mintCode(world.inviter), invitee);
-      if (!setup.invite.redeemed) throw new Error(`the stub did not redeem @${world.inviter}'s invitation for @${invitee}`);
+      setup.invites = [];
+      for (const invitee of others(world.inviter)) {
+        const got = await invite.accept(world.inviter, invitee, { apiUrl: stub.url, env: { ...process.env, VIBE_HOME: ids[invitee].home } });
+        const rec = { invitee, inviter: world.inviter, known: got.known, lines: got.lines };
+        setup.invites.push(rec);
+        if (!got.known) throw new Error(`invite.accept did not mark @${world.inviter} as known for @${invitee}: ${got.lines.join(' ')}`);
+        // The invite line carries a code the inviter minted, and the invitee's
+        // sign-in redeems it (0.9.20): the platform then tells the inviter, and
+        // only the inviter, that this person joined with their invitation.
+        rec.redeemed = stub.redeem(stub.mintCode(world.inviter), invitee);
+        if (!rec.redeemed) throw new Error(`the stub did not redeem @${world.inviter}'s invitation for @${invitee}`);
+      }
+      // A pair's record keeps its old shape: setup.invite, the one invitation.
+      setup.invite = setup.invites[0];
     }
 
     const daySession = {};   // `${who}|${day}` -> session id
@@ -464,10 +474,12 @@ async function runWorld(file, opts, log) {
 // ---------------------------------------------------------------- analysis + records
 const isVibe = (e, tool) => e.name === `mcp__vibe__${tool}`;
 const snippet = (body) => norm(body).slice(0, 40);
-// Lines on the person's screen that name the other person. "here now: @x" is
-// presence, not an arrival; everything else naming them (a message arrived,
-// N waiting from @x, a door, an open-line answer) counts as an arrival line.
-const aboutLines = (text, other) => String(text).split('\n').filter((l) => l.includes(`@${other}`));
+// Lines on the person's screen that name another person in the world (any of
+// `others`, a handle or a list). "here now: @x" is presence, not an arrival;
+// everything else naming them (a message arrived, N waiting from @x, a door,
+// an open-line answer) counts as an arrival line. A line naming two people
+// counts once.
+const aboutLines = (text, others) => { const hs = [].concat(others); return String(text).split('\n').filter((l) => hs.some((o) => l.includes(`@${o}`))); };
 const isPresence = (l) => /\bhere now:/.test(l);
 
 function analyse({ world, transcript, turnsLog, wire, handles, started, humanPlayer = null }) {
@@ -488,7 +500,7 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
     if (!p) continue;
     if (e.kind === 'human_reply') p.human_replies++;
     if (e.kind === 'human_null') { p.human_nulls++; if (e.simulator_only && 'unparsed_raw' in e.simulator_only) p.human_unparsed++; }
-    if (e.kind === 'shown') for (const l of aboutLines(e.text, handles.find((x) => x !== e.who))) {
+    if (e.kind === 'shown') for (const l of aboutLines(e.text, handles.filter((x) => x !== e.who))) {
       if (isPresence(l)) p.presence_lines_shown++; else { p.arrivals_shown++; p.arrival_lines.push(l); }
     }
     if (e.kind === 'returned' && (e.is_error || /^\s*(error|failed)\b/i.test(e.text))) toolErrors.push({ i: e.i, who: e.who, tool: e.name.replace('mcp__vibe__', ''), text: e.text.slice(0, 1000) });
@@ -565,8 +577,10 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
   // held_sender_unknown, using the same rule. The rest are misses.
   // A message that was shown, but not during the recipient's first timeline
   // entry after it was sent, is counted as shown_late.
+  // Per pair, so it holds for three people: in a fresh_invite world only a
+  // pair that includes the inviter starts out known; two invitees do not.
   const knew = (to, from) => world.relationship === 'established' || Boolean(world.open_line) ||
-    world.relationship === 'fresh_invite' ||
+    (world.relationship === 'fresh_invite' && (to === world.inviter || from === world.inviter)) ||
     wire.some((w) => w.from === to && w.to === from);
   const unseen = []; const held = []; const late = [];
   for (const s of wire) {
@@ -582,6 +596,14 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
     } else if (knew(s.to, s.from)) unseen.push(row);
     else { s.held_sender_unknown = true; held.push(row); }
   }
+  // Every wire figure per recipient: with three people, "never reached the
+  // recipient" is only meaningful per person it was sent to.
+  const byTo = (rows) => Object.fromEntries(handles.map((h) => [h, rows.filter((r) => r.to === h).length]));
+  const perRecipient = Object.fromEntries(handles.map((h) => {
+    const got = wire.filter((s) => s.to === h);
+    return [h, { received: got.length, shown: got.filter((s) => s.shown_to_recipient).length, never_shown: byTo(unseen)[h], held_sender_unknown: byTo(held)[h], shown_late: byTo(late)[h],
+      from: Object.fromEntries(handles.filter((x) => x !== h).map((x) => [x, got.filter((s) => s.from === x).length])) }];
+  }));
   const sum = (k) => Object.values(per).reduce((a, p) => a + p[k], 0);
   return {
     id: world.id, archetype: world.archetype, relationship: world.relationship, open_line: world.open_line,
@@ -606,9 +628,10 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
     send_results_unrecognised: { count: sendsUnrecognised.length, list: sendsUnrecognised },
     send_call_outcomes: sendOutcomes,
     arrivals_shown: Object.fromEntries(handles.map((h) => [h, per[h].arrivals_shown])),
-    wire_messages_never_shown_to_recipient: { count: unseen.length, list: unseen },
-    wire_messages_held_sender_unknown: { count: held.length, list: held },
-    wire_messages_shown_late: { count: late.length, list: late },
+    wire_messages_by_recipient: perRecipient,
+    wire_messages_never_shown_to_recipient: { count: unseen.length, by_recipient: byTo(unseen), list: unseen },
+    wire_messages_held_sender_unknown: { count: held.length, by_recipient: byTo(held), list: held },
+    wire_messages_shown_late: { count: late.length, by_recipient: byTo(late), list: late },
     ask_calls: sum('ask_calls'), answer_calls: sum('answer_calls'),
     vibe_tool_errors: { count: toolErrors.length, list: toolErrors },
     human_replies: sum('human_replies'), human_nulls: sum('human_nulls'), human_unparsed: sum('human_unparsed'),
