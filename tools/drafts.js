@@ -723,7 +723,7 @@ async function keepHeld(s, me) {
     `Held for @${s.to}. /vibe created the invitation.`,
     `**Join link:** ${joinUrl}`,
   ];
-  if (pass) lines.push(`**Pass on with it:** ${pass.command}`);
+  if (pass) { lines.push(`**Pass on with it:** ${pass.command}`); invite.noteGiven(); }
   lines.push(`Your message is kept for the GitHub account ${s.to} for ${HELD_DAYS} days${until}. It arrives as your first message when they sign in to /vibe with that account; nothing reaches them before then.`);
 
   // Writing to someone is what lets their answer reach you mid-work. Their

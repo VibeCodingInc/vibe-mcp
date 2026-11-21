@@ -520,6 +520,7 @@ async function setup() {
     }
     const bring = invite.line(authResult.handle);
     if (bring) {
+      invite.noteGiven();
       console.log(`${colors.bold}  /vibe takes two. Send this to the person you build with:${colors.reset}`);
       console.log(`${colors.cyan}  ${bring.command}${colors.reset}`);
       console.log(`${colors.dim}  or the page: ${bring.link}${colors.reset}`);

@@ -158,9 +158,10 @@ function live() {
     const parsed = JSON.parse(stdout);
     // Only a count ever crosses from the reader to the presenter.
     const strangers = Number.isInteger(parsed && parsed.strangers) && parsed.strangers > 0 ? parsed.strangers : 0;
-    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers, signin: normalizeSignin(parsed && parsed.signin) };
+    const invited = Number.isInteger(parsed && parsed.invited) && parsed.invited > 0 ? Math.min(parsed.invited, strangers) : 0;
+    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers, invited, signin: normalizeSignin(parsed && parsed.signin) };
   } catch {
-    return { messages: [], here: [], doors: [], strangers: 0, signin: null };
+    return { messages: [], here: [], doors: [], strangers: 0, invited: 0, signin: null };
   }
 }
 
@@ -192,8 +193,9 @@ function normalizeDoors(value) {
  * Up to three things, each one line for the person and a short note for the
  * model: who is here, a door someone left, and messages that were waiting.
  */
-function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null) {
+function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null, invited = 0) {
   const waitingUnknown = Number.isInteger(strangers) && strangers > 0 ? Math.min(strangers, 99) : 0;
+  const mayBeInvited = Number.isInteger(invited) && invited > 0 ? Math.min(invited, waitingUnknown) : 0;
   const signinNotice = signinLine(normalizeSignin(signin));
   if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice) {
     emptyOutput();
@@ -232,8 +234,13 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
   // in a session, so it carries nothing a stranger wrote.
   if (waitingUnknown > 0) {
     const who = waitingUnknown === 1 ? '1 person you have not written to is' : `${waitingUnknown} people you have not written to are`;
-    shown.push(`/vibe · ${who} waiting. Say: what's waiting on /vibe`);
-    context.push(`/vibe: ${who} waiting with a message. Who they are and what they wrote is deliberately not given here. The person has been shown this line. Do not open or read those conversations unless the person asks what is waiting.`);
+    // The inviter's side (invite.js): the platform does not say who accepted
+    // an invite, so this is said from timing alone, as a possibility, and
+    // still with no handle and none of their words.
+    const invitedNote = mayBeInvited === 0 ? ''
+      : ` ${mayBeInvited === waitingUnknown ? (waitingUnknown === 1 ? 'They' : 'They all') : `${mayBeInvited} of them`} first wrote after you were given your invite line, so it may be someone you invited.`;
+    shown.push(`/vibe · ${who} waiting.${invitedNote} Say: what's waiting on /vibe`);
+    context.push(`/vibe: ${who} waiting with a message.${invitedNote ? `${invitedNote} That is a guess from timing only: do not name or guess who.` : ''} Who they are and what they wrote is deliberately not given here. The person has been shown this line. Do not open or read those conversations unless the person asks what is waiting.`);
   }
 
   if (messages.length > 0) {
@@ -274,7 +281,7 @@ async function fetchLive() {
   const store = require('./store');
 
   authStore.hydrate();
-  const none = { messages: [], here: [], doors: [], strangers: 0 };
+  const none = { messages: [], here: [], doors: [], strangers: 0, invited: 0 };
   const token = authStore.getToken();
   if (!token || !authStore.inspectToken(token).ok) return none;
 
@@ -292,6 +299,9 @@ async function fetchLive() {
   const rows = (await store.getRawInbox(verified.handle)).slice(0, 8);
   const kept = [];
   const unknown = new Set();   // senders they have never written to: counted, never shown
+  const invited = new Set();   // of those, ones who first wrote after this machine gave out an invite line
+  let given = null;
+  try { given = require('./invite').givenAt(); } catch {}
   for (const row of rows) {
     const from = row && row.from;
     if (!from || reach.isMuted(from)) continue;
@@ -308,6 +318,8 @@ async function fetchLive() {
           read = true;
           known = thread.some((m) => String(m.from || '').toLowerCase() === me);
           if (known) reach.know(from);
+          const first = Math.min(...thread.map((m) => Number(m.timestamp)).filter(Number.isFinite));
+          if (!known && given !== null && Number.isFinite(first) && first >= given) invited.add(String(from).toLowerCase());
         }
       } catch {}
     }
@@ -328,7 +340,7 @@ async function fetchLive() {
     try { door.note(row.from, text, row.id); } catch {}
     if (!card.closed && arrival.claim(row.id)) doors.push({ from: String(row.from).toLowerCase(), name: card.name || door.shortUrl(card.url) });
   }
-  return { messages: normalizeMessages(messages), here: await fetchHere(store, me, reach, line), doors, strangers: unknown.size };
+  return { messages: normalizeMessages(messages), here: await fetchHere(store, me, reach, line), doors, strangers: unknown.size, invited: invited.size };
 }
 
 /** The people this person knows who are in a session now. A failed read is nobody, never a guess. */
@@ -355,9 +367,9 @@ async function main() {
     // Read before anything touches the network: it must survive the service
     // being unreachable, which is exactly when a person needs to be told.
     const signin = readSignin();
-    const found = await fetchLive().catch(() => ({ messages: [], here: [], doors: [], strangers: 0 }));
+    const found = await fetchLive().catch(() => ({ messages: [], here: [], doors: [], strangers: 0, invited: 0 }));
     if (signin) markSigninShown();
-    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, signin }));
+    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, invited: found.invited || 0, signin }));
     return;
   }
 
@@ -370,7 +382,7 @@ async function main() {
   const fixture = fixtureMessages(process.env.VIBE_SESSION_START_FIXTURE);
   if (fixture !== null) { hookOutput(fixture); return; }
   const now = live();
-  hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin);
+  hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited);
   claimShown(now.messages);
 }
 

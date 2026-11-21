@@ -218,6 +218,9 @@ opened a line with. Anyone else waits where `vibe start` lists what is waiting.
 You are still told when that happens. When a session opens, one line says how many people
 you have not written to are waiting, and how to ask: `what's waiting on /vibe`. It says
 nothing about who they are or what they wrote, to you or to your agent, until you ask.
+If one of them first wrote after you were given your invite line (`setup --from @you`), it
+says it may be someone you invited: that is from timing on your machine alone, since /vibe
+does not yet tell you who accepted an invite.
 
 ```bash
 npx slashvibe-mcp quiet            # nothing surfaces until: unquiet
