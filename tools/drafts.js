@@ -333,6 +333,15 @@ async function draftHandler(args) {
   const me = config.getHandle();
   const message = typeof (args && args.message) === 'string' ? args.message.trim() : '';
   const wantId = args && args.id;
+  // What the person approves must show what it is (showable.js): a body, link
+  // title or link address with characters that do not show is refused, never
+  // echoed back.
+  const { hasHiddenCharacters } = require('../showable');
+  // The raw text: trim() would quietly drop a leading or trailing BOM.
+  if (message && hasHiddenCharacters(args.message)) return { display: 'Not prepared: the message contains characters that do not show; remove them. Nothing was sent.' };
+  if (args && Array.isArray(args.refs) && args.refs.some((r) => r && (hasHiddenCharacters(r.title) || hasHiddenCharacters(r.url)))) {
+    return { display: 'Not prepared: a link title or address contains characters that do not show; remove them. Nothing was sent.' };
+  }
 
   // Is the person on /vibe at all? Asked only for a NEW draft to a handle
   // shaped like a GitHub login. Only a definite "no such handle" (404) makes
