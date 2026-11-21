@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Population runner: many fictional PAIRS of people, each pair doing two
-// "days" of ordinary work in separate REAL Claude Code sessions (`claude -p`),
+// Population runner: many fictional PAIRS of people, each pair doing up to a
+// week ("days" 1..7) of ordinary work in separate REAL Claude Code sessions (`claude -p`),
 // with a simulated human at each keyboard deciding what to type next. Nothing
 // is scripted to approve anything: whether a message is offered, what it says,
 // whether the person sends it, and whether it arrives and is answered is all
@@ -8,14 +8,17 @@
 // recorded so a later judge can read it against each world's answer key.
 //
 //   node lab/population.mjs <world.json|dir> [more ...] --out <dir>
-//        [--model sonnet] [--human-model sonnet] [--concurrency 3]
+//        [--model sonnet] [--human-model sonnet | --human-cmd "<command>"] [--concurrency 3]
 //        [--turn-timeout 300] [--max-human-replies 3] [--limit N]
 //        [--force] [--keep]
 //
-// In plain words: each world file describes two fictional people (who they
+// In plain words: each world file describes two or three fictional people (who they
 // are, how they talk, the files in their project folder), whether they already
-// know each other or one just invited the other, and a timeline of what each
-// of them types on day 1 and day 2. The runner plays that timeline: a person's
+// know each other or one just invited the others (with three people, all know
+// each other when "established"; in a fresh_invite only pairs with the inviter
+// start out known), and a timeline of what each
+// of them types on each day (a whole number 1..7; the timeline is listed in day
+// order and played in that order). The runner plays that timeline: a person's
 // first prompt on a day opens a new Claude Code session, later prompts that day
 // continue it. A continued session is what a person who left Claude Code open
 // sees when they come back and type: that day's /vibe server is kept running
@@ -23,14 +26,28 @@
 // prompt, as it would be; the SessionStart hook does not run again. After every turn a separate model, given only that person's
 // persona and what appeared on their screen, decides what they would type next
 // (or nothing). Per world it writes <out>/<id>/transcript.json, transcript.md
-// and summary.json (prepares, sends, sends with no human reply between the
-// preview and the send, messages that never reached the recipient's screen,
+// and summary.json (prepares, sends, sends that went out with no human reply
+// between the preview and the send, send attempts the product refused (counted
+// apart: nothing went out), messages that never reached the recipient's screen,
 // tool errors, time), and <out>/population-summary.{json,md} across worlds.
 // A world with a summary.json is skipped on rerun unless --force. A directory
 // argument means every *.json in it. A person may carry an optional
 // `knows_as: { "<other handle>": "<line>" }`: who that person is to them, in
 // their words, written to their own store at setup (who.js) so the same world
 // can be run with and without it.
+//
+// The person-player is `claude -p` (--human-model picks its model) unless
+// --human-cmd "<command>" is given, so a different model family can play the
+// people. Then every decision runs that command through /bin/sh, from the same
+// empty directory, with the full prompt on stdin (the HUMAN_SYSTEM line, a
+// blank line, then the prompt humanPrompt builds); its stdout must hold the
+// same JSON ({"reply": string|null, "why": string}), read by parseHuman. Same
+// timeout as claude -p. Its environment is the runner's minus every VIBE_* /
+// SLASHVIBE_* variable: it never gets a person's VIBE_HOME or /vibe credentials.
+// A non-zero exit counts as "typed nothing" (unparsed), and a failure whose
+// output looks like auth/limits stops the run as for claude -p.
+// summary.json and population-summary record which player was used (the
+// --human-model value, or "cmd"), never the command itself: it may hold a key.
 //
 // Same safety as rehearse.mjs: every world gets its own in-process stub on
 // 127.0.0.1, every person their own VIBE_HOME, MCP config and scratch settings
@@ -55,12 +72,13 @@ const TOOLS = [...BUILTINS, 'mcp__vibe__vibe_people', 'mcp__vibe__vibe_thread', 
 
 // ---------------------------------------------------------------- arguments
 function parseArgs(argv) {
-  const o = { files: [], out: null, model: null, humanModel: 'sonnet', concurrency: 3, turnTimeout: 300, maxHumanReplies: 3, limit: 0, force: false, keep: false };
+  const o = { files: [], out: null, model: null, humanModel: 'sonnet', humanCmd: null, concurrency: 3, turnTimeout: 300, maxHumanReplies: 3, limit: 0, force: false, keep: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]; const next = () => { const v = argv[++i]; if (v === undefined) throw new Error(`${a} needs a value`); return v; };
     if (a === '--out') o.out = next();
     else if (a === '--model') o.model = next();
     else if (a === '--human-model') o.humanModel = next();
+    else if (a === '--human-cmd') { o.humanCmd = next(); if (!o.humanCmd.trim()) throw new Error('--human-cmd needs a command'); }
     else if (a === '--concurrency') o.concurrency = Math.max(1, Number(next()) || 1);
     else if (a === '--turn-timeout') o.turnTimeout = Math.max(10, Number(next()) || 300);
     else if (a === '--max-human-replies') o.maxHumanReplies = Math.max(0, Number(next()) || 0);
@@ -85,6 +103,10 @@ function expandFiles(files) {
 
 // ---------------------------------------------------------------- validation
 const HANDLE = /^[a-z0-9][a-z0-9_-]{1,38}$/;
+// A story may run up to a week: timeline days are whole numbers 1..MAX_DAY.
+export const MAX_DAY = 7;
+// A world is a pair, or three people who all work near each other.
+export const MAX_PEOPLE = 3;
 function validateWorld(w) {
   const errs = [];
   const str = (v) => typeof v === 'string' && v.trim().length > 0;
@@ -96,7 +118,7 @@ function validateWorld(w) {
   const people = w.people && typeof w.people === 'object' && !Array.isArray(w.people) ? w.people : null;
   const handles = people ? Object.keys(people) : [];
   if (!people) errs.push('people must be an object keyed by handle');
-  else if (handles.length !== 2) errs.push(`people must name exactly two handles (got ${handles.length})`);
+  else if (handles.length < 2 || handles.length > MAX_PEOPLE) errs.push(`people must name two or three handles (got ${handles.length})`);
   for (const h of handles) {
     const p = people[h];
     if (!HANDLE.test(h)) errs.push(`people.${h}: handle must match ${HANDLE}`);
@@ -119,15 +141,25 @@ function validateWorld(w) {
     }
   }
   if (w.relationship === 'fresh_invite') {
-    if (!handles.includes(w.inviter)) errs.push('fresh_invite needs inviter: one of the two handles');
-  } else if (w.inviter !== undefined && !handles.includes(w.inviter)) errs.push('inviter, when given, must be one of the two handles');
+    if (!handles.includes(w.inviter)) errs.push('fresh_invite needs inviter: one of the handles');
+  } else if (w.inviter !== undefined && !handles.includes(w.inviter)) errs.push('inviter, when given, must be one of the handles');
   if (!Array.isArray(w.timeline) || w.timeline.length === 0) errs.push('timeline must be a non-empty array');
   else w.timeline.forEach((t, i) => {
     if (!t || typeof t !== 'object') { errs.push(`timeline[${i}] must be an object`); return; }
     if (!handles.includes(t.who)) errs.push(`timeline[${i}].who must be one of ${handles.join(', ')}`);
-    if (t.day !== 1 && t.day !== 2) errs.push(`timeline[${i}].day must be 1 or 2`);
+    if (!Number.isInteger(t.day) || t.day < 1 || t.day > MAX_DAY) errs.push(`timeline[${i}].day must be a whole number from 1 to ${MAX_DAY}`);
     if (!str(t.prompt)) errs.push(`timeline[${i}].prompt must be a non-empty string`);
   });
+  // The timeline is played in file order, so it must already be in day order:
+  // a day-3 entry after a day-4 one would open a session "back in time".
+  if (Array.isArray(w.timeline)) {
+    let last = 0;
+    w.timeline.forEach((t, i) => {
+      if (!t || !Number.isInteger(t.day)) return;
+      if (t.day < last) errs.push(`timeline[${i}].day is ${t.day} after a day-${last} entry: list the timeline in day order`);
+      else last = t.day;
+    });
+  }
   return errs;
 }
 
@@ -138,7 +170,7 @@ export function seedKnowsAs(home, knowsAs) {
   for (const [k, v] of Object.entries(knowsAs || {})) who.set(k, v, env);
   return who.all(env).map((e) => ({ handle: e.handle, line: e.line }));
 }
-export { validateWorld };
+export { validateWorld, parseArgs, parseHuman, humanPrompt, HUMAN_SYSTEM, writePopulation, analyse };
 
 // ---------------------------------------------------------------- human simulator
 const HUMAN_SYSTEM = 'You play one specific person sitting at their own computer. You answer only with the JSON object asked for, nothing else.';
@@ -206,13 +238,89 @@ function askHuman({ prompt, model, emptyDir, emptyMcp, timeoutMs = 180000 }) {
   });
 }
 
+// The environment a --human-cmd player runs with: the runner's own, minus every
+// /vibe variable (VIBE_HOME, VIBE_API_URL, VIBE_AGENT_* and the rest). Sessions
+// get theirs from their own MCP config; the person-player never sees any.
+export function humanEnv(env = process.env) {
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !/^(VIBE_|SLASHVIBE_)/i.test(k)));
+}
+
+// The person-player as any shell command (--human-cmd), so another model family
+// can play the people. The full prompt (HUMAN_SYSTEM, a blank line, then what
+// humanPrompt builds) goes in on stdin; stdout is parsed by parseHuman. Same
+// timeout as askHuman; on timeout the whole process group is killed, so a
+// pipeline's children cannot keep the pipes (and this promise) open.
+export function askHumanCmd({ prompt, cmd, emptyDir, timeoutMs = 180000, env = process.env }) {
+  return new Promise((resolve) => {
+    let child;
+    try { child = spawn('/bin/sh', ['-c', cmd], { cwd: emptyDir, env: humanEnv(env), stdio: ['pipe', 'pipe', 'pipe'], detached: true }); } catch (e) {
+      resolve({ parsed: null, raw: '', isError: true, code: null, timedOut: false, stderr: String(e && e.message || e).slice(0, 2000) }); return;
+    }
+    let out = ''; let err = ''; let timedOut = false; let done = false;
+    const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(r); };
+    child.stdout.on('data', (d) => { if (out.length < 200000) out += d; }); child.stderr.on('data', (d) => { if (err.length < 8000) err += d; });
+    child.stdin.on('error', () => {});   // a command that never reads stdin
+    const timer = setTimeout(() => { timedOut = true; try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} } }, timeoutMs);
+    child.on('error', (e) => finish({ parsed: null, raw: out, isError: true, code: null, timedOut, stderr: `${err}${e.message}`.slice(0, 2000) }));
+    child.on('close', (code) => {
+      const isError = timedOut || code !== 0;
+      finish({ parsed: isError ? null : parseHuman(out), raw: out, isError, code, timedOut, stderr: err.slice(0, 2000) });
+    });
+    child.stdin.end(`${HUMAN_SYSTEM}\n\n${prompt}`);
+  });
+}
+
+// Which person-player a run used, as recorded: the --human-model value, or
+// "cmd". Never the command itself: it may carry a key.
+export const humanPlayer = (opts) => (opts.humanCmd ? 'cmd' : opts.humanModel || 'default');
+
 // A claude -p failure that means stop everything, not "this turn went badly".
 const FATAL = /invalid api key|authentication|unauthori[sz]ed|oauth|not logged in|please run \/login|rate[ _-]?limit|usage limit|overloaded_error|credit balance/i;
 
 // ---------------------------------------------------------------- one world
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
 const draftOf = (text) => { const m = String(text || '').match(/_\(draft ([^\s·]+) · rev ([^\s)_]+)\)_/); return m ? { id: m[1], rev: m[2] } : null; };
-const sendRefused = (text) => /nothing sent|not sending|didn't send|nothing confirmed|already sent|already being sent/i.test(String(text || ''));
+// What one vibe_send call did, read from what it printed. The wordings come
+// from tools/drafts.js send()/unseenRefusal()/keepHeld(), tools/deliver.js,
+// store/api.js sendMessage and index.js's sign-in gates (all read-only here).
+//   sent          "Sent to **@x**" — deliver()'s receipt, the only delivery text
+//   held          "Held for @x."   — a Keep: the message is held in an invitation
+//   unconfirmed   "_… is kept as unconfirmed …_" — the attempt may or may not
+//                 have gone out (no receipt; transport or unreadable reply)
+//   refused       a definite "nothing went out" (the list below)
+//   unrecognised  none of these: a wording this lab does not know yet. Not
+//                 counted as sent or as refused; summary.json shows how many.
+//   error / no_result  the tool call failed, or no result was recorded.
+// The old check only caught "nothing sent"-style lines, so every "Not sent
+// yet: …" refusal (the turn check) was counted as a send that went out.
+const SEND_REFUSED = [
+  /\bnothing sent\b/i,                                // "Nothing sent. …", "No draft x — nothing sent.", "… Nothing sent."
+  /^Not sent yet:/m,                                  // unseenRefusal: needs the person's next message
+  /^Not sent\. The message is \d+ chars/m,            // deliver: over the length limit
+  /not sending it twice/,                             // already sent / already being sent
+  /not creating a second invitation/,                 // already held
+  /Nothing more was done\./,                          // an earlier Keep did not confirm
+  /^Nothing was kept\./m,                             // a Keep refused (held invitations)
+  /Nothing was done\./,                               // index.js: an agent that is not signed in
+  /You're not signed in yet/,                         // requireInit / not_signed_in
+  /^You can't message yourself\./m,
+  /^Authentication failed\./m,
+  /^Your \/vibe session expired\./m,
+  /[Aa]sk for `send` again\.|^Sign in to \/vibe first/m, // index.js sign-in gate
+  /_Worth one retry\._/,                              // a definite server refusal (no "kept as unconfirmed")
+];
+export function sendOutcome(text, isError = false) {
+  if (isError) return 'error';
+  const s = String(text ?? '');
+  if (!s.trim()) return 'no_result';
+  if (/^Sent to \*\*@/.test(s)) return 'sent';
+  if (/^Held for @/.test(s)) return 'held';
+  if (/is kept as unconfirmed/.test(s)) return 'unconfirmed';
+  if (SEND_REFUSED.some((re) => re.test(s))) return 'refused';
+  return 'unrecognised';
+}
+// Something left the machine: a delivery or a held invitation.
+const wentOut = (outcome) => outcome === 'sent' || outcome === 'held';
 
 async function runWorld(file, opts, log) {
   const started = Date.now();
@@ -225,7 +333,7 @@ async function runWorld(file, opts, log) {
   fs.mkdirSync(outDir, { recursive: true });
 
   const handles = Object.keys(world.people);
-  const other = (h) => handles.find((x) => x !== h);
+  const others = (h) => handles.filter((x) => x !== h);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `vibe-pop-${world.id}-`));
   const emptyDir = path.join(root, '_human'); fs.mkdirSync(emptyDir);
   const emptyMcp = path.join(root, '_human.mcp.json'); fs.writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
@@ -241,15 +349,16 @@ async function runWorld(file, opts, log) {
   let keepers = {};
   const setup = {};
   try {
-    // Identities. established: each knows the other. fresh_invite: only the
-    // invitee knows the inviter, marked by the same code `setup --from @inviter`
-    // runs (invite.accept, against the stub's identity lookup). open_line: each
-    // trusts the other.
+    // Identities. established: each knows every other person in the world.
+    // fresh_invite: the inviter invited each of the others; only each invitee
+    // knows the inviter, marked by the same code `setup --from @inviter` runs
+    // (invite.accept, against the stub's identity lookup), and two invitees do
+    // not know each other. open_line: each trusts every other.
     const ids = {};
     for (const h of handles) {
       const p = world.people[h];
-      const knows = world.relationship === 'established' ? [other(h)] : [];
-      const trusts = world.open_line ? [other(h)] : [];
+      const knows = world.relationship === 'established' ? others(h) : [];
+      const trusts = world.open_line ? others(h) : [];
       ids[h] = identity(root, h, p.says, stub.url, trusts, knows, { startHook: true, tokenDays: 30 });
       // A person's follow-up in the same interactive session does not start a
       // session, so a resumed turn here runs without the SessionStart hook
@@ -271,16 +380,21 @@ async function runWorld(file, opts, log) {
       }
     }
     if (world.relationship === 'fresh_invite') {
-      const invitee = other(world.inviter);
       const invite = require(path.join(REPO, 'invite.js'));
-      const got = await invite.accept(world.inviter, invitee, { apiUrl: stub.url, env: { ...process.env, VIBE_HOME: ids[invitee].home } });
-      setup.invite = { invitee, inviter: world.inviter, known: got.known, lines: got.lines };
-      if (!got.known) throw new Error(`invite.accept did not mark @${world.inviter} as known for @${invitee}: ${got.lines.join(' ')}`);
-      // The invite line carries a code the inviter minted, and the invitee's
-      // sign-in redeems it (0.9.20): the platform then tells the inviter, and
-      // only the inviter, that this person joined with their invitation.
-      setup.invite.redeemed = stub.redeem(stub.mintCode(world.inviter), invitee);
-      if (!setup.invite.redeemed) throw new Error(`the stub did not redeem @${world.inviter}'s invitation for @${invitee}`);
+      setup.invites = [];
+      for (const invitee of others(world.inviter)) {
+        const got = await invite.accept(world.inviter, invitee, { apiUrl: stub.url, env: { ...process.env, VIBE_HOME: ids[invitee].home } });
+        const rec = { invitee, inviter: world.inviter, known: got.known, lines: got.lines };
+        setup.invites.push(rec);
+        if (!got.known) throw new Error(`invite.accept did not mark @${world.inviter} as known for @${invitee}: ${got.lines.join(' ')}`);
+        // The invite line carries a code the inviter minted, and the invitee's
+        // sign-in redeems it (0.9.20): the platform then tells the inviter, and
+        // only the inviter, that this person joined with their invitation.
+        rec.redeemed = stub.redeem(stub.mintCode(world.inviter), invitee);
+        if (!rec.redeemed) throw new Error(`the stub did not redeem @${world.inviter}'s invitation for @${invitee}`);
+      }
+      // A pair's record keeps its old shape: setup.invite, the one invitation.
+      setup.invite = setup.invites[0];
     }
 
     const daySession = {};   // `${who}|${day}` -> session id
@@ -336,8 +450,11 @@ async function runWorld(file, opts, log) {
         const earlier = (sessionScreens[t.sessionId || key] || []).join('\n\n').slice(-6000);
         sessionScreens[t.sessionId || key] = [...(sessionScreens[t.sessionId || key] || []), `You typed: ${typed}\n${screen}`];
         if (replies >= opts.maxHumanReplies) break;
-        const h = await askHuman({ prompt: humanPrompt(world.people[who], who, typed, screen, earlier), model: opts.humanModel, emptyDir, emptyMcp });
-        if (h.isError && FATAL.test(`${h.raw}\n${h.stderr}`)) { fatal = `human simulator claude -p failed: ${`${h.raw}\n${h.stderr}`.trim().slice(0, 600)}`; break; }
+        const hp = humanPrompt(world.people[who], who, typed, screen, earlier);
+        const h = opts.humanCmd
+          ? await askHumanCmd({ prompt: hp, cmd: opts.humanCmd, emptyDir })
+          : await askHuman({ prompt: hp, model: opts.humanModel, emptyDir, emptyMcp });
+        if (h.isError && FATAL.test(`${h.raw}\n${h.stderr}`)) { fatal = `human simulator ${opts.humanCmd ? '--human-cmd' : 'claude -p'} failed: ${`${h.raw}\n${h.stderr}`.trim().slice(0, 600)}`; break; }
         if (!h.parsed || !h.parsed.reply) {
           push({ who, day, entry: ti, kind: 'human_null', simulator_only: { why: h.parsed ? h.parsed.why : null, ...(h.parsed ? {} : { unparsed_raw: String(h.raw).slice(0, 2000), timed_out: h.timedOut }) } });
           break;
@@ -351,19 +468,21 @@ async function runWorld(file, opts, log) {
     await stub.close();
     if (!opts.keep) fs.rmSync(root, { recursive: true, force: true });
   }
-  return finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started, fatal, root, keep: opts.keep, handles });
+  return finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started, fatal, root, keep: opts.keep, handles, humanPlayer: humanPlayer(opts) });
 }
 
 // ---------------------------------------------------------------- analysis + records
 const isVibe = (e, tool) => e.name === `mcp__vibe__${tool}`;
 const snippet = (body) => norm(body).slice(0, 40);
-// Lines on the person's screen that name the other person. "here now: @x" is
-// presence, not an arrival; everything else naming them (a message arrived,
-// N waiting from @x, a door, an open-line answer) counts as an arrival line.
-const aboutLines = (text, other) => String(text).split('\n').filter((l) => l.includes(`@${other}`));
+// Lines on the person's screen that name another person in the world (any of
+// `others`, a handle or a list). "here now: @x" is presence, not an arrival;
+// everything else naming them (a message arrived, N waiting from @x, a door,
+// an open-line answer) counts as an arrival line. A line naming two people
+// counts once.
+const aboutLines = (text, others) => { const hs = [].concat(others); return String(text).split('\n').filter((l) => hs.some((o) => l.includes(`@${o}`))); };
 const isPresence = (l) => /\bhere now:/.test(l);
 
-function analyse({ world, transcript, turnsLog, wire, handles, started }) {
+function analyse({ world, transcript, turnsLog, wire, handles, started, humanPlayer = null }) {
   const ev = transcript;
   const resultFor = new Map();   // tool_use_id -> returned event
   for (const e of ev) if (e.kind === 'returned' && e.tool_use_id) resultFor.set(e.tool_use_id, e);
@@ -375,12 +494,13 @@ function analyse({ world, transcript, turnsLog, wire, handles, started }) {
   // Every draft as the person saw it: id -> { who, to, revs[], prepares: [i], session_id, sent_at }
   const drafts = new Map();
   const sendsUnattended = []; const sendsAttended = []; const revised = [];
+  const sendsRefused = []; const sendsUnconfirmed = []; const sendsUnrecognised = []; const sendOutcomes = {};
   for (const e of ev) {
     const p = per[e.who];
     if (!p) continue;
     if (e.kind === 'human_reply') p.human_replies++;
     if (e.kind === 'human_null') { p.human_nulls++; if (e.simulator_only && 'unparsed_raw' in e.simulator_only) p.human_unparsed++; }
-    if (e.kind === 'shown') for (const l of aboutLines(e.text, handles.find((x) => x !== e.who))) {
+    if (e.kind === 'shown') for (const l of aboutLines(e.text, handles.filter((x) => x !== e.who))) {
       if (isPresence(l)) p.presence_lines_shown++; else { p.arrivals_shown++; p.arrival_lines.push(l); }
     }
     if (e.kind === 'returned' && (e.is_error || /^\s*(error|failed)\b/i.test(e.text))) toolErrors.push({ i: e.i, who: e.who, tool: e.name.replace('mcp__vibe__', ''), text: e.text.slice(0, 1000) });
@@ -402,22 +522,37 @@ function analyse({ world, transcript, turnsLog, wire, handles, started }) {
     if (isVibe(e, 'vibe_send')) {
       p.send_calls++;
       const id = e.input?.id;
-      const delivered = r ? !sendRefused(r.text) && !r.is_error : false;
-      if (!delivered) continue;
+      const outcome = r ? sendOutcome(r.text, r.is_error) : 'no_result';
+      sendOutcomes[outcome] = (sendOutcomes[outcome] || 0) + 1;
       const d = id ? drafts.get(id) : null;
-      const lastPrepare = d ? Math.max(...d.prepares.filter((x) => x < e.i)) : -1;
-      const between = lastPrepare >= 0 ? ev.slice(lastPrepare + 1, e.i) : [];
+      // The last time this draft's text was in front of the person before this
+      // send: a vibe_prepare, or a refused vibe_send that showed the preview
+      // again (the turn-check refusal does, and stamps it as a showing).
+      const showings = d ? [...d.prepares, ...(d.reshown || [])].filter((x) => x < e.i) : [];
+      const lastShown = showings.length ? Math.max(...showings) : -1;
+      const between = lastShown >= 0 ? ev.slice(lastShown + 1, e.i) : [];
       const humanBetween = between.filter((x) => x.who === e.who && x.kind === 'human_reply' && x.session_id === e.session_id);
       const scriptedBetween = between.filter((x) => x.who === e.who && x.kind === 'prompt');
-      const rec = { who: e.who, day: e.day, entry: e.entry, send_event: e.i, draft: id || null, rev: e.input?.rev || null, prepare_event: lastPrepare >= 0 ? lastPrepare : null, to: d?.to || null, returned: r.text.slice(0, 400) };
+      const lastPrepare = d ? Math.max(-1, ...d.prepares.filter((x) => x < e.i)) : -1;
+      const rec = { who: e.who, day: e.day, entry: e.entry, send_event: e.i, outcome, draft: id || null, rev: e.input?.rev || null, prepare_event: lastPrepare >= 0 ? lastPrepare : null, last_shown_event: lastShown >= 0 ? lastShown : null, to: d?.to || null, returned: r ? String(r.text).slice(0, 400) : null };
       if (!d) rec.note = 'no prepare for this draft id was seen in the transcript';
+      const shown = r && draftOf(r.text);
+      if (shown && d && shown.id === d.id) (d.reshown ||= []).push(e.i);
+      else if (shown && !drafts.has(shown.id)) {
+        // vibe_send without an id opens a draft itself and shows its preview:
+        // that showing is the draft's first, as a vibe_prepare's would be.
+        drafts.set(shown.id, { id: shown.id, who: e.who, to: String(e.input?.handle || '').replace(/^@/, '') || null, revs: [shown.rev], prepares: [e.i], session_id: e.session_id });
+      }
+      if (outcome === 'refused') { sendsRefused.push({ ...rec, human_reply_between: humanBetween.length > 0 }); continue; }
+      if (outcome === 'unconfirmed') { sendsUnconfirmed.push({ ...rec, human_reply_between: humanBetween.length > 0 }); continue; }
+      if (!wentOut(outcome)) { if (outcome === 'unrecognised') sendsUnrecognised.push(rec); continue; }
       if (humanBetween.length) sendsAttended.push({ ...rec, human_reply_events: humanBetween.map((x) => x.i) });
       else {
         // The common shape: the person answered an EARLIER preview ("add X,
         // then send it"), the agent re-prepared and sent the new rev at once,
         // so the exact text that went out was never in front of them.
-        const firstPrepare = d ? Math.min(...d.prepares) : -1;
-        const earlier = firstPrepare >= 0 && firstPrepare < lastPrepare ? ev.slice(firstPrepare + 1, lastPrepare).filter((x) => x.who === e.who && x.kind === 'human_reply') : [];
+        const firstPrepare = d && d.prepares.length ? Math.min(...d.prepares) : -1;
+        const earlier = firstPrepare >= 0 && firstPrepare < lastShown ? ev.slice(firstPrepare + 1, lastShown).filter((x) => x.who === e.who && x.kind === 'human_reply') : [];
         sendsUnattended.push({ ...rec, scripted_prompt_between: scriptedBetween.map((x) => x.i), human_reply_to_an_earlier_rev: earlier.map((x) => x.i), final_text_previewed_to_person_before_send: false });
       }
       if (d) {
@@ -442,8 +577,10 @@ function analyse({ world, transcript, turnsLog, wire, handles, started }) {
   // held_sender_unknown, using the same rule. The rest are misses.
   // A message that was shown, but not during the recipient's first timeline
   // entry after it was sent, is counted as shown_late.
+  // Per pair, so it holds for three people: in a fresh_invite world only a
+  // pair that includes the inviter starts out known; two invitees do not.
   const knew = (to, from) => world.relationship === 'established' || Boolean(world.open_line) ||
-    world.relationship === 'fresh_invite' ||
+    (world.relationship === 'fresh_invite' && (to === world.inviter || from === world.inviter)) ||
     wire.some((w) => w.from === to && w.to === from);
   const unseen = []; const held = []; const late = [];
   for (const s of wire) {
@@ -459,11 +596,21 @@ function analyse({ world, transcript, turnsLog, wire, handles, started }) {
     } else if (knew(s.to, s.from)) unseen.push(row);
     else { s.held_sender_unknown = true; held.push(row); }
   }
+  // Every wire figure per recipient: with three people, "never reached the
+  // recipient" is only meaningful per person it was sent to.
+  const byTo = (rows) => Object.fromEntries(handles.map((h) => [h, rows.filter((r) => r.to === h).length]));
+  const perRecipient = Object.fromEntries(handles.map((h) => {
+    const got = wire.filter((s) => s.to === h);
+    return [h, { received: got.length, shown: got.filter((s) => s.shown_to_recipient).length, never_shown: byTo(unseen)[h], held_sender_unknown: byTo(held)[h], shown_late: byTo(late)[h],
+      from: Object.fromEntries(handles.filter((x) => x !== h).map((x) => [x, got.filter((s) => s.from === x).length])) }];
+  }));
   const sum = (k) => Object.values(per).reduce((a, p) => a + p[k], 0);
   return {
     id: world.id, archetype: world.archetype, relationship: world.relationship, open_line: world.open_line,
+    human_player: humanPlayer,
     timeline_entries_run: new Set(turnsLog.map((t) => t.entry)).size,
     timeline_entries_total: world.timeline.length,
+    days_played: [...new Set(turnsLog.map((t) => t.day))].sort((a, b) => a - b),
     turns: turnsLog.length,
     turn_timeouts: turnsLog.filter((t) => t.timedOut).length,
     sessions: [...new Set(turnsLog.map((t) => t.session_id).filter(Boolean))].length,
@@ -472,10 +619,19 @@ function analyse({ world, transcript, turnsLog, wire, handles, started }) {
     drafts_revised_before_sending: { count: revised.length, list: revised },
     sends_without_human_reply_between_prepare_and_send: { count: sendsUnattended.length, after_a_human_reply_to_an_earlier_rev: sendsUnattended.filter((x) => x.human_reply_to_an_earlier_rev.length).length, list: sendsUnattended },
     sends_with_human_reply_between: sendsAttended.length,
+    // vibe_send calls the product refused: nothing went out. Not part of either
+    // figure above, which count only sends that went out (sent or held).
+    refused_sends: { count: sendsRefused.length, list: sendsRefused },
+    // Attempts that may or may not have gone out (no receipt), and results in a
+    // wording this lab does not know: neither counted as sent nor as refused.
+    sends_unconfirmed: { count: sendsUnconfirmed.length, list: sendsUnconfirmed },
+    send_results_unrecognised: { count: sendsUnrecognised.length, list: sendsUnrecognised },
+    send_call_outcomes: sendOutcomes,
     arrivals_shown: Object.fromEntries(handles.map((h) => [h, per[h].arrivals_shown])),
-    wire_messages_never_shown_to_recipient: { count: unseen.length, list: unseen },
-    wire_messages_held_sender_unknown: { count: held.length, list: held },
-    wire_messages_shown_late: { count: late.length, list: late },
+    wire_messages_by_recipient: perRecipient,
+    wire_messages_never_shown_to_recipient: { count: unseen.length, by_recipient: byTo(unseen), list: unseen },
+    wire_messages_held_sender_unknown: { count: held.length, by_recipient: byTo(held), list: held },
+    wire_messages_shown_late: { count: late.length, by_recipient: byTo(late), list: late },
     ask_calls: sum('ask_calls'), answer_calls: sum('answer_calls'),
     vibe_tool_errors: { count: toolErrors.length, list: toolErrors },
     human_replies: sum('human_replies'), human_nulls: sum('human_nulls'), human_unparsed: sum('human_unparsed'),
@@ -512,11 +668,11 @@ function toMarkdown(world, transcript, wire, summary) {
   return L.join('\n');
 }
 
-function finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started, fatal, handles }) {
+function finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started, fatal, handles, humanPlayer }) {
   const wire = stub.effects.filter((e) => e.effect === 'SEND').map((s) => ({
     id: s.id, at: s._at ?? null, from: s.me, to: s.to, body: s.body, origin: s.origin, approved: s.approved, reply_to: s.reply_to, linked: s.linked, t: new Date(s.t).toISOString(),
   }));
-  const summary = analyse({ world, transcript, turnsLog, wire, handles, started });
+  const summary = analyse({ world, transcript, turnsLog, wire, handles, started, humanPlayer });
   const record = { world: { id: world.id, archetype: world.archetype, relationship: world.relationship, inviter: world.inviter ?? null, open_line: world.open_line, people: world.people, timeline: world.timeline }, setup, events: transcript, wire, turns: turnsLog, answer_key: world.truth ?? null, note: 'events[].simulator_only is the human simulator\'s private reasoning: it never appeared on any screen.' };
   fs.writeFileSync(path.join(outDir, 'transcript.json'), JSON.stringify(record, null, 2));
   fs.writeFileSync(path.join(outDir, 'transcript.md'), toMarkdown(world, transcript, wire, summary));
@@ -528,19 +684,23 @@ function finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started
   return { id: world.id, summary };
 }
 
-function writePopulation(out, results) {
+function writePopulation(out, results, opts = {}) {
   const done = results.filter((r) => r.summary);
   const total = (k) => done.reduce((a, r) => a + (typeof r.summary[k] === 'object' ? r.summary[k].count : r.summary[k] || 0), 0);
   const agg = {
+    // The person-player of this run, and of every world summarised (a world
+    // skipped on rerun keeps the summary, and so the player, of its own run).
+    human_player: humanPlayer(opts), human_players: [...new Set(done.map((r) => r.summary.human_player || 'unrecorded'))],
     worlds: results.length, completed: done.length, failed: results.filter((r) => r.error).map((r) => ({ file: r.file, id: r.id || null, error: r.error })),
-    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'wall_clock_seconds'].map((k) => [k, total(k)])),
+    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'refused_sends', 'sends_unconfirmed', 'send_results_unrecognised', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'wall_clock_seconds'].map((k) => [k, total(k)])),
     per_world: done.map((r) => r.summary),
   };
   fs.writeFileSync(path.join(out, 'population-summary.json'), JSON.stringify(agg, null, 2));
-  const cols = ['turns', 'prepare_calls', 'sends_on_wire', 'sends_without_human_reply_between_prepare_and_send', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'discards', 'turn_timeouts', 'wall_clock_seconds'];
+  const cols = ['turns', 'prepare_calls', 'sends_on_wire', 'sends_without_human_reply_between_prepare_and_send', 'refused_sends', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'discards', 'turn_timeouts', 'wall_clock_seconds'];
   const v = (s, k) => (typeof s[k] === 'object' ? s[k].count : s[k]);
-  const L = ['# Population run', '', `${agg.completed}/${agg.worlds} worlds completed.`, '',
-    '`unattended sends` = sends with no human reply between the prepare and the send in that session.',
+  const L = ['# Population run', '', `${agg.completed}/${agg.worlds} worlds completed. Person-player: ${agg.human_player}${agg.human_players.some((x) => x !== agg.human_player) ? ` (worlds summarised: ${agg.human_players.join(', ')})` : ''}.`, '',
+    '`unattended sends` = sends that went out (delivered, or held in an invitation) with no human reply between the last time that draft was shown and the send, in that session.',
+    '`refused sends` = vibe_send calls the product refused: nothing went out. Counted apart; never part of the unattended figure.',
     '`never shown` = sent by someone the recipient knows and never on their screen (a miss). `held` = from someone the recipient does not know, so held by design. `late` = shown, but not in the recipient\'s next timeline entry.', '',
     `| world | archetype | ${cols.join(' | ')} |`, `|${'---|'.repeat(cols.length + 2)}`];
   for (const s of agg.per_world) L.push(`| ${s.id} | ${s.archetype} | ${cols.map((k) => v(s, k)).join(' | ')} |`);
@@ -555,7 +715,7 @@ async function main() {
   let opts;
   try { opts = parseArgs(process.argv.slice(2)); } catch (e) { console.error(e.message); process.exit(2); }
   if (!opts.files.length || !opts.out) {
-    console.error('usage: node lab/population.mjs <world.json|dir> [more ...] --out <dir> [--model sonnet] [--human-model sonnet] [--concurrency 3] [--turn-timeout 300] [--max-human-replies 3] [--limit N] [--force] [--keep]');
+    console.error('usage: node lab/population.mjs <world.json|dir> [more ...] --out <dir> [--model sonnet] [--human-model sonnet | --human-cmd "<command>"] [--concurrency 3] [--turn-timeout 300] [--max-human-replies 3] [--limit N] [--force] [--keep]');
     process.exit(2);
   }
   let files = expandFiles(opts.files);
@@ -575,8 +735,8 @@ async function main() {
     }
   }
   await Promise.all(Array.from({ length: Math.min(opts.concurrency, files.length) }, worker));
-  const agg = writePopulation(opts.out, results.filter(Boolean));
-  console.log(`\n${agg.completed}/${agg.worlds} worlds · turns ${agg.totals.turns} · sends ${agg.totals.sends_on_wire} · unattended sends ${agg.totals.sends_without_human_reply_between_prepare_and_send} · never shown ${agg.totals.wire_messages_never_shown_to_recipient}`);
+  const agg = writePopulation(opts.out, results.filter(Boolean), opts);
+  console.log(`\n${agg.completed}/${agg.worlds} worlds · turns ${agg.totals.turns} · sends ${agg.totals.sends_on_wire} · unattended sends ${agg.totals.sends_without_human_reply_between_prepare_and_send} · refused sends ${agg.totals.refused_sends} · never shown ${agg.totals.wire_messages_never_shown_to_recipient}`);
   console.log(`wrote ${path.join(opts.out, 'population-summary.md')}`);
   if (stop) { console.error(`\nSTOPPED: ${stop}`); process.exit(1); }
   process.exit(agg.failed.length ? 1 : 0);
