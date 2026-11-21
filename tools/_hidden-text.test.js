@@ -45,6 +45,9 @@ const HIDDEN = {
   'word joiner': 'a⁠b',
   'byte order mark': '﻿hello',
   'a lone zero-width joiner': 'a‍b',
+  'a digit and U+FE0F without the keycap': 'step 1\uFE0F next',
+  'a letter as a keycap': 'a\uFE0F\u20E3',
+  'a subdivision flag (tag characters)': '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}',
   'escape sequence': 'hi \u001b[8mtoken\u001b[0m',
   'carriage return': 'a\rb',
   'C1 control': 'a\u0085b',
@@ -59,6 +62,8 @@ const SHOWABLE = {
   'woman shrugging': '🤷‍♀️',
   'newlines and tabs': 'line one\n\tline two',
   'accents and other scripts': 'café, Привет, こんにちは',
+  'keycap numbering': '1\uFE0F\u20E3 first 2\uFE0F\u20E3 second',
+  'keycap # and *': '#\uFE0F\u20E3 and *\uFE0F\u20E3',
 };
 
 test('the rule: hidden characters are found; emoji sequences and ordinary text pass', () => {

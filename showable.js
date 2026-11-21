@@ -14,12 +14,14 @@
  *
  * Emoji are not broken by it: U+FE0F (emoji presentation) is allowed right
  * after an emoji, and U+200D (zero-width joiner) only between two emoji, so
- * ❤️, 👨‍👩‍👧, 👍🏽, 🧑🏽‍💻 and 🏳️‍🌈 pass. Flags made of regional indicators
+ * ❤️, 👨‍👩‍👧, 👍🏽, 🧑🏽‍💻 and 🏳️‍🌈 pass, and U+FE0F is allowed in a keycap
+ * (one of 0-9 # * , U+FE0F, U+20E3: 1️⃣) and nowhere else. Flags made of regional indicators
  * (🇫🇷) pass; subdivision flags spelled with tag characters do not.
  */
 
 const PICTOGRAPHIC = /\p{Extended_Pictographic}/u;
 const FORMAT = /\p{Cf}/u;
+const KEYCAP_BASE = /^[0-9#*]$/;
 const isModifier = (cp) => cp >= 0x1F3FB && cp <= 0x1F3FF;   // skin tones (Emoji_Modifier)
 
 function hiddenAlways(cp) {
@@ -46,7 +48,12 @@ function hasHiddenCharacters(text) {
   };
   for (let i = 0; i < cps.length; i++) {
     const cp = cps[i];
-    if (cp === 0xFE0F) { if (i > 0 && PICTOGRAPHIC.test(String.fromCodePoint(cps[i - 1]))) continue; return true; }
+    if (cp === 0xFE0F) {
+      if (i > 0 && PICTOGRAPHIC.test(String.fromCodePoint(cps[i - 1]))) continue;
+      // Keycap: exactly one of 0-9 # * , then U+FE0F, then U+20E3 (1️⃣ 2️⃣).
+      if (i > 0 && KEYCAP_BASE.test(String.fromCodePoint(cps[i - 1])) && cps[i + 1] === 0x20E3) continue;
+      return true;
+    }
     if (cp === 0x200D) {
       const next = i + 1 < cps.length ? String.fromCodePoint(cps[i + 1]) : '';
       if (emojiEndsAt(i - 1) && next && PICTOGRAPHIC.test(next)) continue;
