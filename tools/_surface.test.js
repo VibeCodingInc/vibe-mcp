@@ -151,6 +151,7 @@ test('no tool call sends without a preview the person approved: a handle + messa
   // The open line is the one deliberate exception (tools/line.js): opened
   // from a terminal by both people, refused for anyone without a line.
   const OPEN_LINE = new Set(['vibe_ask', 'vibe_answer']);
+  const OUTSIDE_PROCESS = new Set(['vibe_init', 'vibe_token', 'vibe_visit']);
   assert.ok(Object.keys(tools).length >= 12 && tools.vibe_send && tools.vibe_prepare, 'every registered tool was found');
   const invites = [];
   const posts = [];
@@ -170,6 +171,11 @@ test('no tool call sends without a preview the person approved: a handle + messa
       const args = { handle: '@linus', to: 'linus', message: 'SECRET from a repo file', body: 'SECRET from a repo file', reply_to: 'msg_q9' };
       for (const [name, tool] of Object.entries(tools)) {
         if (OPEN_LINE.has(name)) continue;
+        // Not called here: these act outside the process (sign-in opens a
+        // browser and waits for it; visit opens a link), so on a machine with
+        // no session they never return. None of them can send: the test
+        // below pins every file that can reach deliver().
+        if (OUTSIDE_PROCESS.has(name)) continue;
         let r;
         try { r = await tool.handler({ ...args }); } catch (e) { r = { display: String(e && e.message) }; }
         assert.equal(sent.length, 0, `${name} sent a message with no approved draft`);
