@@ -359,4 +359,15 @@ class VibeMCPServer {
   }
 }
 
-new VibeMCPServer().start();
+/** Start the MCP server on stdin/stdout. cli.js calls this; so does `node index.js`. */
+function start() {
+  const server = new VibeMCPServer();
+  server.start();
+  return server;
+}
+
+// Loading this file starts nothing: requiring it used to start a server on the
+// requirer's stdin and verify the saved sign-in against production.
+if (require.main === module) start();
+
+module.exports = { start, VibeMCPServer, SERVER_INSTRUCTIONS };

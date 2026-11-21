@@ -575,23 +575,38 @@ async function setup() {
   }
 }
 
-// Run setup when this file is loaded (invoked by cli.js or npx vibe-setup).
-//
-// Requiring this module USED to be indistinguishable from running it, which is a
-// live hazard rather than a style point: it means anything that so much as inspects
-// setup.js opens a browser, writes host configs and authenticates against production.
-// It happened during a rehearsal. VIBE_SETUP_NO_AUTORUN lets a caller load the module
-// to look at it — nothing in normal use sets that variable.
-if (process.env.VIBE_SETUP_NO_AUTORUN !== '1') {
-  setup().catch(err => {
+/**
+ * Run setup as a person runs it: the walk, and a non-zero exit if it fails.
+ * The only two callers are this file as the entry point (`vibe-setup`, `node
+ * setup.js`) and cli.js on `npx slashvibe-mcp setup`.
+ *
+ * VIBE_SETUP_NO_AUTORUN=1 refuses even an explicit run: test suites and the lab
+ * set it for every process they start, so nothing below them can sign in to
+ * production as whoever owns the machine. Nothing in normal use sets it.
+ */
+function run() {
+  if (process.env.VIBE_SETUP_NO_AUTORUN === '1') {
+    process.stderr.write('slashvibe-mcp: setup not run (VIBE_SETUP_NO_AUTORUN=1 is set in this environment).\n');
+    process.exitCode = 1;
+    return Promise.resolve();
+  }
+  return setup().catch(err => {
     console.error(`${colors.red}Setup failed: ${err.message}${colors.reset}`);
     process.exit(1);
   });
 }
 
+// Loading this module does nothing. It used to run setup on require, so anything
+// that so much as inspected setup.js (a test, a one-liner, a tool reading its
+// exports) opened a browser, wrote host configs and signed in to production as the
+// machine's real user. That happened twice. Setup runs only when this file is the
+// entry point, or when cli.js calls run().
+if (require.main === module) run();
+
 // Named exports for tests and for callers that want a piece rather than the whole
 // ceremony. Deliberately narrow.
 module.exports = {
+  run,
   setup,
   findClaudeConfig,
   configureAllHosts,

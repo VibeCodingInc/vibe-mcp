@@ -338,7 +338,9 @@ async function operateCli(argv, say) {
   say(`  npx slashvibe-mcp operate renew @${agent}   ·   stop being named: npx slashvibe-mcp operate revoke @${agent}`);
 }
 
-if (['help', '--help', '-h'].includes(args[0])) {
+if (require.main !== module) {
+  // Loaded, not run: requiring this file must do nothing (see setup.js run()).
+} else if (['help', '--help', '-h'].includes(args[0])) {
   process.stdout.write(`${USAGE}\n`);
 } else if (['--version', '-v', 'version'].includes(args[0])) {
   process.stdout.write(`${require('./package.json').version}\n`);
@@ -502,7 +504,7 @@ if (['help', '--help', '-h'].includes(args[0])) {
     process.exitCode = 1;
   }
 } else if (args.includes('setup')) {
-  require('./setup.js');
+  require('./setup.js').run();
 } else if (process.stdin.isTTY) {
   // Running from terminal (not as MCP server)
   const config = require('./config');
@@ -519,7 +521,7 @@ if (['help', '--help', '-h'].includes(args[0])) {
 
   if (!config.isInitialized() && !cred.ok) {
     // Never signed in — set up.
-    require('./setup.js');
+    require('./setup.js').run();
   } else if (!cred.ok && cred.reason !== 'none') {
     // Signed in once, not any more. Say which, and fix it rather than describing it.
     const when = cred.expiresAt
@@ -530,7 +532,7 @@ if (['help', '--help', '-h'].includes(args[0])) {
       : `Your /vibe sign-in is no longer valid${when}.`);
     console.log('Signing you back in...');
     console.log('');
-    require('./setup.js');
+    require('./setup.js').run();
   } else {
     // Genuinely signed in — say WHO, because a status line that cannot name you is the
     // one that hid this in the first place.
@@ -558,5 +560,5 @@ if (['help', '--help', '-h'].includes(args[0])) {
       process.stderr.write('slashvibe-mcp: no terminal here, so this started as an MCP server and is waiting for a coding agent. To install /vibe, run: npx slashvibe-mcp setup\n');
     }
   } catch {}
-  require('./index.js');
+  require('./index.js').start();
 }
