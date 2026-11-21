@@ -234,6 +234,22 @@ npx slashvibe-mcp quiet            # nothing surfaces until: unquiet
 npx slashvibe-mcp mute @handle     # one person stops surfacing: unmute @handle
 ```
 
+Your agent knows a handle and a status line, not that @walt is your dad who owns the
+business. Tell it, in your words, and it can connect "this needs the owner" to @walt:
+
+```bash
+npx slashvibe-mcp who @walt "my dad; owns Walt's Hauling, knows the trucks and prices"
+npx slashvibe-mcp who              # what you have noted · who @walt --clear removes one
+```
+
+What is kept: one line per person, in `~/.vibe/who.json` on this machine (readable only by
+you, mode 0600). Your agent is given it at session start, in the people list, and beside a
+message from that person. The package never sends it on its own. Your agent is told never to
+put it into a message; an unattended answer or question over an open line that contains it is
+refused; and a draft that contains it says so in the preview, so you decide before Send. It is
+not shown to your agent beside a message that came over an open line. Your agent cannot write
+it: you do, with the command above.
+
 The line that says what you are working on is yours. Tell your agent ("say I'm working on
 the scheduler lease") and it sets it; nothing is taken from your repository.
 

@@ -13,6 +13,7 @@ const { spawnSync } = require('node:child_process');
 
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-surface-'));
 process.env.VIBE_HOME = HOME;
+process.env.VIBE_API_URL = 'http://127.0.0.1:9';   // never production, even for a call nobody stubbed
 const jwt = (h) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Math.floor(Date.now() / 1000) + 86400 })).toString('base64url')}.sig`;
 fs.writeFileSync(path.join(HOME, 'config.json'), JSON.stringify({ username: 'ada', authMethod: 'github', authToken: jwt('ada') }));
 

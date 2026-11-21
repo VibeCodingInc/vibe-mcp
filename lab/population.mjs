@@ -27,7 +27,10 @@
 // preview and the send, messages that never reached the recipient's screen,
 // tool errors, time), and <out>/population-summary.{json,md} across worlds.
 // A world with a summary.json is skipped on rerun unless --force. A directory
-// argument means every *.json in it.
+// argument means every *.json in it. A person may carry an optional
+// `knows_as: { "<other handle>": "<line>" }`: who that person is to them, in
+// their words, written to their own store at setup (who.js) so the same world
+// can be run with and without it.
 //
 // Same safety as rehearse.mjs: every world gets its own in-process stub on
 // 127.0.0.1, every person their own VIBE_HOME, MCP config and scratch settings
@@ -38,6 +41,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { startStub } from './stub.mjs';
 import { identity, session, keepOpen, caughtUp, REPO } from './harness.mjs';
 
@@ -99,6 +103,16 @@ function validateWorld(w) {
     if (!p || typeof p !== 'object') { errs.push(`people.${h} must be an object`); continue; }
     for (const k of ['name', 'role', 'says', 'persona']) if (!str(p[k])) errs.push(`people.${h}.${k} must be a non-empty string`);
     if (p.files !== undefined && (typeof p.files !== 'object' || p.files === null || Array.isArray(p.files))) errs.push(`people.${h}.files must be an object of "rel/path": "content"`);
+    // Optional: who the other person is to this one, in this person's words
+    // (who.js), written to their store at setup so a world can run with and without it.
+    if (p.knows_as !== undefined) {
+      if (typeof p.knows_as !== 'object' || p.knows_as === null || Array.isArray(p.knows_as)) errs.push(`people.${h}.knows_as must be an object of "<handle>": "<line>"`);
+      else for (const [k, v] of Object.entries(p.knows_as)) {
+        if (!HANDLE.test(k)) errs.push(`people.${h}.knows_as: "${k}" must be a handle matching ${HANDLE}`);
+        else if (k === h) errs.push(`people.${h}.knows_as: a person does not note themselves`);
+        if (!str(v)) errs.push(`people.${h}.knows_as["${k}"] must be a non-empty string`);
+      }
+    }
     for (const [rel, content] of Object.entries(p.files || {})) {
       if (typeof content !== 'string') errs.push(`people.${h}.files["${rel}"] must be a string`);
       if (!rel || path.isAbsolute(rel) || rel.split(/[\\/]/).includes('..')) errs.push(`people.${h}.files["${rel}"]: path must be relative and stay inside the work dir`);
@@ -116,6 +130,15 @@ function validateWorld(w) {
   });
   return errs;
 }
+
+/** Write a person's knows_as lines into their own store (who.js), as `who @h "..."` would. Returns what is stored. */
+export function seedKnowsAs(home, knowsAs) {
+  const who = require(path.join(REPO, 'who.js'));
+  const env = { ...process.env, VIBE_HOME: home };
+  for (const [k, v] of Object.entries(knowsAs || {})) who.set(k, v, env);
+  return who.all(env).map((e) => ({ handle: e.handle, line: e.line }));
+}
+export { validateWorld };
 
 // ---------------------------------------------------------------- human simulator
 const HUMAN_SYSTEM = 'You play one specific person sitting at their own computer. You answer only with the JSON object asked for, nothing else.';
@@ -237,6 +260,9 @@ async function runWorld(file, opts, log) {
       delete s.hooks.SessionStart;
       ids[h].resumeSettings = path.join(root, h, 'settings.resume.json');
       fs.writeFileSync(ids[h].resumeSettings, JSON.stringify(s, null, 2));
+      // knows_as: the line this person keeps about who someone is to them,
+      // written by the same code `npx slashvibe-mcp who @h "..."` runs.
+      if (p.knows_as && typeof p.knows_as === 'object') (setup.knows_as ||= {})[h] = seedKnowsAs(ids[h].home, p.knows_as);
       for (const [rel, text] of Object.entries(p.files || {})) {
         const dest = path.join(ids[h].work, rel);
         if (!path.resolve(dest).startsWith(path.resolve(ids[h].work) + path.sep)) throw new Error(`file ${rel} escapes the work dir`);
@@ -556,4 +582,5 @@ async function main() {
   process.exit(agg.failed.length ? 1 : 0);
 }
 
-await main();
+// Run only as a program, so a test can import validateWorld and seedKnowsAs.
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await main();

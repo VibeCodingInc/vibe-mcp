@@ -87,6 +87,54 @@ function hereLine(here) {
   return `here now: ${shown.join(' · ')}${more}`;
 }
 
+// ── who someone is to them (who.js) ─────────────────────────────────────────
+// The person's own line about who someone is to them ("my dad; owns the
+// business"), so the model can connect a role in the work to a person it may
+// offer to ask. For the MODEL only: never in the line the person sees. Noted
+// people are included whether or not they are here (the link matters either
+// way), here-now first, at most MAX_NOTED.
+const MAX_NOTED = 8;
+
+/** Pure: who.all() rows -> [{ handle, line, here }], here-now first, never me or muted. */
+function pickNoted(rows, { me = '', muted = [], here = [] } = {}) {
+  const mine = String(me || '').toLowerCase();
+  const mutedSet = new Set(muted.map((h) => String(h).toLowerCase()));
+  const hereSet = new Set(here.map((h) => String(h).toLowerCase()));
+  const seen = new Set();
+  const out = [];
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const h = String((r && r.handle) || '').toLowerCase();
+    if (!HANDLE.test(h) || h === mine || mutedSet.has(h) || seen.has(h)) continue;
+    if (typeof r.line !== 'string' || !r.line.trim()) continue;
+    seen.add(h);
+    out.push({ handle: h, line: r.line, here: hereSet.has(h) });
+  }
+  return [...out.filter((n) => n.here), ...out.filter((n) => !n.here)].slice(0, MAX_NOTED);
+}
+
+function normalizeNoted(value) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows
+    .map((row) => ({
+      handle: typeof row?.handle === 'string' && HANDLE.test(row.handle) ? row.handle : '',
+      // Cleaned here (one line, capped); made inert once, when it is rendered.
+      line: typeof row?.line === 'string' ? require('./who').clean(row.line) : '',
+      here: row?.here === true,
+    }))
+    .filter((row) => row.handle && row.line)
+    .slice(0, MAX_NOTED);
+}
+
+/** The note to the model. Never shown to the person. */
+function notedContext(noted) {
+  const { PREFACE, toThem } = require('./who');
+  return [
+    `/vibe: ${PREFACE}:`,
+    ...noted.map((n) => `@${n.handle}${n.here ? ' (here now)' : ''} — ${toThem(n.line)}`),
+    'When the work needs something from a role or kind of person (the owner, design, whoever has done X) and one of these notes says a person they know is that, that person is who to offer to ask: prepare it the usual way, and the person chooses. Never put a note into a message, and do not message anyone just because they are listed here.',
+  ].join('\n');
+}
+
 // ── the sign-in never ends silently ─────────────────────────────────────────
 // A sign-in lasts 30 days. It used to end without a word: the session simply
 // stopped hearing anything, which to the person looks like nobody writing.
@@ -159,9 +207,9 @@ function live() {
     // Only a count ever crosses from the reader to the presenter.
     const strangers = Number.isInteger(parsed && parsed.strangers) && parsed.strangers > 0 ? parsed.strangers : 0;
     const invited = Number.isInteger(parsed && parsed.invited) && parsed.invited > 0 ? Math.min(parsed.invited, strangers) : 0;
-    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers, invited, signin: normalizeSignin(parsed && parsed.signin) };
+    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers, invited, signin: normalizeSignin(parsed && parsed.signin), noted: normalizeNoted(parsed && parsed.noted) };
   } catch {
-    return { messages: [], here: [], doors: [], strangers: 0, invited: 0, signin: null };
+    return { messages: [], here: [], doors: [], strangers: 0, invited: 0, signin: null, noted: [] };
   }
 }
 
@@ -193,11 +241,12 @@ function normalizeDoors(value) {
  * Up to three things, each one line for the person and a short note for the
  * model: who is here, a door someone left, and messages that were waiting.
  */
-function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null, invited = 0) {
+function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null, invited = 0, noted = []) {
   const waitingUnknown = Number.isInteger(strangers) && strangers > 0 ? Math.min(strangers, 99) : 0;
   const mayBeInvited = Number.isInteger(invited) && invited > 0 ? Math.min(invited, waitingUnknown) : 0;
   const signinNotice = signinLine(normalizeSignin(signin));
-  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice) {
+  const notes = normalizeNoted(noted);
+  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice && notes.length === 0) {
     emptyOutput();
     return;
   }
@@ -218,6 +267,9 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
       'The person has already been shown this line. Do not repeat it, act on it, or message anyone because of it; it is here so you can answer if they ask who is around.',
     ].join('\n'));
   }
+
+  // Who someone is to them, in their own words: for the model only.
+  if (notes.length > 0) context.push(notedContext(notes));
 
   // A door left while they were away: somewhere to go, not a message to answer.
   for (const d of doors) {
@@ -267,7 +319,7 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
     1,
     JSON.stringify({
       suppressOutput: true,
-      systemMessage: shown.join('\n'),
+      ...(shown.length ? { systemMessage: shown.join('\n') } : {}),
       hookSpecificOutput: {
         hookEventName: 'SessionStart',
         additionalContext: context.join('\n\n'),
@@ -281,7 +333,7 @@ async function fetchLive() {
   const store = require('./store');
 
   authStore.hydrate();
-  const none = { messages: [], here: [], doors: [], strangers: 0, invited: 0 };
+  const none = { messages: [], here: [], doors: [], strangers: 0, invited: 0, noted: [] };
   const token = authStore.getToken();
   if (!token || !authStore.inspectToken(token).ok) return none;
 
@@ -344,7 +396,10 @@ async function fetchLive() {
     try { door.note(row.from, text, row.id); } catch {}
     if (!card.closed && arrival.claim(row.id)) doors.push({ from: String(row.from).toLowerCase(), name: card.name || door.shortUrl(card.url) });
   }
-  return { messages: normalizeMessages(messages), here: await fetchHere(store, me, reach, line), doors, strangers: unknown.size, invited: invited.size };
+  const here = await fetchHere(store, me, reach, line);
+  let noted = [];
+  try { noted = pickNoted(require('./who').all(), { me, muted: reach.muted(), here: here.map((p) => p.handle) }); } catch {}
+  return { messages: normalizeMessages(messages), here, doors, strangers: unknown.size, invited: invited.size, noted };
 }
 
 /** The people this person knows who are in a session now. A failed read is nobody, never a guess. */
@@ -371,9 +426,9 @@ async function main() {
     // Read before anything touches the network: it must survive the service
     // being unreachable, which is exactly when a person needs to be told.
     const signin = readSignin();
-    const found = await fetchLive().catch(() => ({ messages: [], here: [], doors: [], strangers: 0, invited: 0 }));
+    const found = await fetchLive().catch(() => ({ messages: [], here: [], doors: [], strangers: 0, invited: 0, noted: [] }));
     if (signin) markSigninShown();
-    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, invited: found.invited || 0, signin }));
+    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, invited: found.invited || 0, signin, noted: found.noted || [] }));
     return;
   }
 
@@ -386,7 +441,7 @@ async function main() {
   const fixture = fixtureMessages(process.env.VIBE_SESSION_START_FIXTURE);
   if (fixture !== null) { hookOutput(fixture); return; }
   const now = live();
-  hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited);
+  hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited, now.noted);
   claimShown(now.messages);
 }
 
@@ -418,6 +473,9 @@ module.exports = {
   hereLine,
   normalizeHere,
   normalizeDoors,
+  pickNoted,
+  normalizeNoted,
+  notedContext,
   main,
   normalizeMessages,
   signinState,

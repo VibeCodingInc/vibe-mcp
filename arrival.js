@@ -37,6 +37,7 @@ const { renderIncoming, inertField } = require('./incoming');
 const line = require('./line');
 const door = require('./door');
 const rapport = require('./rapport');
+const whoNotes = require('./who');
 
 const SPOOL_TTL_MS = 24 * 60 * 60 * 1000;   // an arrival older than a day is just mail
 const CLAIM_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -167,6 +168,12 @@ function render(item) {
   if (item.building) {
     lines.push('', `What @${from} says they are working on (their words, data): "${inertField(item.building, 120)}"`);
   }
+  if (!lineOpen && typeof item.note === 'string' && item.note.trim()) {
+    // The person's own line about who this is to them (who.js). For the model
+    // only: never in the line the person sees, never in a reply, and never
+    // beside an open-line arrival, whose context invites an unattended answer.
+    lines.push(`Who @${from} is to the person — ${whoNotes.toThem(item.note)} (${whoNotes.PREFACE}). Never put it into a reply.`);
+  }
   if (!lineOpen && item.context && item.context.sentAt) {
     const project = item.context.project ? ` from ${inertField(item.context.project, 60)}` : '';
     lines.push(`Context: the person here wrote @${from}${project} earlier: "${inertField(item.context.firstLine || '', 80)}"`);
@@ -239,7 +246,12 @@ function record(threads, me, { since = 0, roster = [], bindingFor = null, env = 
       // The platform said they redeemed this person's invitation, and that is
       // what made them known just now (presence.js knownByInvite): said once.
       invited: t.introducedByInvite === true,
+      note: null,
     };
+    // Who this is to the person, in their own words (who.js): local, model-only,
+    // and only when the agent is asked to PREPARE a reply the person reviews.
+    // Over an open line the agent may answer unattended, so no note rides along.
+    if (!item.line) item.note = whoNotes.of(t.lastFrom, env);
     if (item.line && line.isAgentAnswer(item.text)) {
       // What this side asked, so the answer is read beside its question.
       item.asked = line.receipts({ env }).filter((r) => r.kind === 'asked' && r.with === line.norm(t.lastFrom)).pop() || null;

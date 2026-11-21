@@ -289,13 +289,23 @@ const draftDefinition = {
 
 const cleanId = (v) => (typeof v === 'string' ? v.trim().replace(/^#/, '') : '') || null;
 
+/**
+ * One visible line when the draft carries words from one of the person's
+ * private notes (who.js): not a refusal, the person is looking at it and
+ * decides. Names whose note, never repeats it. Empty otherwise.
+ */
+function noteLine(message) {
+  const noted = require('../who').foundIn(message);
+  return noted ? `**Note:** this draft includes something from your private note about @${noted.handle} (kept on this machine). Send only if you want that to go.\n` : '';
+}
+
 function preview(d, person) {
   const where = person ? (isHereNow(person) ? 'here now' : (person.status === 'away' ? 'away' : 'not around — it waits for their next turn')) : 'presence unknown — it waits for their next turn';
   const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
   const message = compose(d);
   const rev = revOf(d);
   const answers = d.replyTo ? `\n**Answers:** #${inertField(d.replyTo, 60)}` : '';
-  const head = `**To:** @${d.to} (${where})\n**Message (exact):**\n${message}\n**Attachments:** ${att}${answers}\n\n`;
+  const head = `**To:** @${d.to} (${where})\n**Message (exact):**\n${message}\n**Attachments:** ${att}${answers}\n${noteLine(message)}\n`;
   if (d.status === 'unknown') {
     // The earlier Send did not confirm: it may already have reached them.
     // Only the two honest actions exist (codex P2).
@@ -428,7 +438,7 @@ function heldPreview(d) {
   const message = compose(d);
   const rev = revOf(d);
   return {
-    display: `**To:** @${d.to} (not on /vibe yet)\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n\n`
+    display: `**To:** @${d.to} (not on /vibe yet)\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n${noteLine(message)}\n`
       + `@${d.to} is not on /vibe yet. If you keep it, this exact message is held for the GitHub account ${d.to} for ${HELD_DAYS} days and arrives as your first message when they sign in to /vibe with that account. You get a link to pass on to them.\n\n`
       + `Keep for @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_`,
     data: {

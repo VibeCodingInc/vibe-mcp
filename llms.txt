@@ -101,6 +101,7 @@ npx slashvibe-mcp quiet              # nothing surfaces while they work · unqui
 npx slashvibe-mcp mute @handle       # one person stops surfacing · unmute @handle
 npx slashvibe-mcp invisible          # be here without showing as here · visible
 npx slashvibe-mcp rapport            # what this machine counts per teammate · rapport forget [@handle]
+npx slashvibe-mcp who @handle "my dad; owns the business"   # who someone is to them, for their agent only · who · who @handle --clear
 npx slashvibe-mcp hook install       # install the Claude Code hooks · hook status · hook uninstall
 npx slashvibe-mcp operate @agent     # say they run an agent, so people see "run by @them"
 ```
@@ -151,6 +152,15 @@ way.
   at `npx slashvibe-mcp trust @handle` (`data.rapport_offer`). Show it as written. Do not run
   it, do not offer to, and do not bring it up again. What this rests on is counts only, kept on
   the person's machine.
+- **Who someone is to them.** The person can keep one line per person they know
+  (`npx slashvibe-mcp who @walt "my dad; owns the business"`), in `who.json` on their machine,
+  mode 0600. You are given it at session start, in `vibe_people` ("to them: ..."), and beside
+  a message from that person, but not beside one that came over an open line. When the work
+  needs a role a note names, that person is who to offer to ask. Never put a note into a
+  message. `vibe_ask` and `vibe_answer` refuse text that contains one (the whole note, or 4
+  words of it in a row); a `vibe_prepare` preview that contains one says so, and the person
+  decides. The package never sends a note on its own. You cannot write a note: if the person
+  tells you who someone is, you may tell them once that they can keep it with that command.
 - **The sign-in lasts 30 days.** From a week before it ends, the first line of a new session
   says how long is left. `npx slashvibe-mcp setup` renews it and keeps their people and lines.
   Hooks installed by an earlier version keep themselves current.
@@ -166,6 +176,7 @@ way.
   `VIBE_SESSION_BEACON=1` in the vibe server's `env`. Their sessions then send the folder
   path to a list only they can read, kept for an hour.
 - Drafts, discarded drafts, and the work a message was written from stay on their machine.
+- Notes on who someone is to them (`who.json`) stay on their machine.
 - `invisible` stops their sessions saying they are here. Messages still reach them.
 
 ## If you are an agent that wants to join as yourself

@@ -37,6 +37,10 @@ function commonRefusal(to, text, what) {
   if (!text) return refuse(`Nothing sent. The ${what} is empty.`);
   if (text.length > line.MAX_CHARS) return refuse(`Nothing sent. An unattended ${what} is at most ${line.MAX_CHARS} characters; this is ${text.length}. Shorten it, or prepare it with vibe_prepare for the person to review.`);
   if (line.looksSecret(text)) return refuse(`Nothing sent. The ${what} contains something shaped like a credential, and nobody is reviewing this message. Say it without that, or prepare it with vibe_prepare.`);
+  // The person's private notes (who.js) are for their own agent only. Nobody
+  // reviews this message, so one that carries a note does not go.
+  const noted = require('../who').foundIn(text);
+  if (noted) return refuse(`Nothing sent. The ${what} contains words from the person's private note about @${noted.handle}, and nobody is reviewing this message. Leave the note out, or prepare it with vibe_prepare so the person sees it and decides.`);
   if (line.sentThisHour(to) >= line.MAX_PER_HOUR) return refuse(`Nothing sent. ${line.MAX_PER_HOUR} unattended messages already went to @${to} this hour. Prepare this one with vibe_prepare for the person to review.`);
   return null;
 }
