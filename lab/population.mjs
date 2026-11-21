@@ -17,7 +17,10 @@
 // know each other or one just invited the other, and a timeline of what each
 // of them types on day 1 and day 2. The runner plays that timeline: a person's
 // first prompt on a day opens a new Claude Code session, later prompts that day
-// continue it. After every turn a separate model, given only that person's
+// continue it. A continued session is what a person who left Claude Code open
+// sees when they come back and type: that day's /vibe server is kept running
+// between turns (harness keepOpen), so what arrived meanwhile is at their next
+// prompt, as it would be; the SessionStart hook does not run again. After every turn a separate model, given only that person's
 // persona and what appeared on their screen, decides what they would type next
 // (or nothing). Per world it writes <out>/<id>/transcript.json, transcript.md
 // and summary.json (prepares, sends, sends with no human reply between the
@@ -36,7 +39,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { startStub } from './stub.mjs';
-import { identity, session, REPO } from './harness.mjs';
+import { identity, session, keepOpen, caughtUp, REPO } from './harness.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -209,6 +212,10 @@ async function runWorld(file, opts, log) {
   const turnsLog = [];     // per turn bookkeeping
   const push = (e) => { const x = { i: transcript.length, ...e }; transcript.push(x); return x; };
   let fatal = null;
+  // `${who}|${day}` -> the /vibe server that person's open session keeps
+  // running between prompts (harness keepOpen). One per person at a time: a
+  // new day is a new session, so the previous day's server is stopped.
+  let keepers = {};
   const setup = {};
   try {
     // Identities. established: each knows the other. fresh_invite: only the
@@ -224,7 +231,8 @@ async function runWorld(file, opts, log) {
       // A person's follow-up in the same interactive session does not start a
       // session, so a resumed turn here runs without the SessionStart hook
       // (claude -p --resume would otherwise fire it as "resume" every turn).
-      // The arrival hook (UserPromptSubmit/PostToolUse) still runs.
+      // The arrival hook (UserPromptSubmit/PostToolUse) still runs, fed by the
+      // day's kept-open server (keepers, below) as it would be in that session.
       const s = JSON.parse(fs.readFileSync(ids[h].settings, 'utf8'));
       delete s.hooks.SessionStart;
       ids[h].resumeSettings = path.join(root, h, 'settings.resume.json');
@@ -257,6 +265,16 @@ async function runWorld(file, opts, log) {
       const entryLine = { prepares: 0, sends: 0, replies: 0, timeouts: 0 };
       for (;;) {
         const resume = daySession[key] || null;
+        let caught = null;
+        if (!resume) {
+          for (const k of Object.keys(keepers)) if (k.startsWith(`${who}|`) && k !== key) { await keepers[k].stop(); delete keepers[k]; }
+          if (!keepers[key]) keepers[key] = keepOpen(ids[who]);
+        } else if (keepers[key]) {
+          // Story time between turns is hours; lab time is seconds. Before the
+          // person types again, let their open session's server finish looking
+          // at what was sent to them meanwhile, as it would have long since.
+          caught = await caughtUp(ids[who], stub, { since: keepers[key].startedAt });
+        }
         const sendsBefore = stub.effects.length;
         push({ who, day, entry: ti, kind, text: typed, session: resume ? 'resumed' : 'new', ...(resume ? { session_id: resume } : {}), ...(kind === 'human_reply' ? { simulator_only: { why } } : {}) });
         const t = await session(ids[who], typed, { ...turnOpts, resume, settings: resume ? ids[who].resumeSettings : null }).done;
@@ -270,7 +288,8 @@ async function runWorld(file, opts, log) {
         const newEffects = stub.effects.slice(sendsBefore).filter((x) => x.effect === 'SEND');
         for (const s of newEffects) s._at = transcript.length - 1;
         const turnEvents = transcript.slice(turnFirst);
-        turnsLog.push({ who, day, entry: ti, session_id: t.sessionId, resumed: Boolean(resume), timedOut: t.timedOut, exitCode: t.exitCode, sends: newEffects.length });
+        turnsLog.push({ who, day, entry: ti, session_id: t.sessionId, resumed: Boolean(resume), timedOut: t.timedOut, exitCode: t.exitCode, sends: newEffects.length,
+          ...(caught ? { waited_for_open_server_ms: caught.waitedMs, ...(caught.timedOut ? { open_server_not_caught_up: caught.pending } : {}) } : {}) });
         entryLine.prepares += t.tools.filter((x) => x.name === 'vibe_prepare').length;
         entryLine.sends += newEffects.length;
         if (t.timedOut) entryLine.timeouts++;
@@ -297,6 +316,7 @@ async function runWorld(file, opts, log) {
       log(`[${world.id}] ${ti + 1}/${world.timeline.length} day ${day} @${who} (${turnsLog.filter((x) => x.entry === ti)[0]?.resumed ? 'resumed' : 'new session'}) ${Math.round((Date.now() - entryStart) / 1000)}s · turns ${entryLine.replies + 1} · prepares ${entryLine.prepares} · sends ${entryLine.sends}${entryLine.timeouts ? ` · TIMEOUTS ${entryLine.timeouts}` : ''}`);
     }
   } finally {
+    for (const k of Object.keys(keepers)) await keepers[k].stop();
     await stub.close();
     if (!opts.keep) fs.rmSync(root, { recursive: true, force: true });
   }
@@ -383,13 +403,30 @@ function analyse({ world, transcript, turnsLog, wire, handles, started }) {
   // Counted as shown when, after the send, the recipient's screen had a line
   // naming the sender (an arrival or SessionStart line), or a /vibe tool's
   // output containing the start of the body.
-  const unseen = [];
+  //
+  // Not every unseen message is a miss. The product shows a message mid-work
+  // only from someone the recipient knows (has written to, accepted an invite
+  // from, or has an open line with); anyone else's waits, unread, and the next
+  // new session says only that someone is waiting. Those are counted apart, as
+  // held_sender_unknown, using the same rule. The rest are misses.
+  // A message that was shown, but not during the recipient's first timeline
+  // entry after it was sent, is counted as shown_late.
+  const knew = (to, from) => world.relationship === 'established' || Boolean(world.open_line) ||
+    (world.relationship === 'fresh_invite' && from === world.inviter) ||
+    wire.some((w) => w.from === to && w.to === from);
+  const unseen = []; const held = []; const late = [];
   for (const s of wire) {
     const after = ev.filter((e) => e.i > s.at && e.who === s.to);
     const line = after.find((e) => e.kind === 'shown' && aboutLines(e.text, s.from).some((l) => !isPresence(l)));
     const tool = after.find((e) => e.kind === 'returned' && norm(e.text).includes(snippet(s.body)));
-    s.shown_to_recipient = line ? { how: 'line', event: line.i } : (tool ? { how: 'tool_output', event: tool.i } : null);
-    if (!s.shown_to_recipient) unseen.push({ id: s.id, from: s.from, to: s.to, body: s.body });
+    const first = [line, tool].filter(Boolean).sort((a, b) => a.i - b.i)[0] || null;
+    s.shown_to_recipient = first ? { how: first === line ? 'line' : 'tool_output', event: first.i } : null;
+    const row = { id: s.id, from: s.from, to: s.to, body: s.body };
+    if (first) {
+      const nextEntry = after.length ? after[0].entry : null;
+      if (nextEntry !== null && first.entry !== nextEntry) late.push({ ...row, next_entry: nextEntry + 1, shown_in_entry: first.entry + 1 });
+    } else if (knew(s.to, s.from)) unseen.push(row);
+    else { s.held_sender_unknown = true; held.push(row); }
   }
   const sum = (k) => Object.values(per).reduce((a, p) => a + p[k], 0);
   return {
@@ -406,6 +443,8 @@ function analyse({ world, transcript, turnsLog, wire, handles, started }) {
     sends_with_human_reply_between: sendsAttended.length,
     arrivals_shown: Object.fromEntries(handles.map((h) => [h, per[h].arrivals_shown])),
     wire_messages_never_shown_to_recipient: { count: unseen.length, list: unseen },
+    wire_messages_held_sender_unknown: { count: held.length, list: held },
+    wire_messages_shown_late: { count: late.length, list: late },
     ask_calls: sum('ask_calls'), answer_calls: sum('answer_calls'),
     vibe_tool_errors: { count: toolErrors.length, list: toolErrors },
     human_replies: sum('human_replies'), human_nulls: sum('human_nulls'), human_unparsed: sum('human_unparsed'),
@@ -437,7 +476,7 @@ function toMarkdown(world, transcript, wire, summary) {
   });
   L.push('', '## The wire', '');
   if (!wire.length) L.push('(nothing was sent)');
-  for (const s of wire) L.push(`- ${s.id} @${s.from} → @${s.to} [${s.origin || 'composed'}${s.approved ? ', approved' : ''}${s.reply_to ? `, answers ${s.reply_to}${s.linked ? '' : ' NOT LINKED'}` : ''}] shown to recipient: ${s.shown_to_recipient ? s.shown_to_recipient.how : 'NO'} — ${s.body}`);
+  for (const s of wire) L.push(`- ${s.id} @${s.from} → @${s.to} [${s.origin || 'composed'}${s.approved ? ', approved' : ''}${s.reply_to ? `, answers ${s.reply_to}${s.linked ? '' : ' NOT LINKED'}` : ''}] shown to recipient: ${s.shown_to_recipient ? s.shown_to_recipient.how : (s.held_sender_unknown ? 'NO (held: sender not known to recipient)' : 'NO')} — ${s.body}`);
   L.push('', '## Summary', '', fence(JSON.stringify(summary, null, 2)));
   return L.join('\n');
 }
@@ -463,14 +502,15 @@ function writePopulation(out, results) {
   const total = (k) => done.reduce((a, r) => a + (typeof r.summary[k] === 'object' ? r.summary[k].count : r.summary[k] || 0), 0);
   const agg = {
     worlds: results.length, completed: done.length, failed: results.filter((r) => r.error).map((r) => ({ file: r.file, id: r.id || null, error: r.error })),
-    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'wire_messages_never_shown_to_recipient', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'wall_clock_seconds'].map((k) => [k, total(k)])),
+    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'wall_clock_seconds'].map((k) => [k, total(k)])),
     per_world: done.map((r) => r.summary),
   };
   fs.writeFileSync(path.join(out, 'population-summary.json'), JSON.stringify(agg, null, 2));
-  const cols = ['turns', 'prepare_calls', 'sends_on_wire', 'sends_without_human_reply_between_prepare_and_send', 'wire_messages_never_shown_to_recipient', 'discards', 'turn_timeouts', 'wall_clock_seconds'];
+  const cols = ['turns', 'prepare_calls', 'sends_on_wire', 'sends_without_human_reply_between_prepare_and_send', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'discards', 'turn_timeouts', 'wall_clock_seconds'];
   const v = (s, k) => (typeof s[k] === 'object' ? s[k].count : s[k]);
   const L = ['# Population run', '', `${agg.completed}/${agg.worlds} worlds completed.`, '',
-    '`unattended sends` = sends with no human reply between the prepare and the send in that session.', '',
+    '`unattended sends` = sends with no human reply between the prepare and the send in that session.',
+    '`never shown` = sent by someone the recipient knows and never on their screen (a miss). `held` = from someone the recipient does not know, so held by design. `late` = shown, but not in the recipient\'s next timeline entry.', '',
     `| world | archetype | ${cols.join(' | ')} |`, `|${'---|'.repeat(cols.length + 2)}`];
   for (const s of agg.per_world) L.push(`| ${s.id} | ${s.archetype} | ${cols.map((k) => v(s, k)).join(' | ')} |`);
   L.push(`| **total** | | ${cols.map((k) => agg.totals[k]).join(' | ')} |`);
