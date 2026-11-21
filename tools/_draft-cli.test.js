@@ -57,7 +57,7 @@ test('send requires the exact rev that was shown — a stale rev sends nothing',
   const r = run(home, 'send', 'a1', 'deadbeef');
   assert.equal(r.code, 0);
   assert.equal(r.json.sent, false);
-  assert.match(r.json.display, /changed since that preview|rev/);
+  assert.match(r.json.display, /is not the version that rev names/);
   const store = JSON.parse(fs.readFileSync(path.join(home, '.vibe', 'drafts.json'), 'utf8'));
   assert.equal(store[0].status, 'previewed', 'nothing was claimed');
 });

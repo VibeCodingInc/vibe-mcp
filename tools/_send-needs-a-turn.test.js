@@ -152,7 +152,8 @@ test('rev 1, a turn, then rev 2 with an added line and Send in the same turn: re
     assert.ok(r.data.actions.some((a) => a.tool === 'vibe_send' && a.args.rev === p2.data.draft.rev));
     // The old rev is not a way around it either.
     const old = await drafts.vibe_send.handler({ id: p1.data.draft.id, rev: p1.data.draft.rev });
-    assert.match(old.display, /changed since that preview/);
+    assert.match(old.display, /is not the version that rev names/);
+    assert.ok(!old.display.includes(p2.data.draft.rev), 'the refusal names no rev');
     personTurn({ prompt: 'yes send' });
     const ok = await drafts.vibe_send.handler({ id: p2.data.draft.id, rev: p2.data.draft.rev });
     assert.equal(ok.data.sent, true);
@@ -229,6 +230,25 @@ test('unsent-reply reminder: shown, "send it", reopen + send in that turn is ref
   });
 });
 
+// Review 2026-11-21 (scratchpad probe bypass.test.js): a reminder handed the
+// draft id to a new session; vibe_send with a made-up rev answered with the
+// current rev ("rev X → Y"), and a second vibe_send with it went out in the
+// same turn, the text never shown. A refusal never names a rev now.
+test('a wrong rev is refused without naming the current rev', async () => {
+  await withWire(async (sends) => {
+    const p = await prepare({ message: "yesterday's reply" });
+    personTurn({ prompt: 'something else' });
+    personTurn({ prompt: 'send it' });
+    const id = p.data.draft.id;
+    const probe = await drafts.vibe_send.handler({ id, rev: 'deadbeef' });
+    assert.ok(!probe.display.includes(p.data.draft.rev), `leaked the rev: ${probe.display}`);
+    assert.ok(!/→/.test(probe.display));
+    assert.match(probe.display, /Show it again with vibe_prepare \{id: "w[0-9a-f]+"\}/);
+    assert.ok(!probe.data || !probe.data.draft, 'no draft data either');
+    assert.equal(sends.length, 0);
+  });
+});
+
 test('a turn recorded for a different project directory does not unlock this one', async () => {
   await withWire(async (sends) => {
     const p = await prepare({ message: 'other project' });
@@ -267,7 +287,13 @@ test('a turn in the same millisecond as the rev does not count as after it', asy
     turns.record(PROJECT, d.revAt);
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
     assert.equal(r.data.sent, false);
-    turns.record(PROJECT, d.revAt + 1);
+    // The refusal showed the preview again, and that showing is stamped.
+    const shown = drafts.loadDrafts().find((x) => x.id === p.data.draft.id).revAt;
+    assert.ok(shown >= d.revAt);
+    turns.record(PROJECT, shown);
+    assert.equal((await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev })).data.sent, false, 'same millisecond as the re-show: still not after it');
+    const again = drafts.loadDrafts().find((x) => x.id === p.data.draft.id).revAt;
+    turns.record(PROJECT, again + 1);
     assert.equal((await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev })).data.sent, true);
     assert.equal(sends.length, 1);
   });

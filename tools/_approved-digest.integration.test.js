@@ -85,7 +85,7 @@ test('the digest is computed once from the approved snapshot: an edit after prev
     const d = await moves.vibe_prepare.handler({ handle: '@linus', message: 'v1' });
     await moves.vibe_prepare.handler({ id: d.data.draft.id, message: 'v2' });
     const r = await moves.vibe_send.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
-    assert.match(r.display, /changed since that preview/);
+    assert.match(r.display, /is not the version that rev names/);
     assert.ok(!wire.captured.some(c => c.method === 'POST' && c.path.startsWith('/api/v2/messages')));
   } finally { wire.restore(); }
 });

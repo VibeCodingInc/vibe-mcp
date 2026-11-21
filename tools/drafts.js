@@ -552,7 +552,11 @@ async function send(args, { byPerson }) {
     if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — not sending it twice.` };
     if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.` };
     if (!rev) return { display: `Send needs the rev shown in the preview of draft ${d.id} — open it with vibe_prepare and send with that rev. Nothing sent.` };
-    if (rev !== revOf(d)) return { display: `Draft ${d.id} changed since that preview (rev ${rev} → ${revOf(d)}) — open it again with vibe_prepare and approve what it shows now. Nothing sent.` };
+    // Never name the current rev here: a rev handed out without a showing
+    // would let an agent send text the person was never shown (review
+    // 2026-11-21: probe a wrong rev, read the right one, send). Every rev an
+    // agent receives comes with the preview, and that showing is stamped.
+    if (rev !== revOf(d)) return { display: `Draft ${d.id} is not the version that rev names. Show it again with vibe_prepare {id: "${d.id}"}, and send only what the person approves after seeing it. Nothing sent.` };
     if (d.status === 'sending') {
       // The claiming process died mid-send: the SAME text under the SAME key
       // is what a retry would send. Uncertainty is recorded BEFORE the retry
@@ -570,7 +574,13 @@ async function send(args, { byPerson }) {
     // The person must have had a turn since THIS text was prepared (turns.js):
     // an agent cannot prepare a new rev and send it inside one turn.
     turn = turnCheck(d, byPerson);
-    if (turn.check === 'needs_turn') return { unseen: { ...d } };
+    if (turn.check === 'needs_turn') {
+      // The refusal shows the preview with its rev: that is a showing, and it
+      // is stamped like one, so the next Send needs the person's next prompt.
+      const why = turn.why || null;
+      stampRev(d);
+      return { unseen: { ...d }, why };
+    }
     d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
     d.idempotencyKey = sendKey(d);
     const message = compose(d).trim();

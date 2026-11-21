@@ -176,7 +176,7 @@ test('a message changed after the preview is refused before anything leaves', as
     const e = await moves.vibe_prepare.handler({ id: d.data.draft.id, message: 'v2' });
     assert.equal(e.data.draft.held, true, 'an edit keeps it held');
     const r = await moves.vibe_send.handler({ id: d.data.draft.id, rev: d.data.draft.rev });
-    assert.match(r.display, /changed since that preview/);
+    assert.match(r.display, /is not the version that rev names/);
     assert.equal(wire.captured.filter((c) => c.path === '/api/invites').length, 0);
     const ok = await moves.vibe_send.handler({ id: d.data.draft.id, rev: e.data.draft.rev });
     assert.equal(ok.data.held, true);
