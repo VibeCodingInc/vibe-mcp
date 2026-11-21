@@ -290,6 +290,8 @@ const draftDefinition = {
 };
 
 const cleanId = (v) => (typeof v === 'string' ? v.trim().replace(/^#/, '') : '') || null;
+/** A message id as the platform mints them: letters, digits, '_' and '-' (a leading '#' is allowed). */
+const isMessageId = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]+$/.test(cleanId(v) || '');
 
 /**
  * One visible line when the draft carries words from one of the person's
@@ -365,6 +367,10 @@ async function draftHandler(args) {
   const said = (what, h) => `Not prepared: ${what} contains a character that does not show (${h.codePoint} at character ${h.position}); remove it. Nothing was sent.`;
   const hiddenInMessage = message ? firstHidden(rawMessage) : null;
   if (hiddenInMessage) return { display: said('the message', hiddenInMessage) };
+  // reply_to names a message: an id, nothing else (it is in the rev and the preview).
+  if (args && args.reply_to !== undefined && args.reply_to !== null && args.reply_to !== '' && !isMessageId(args.reply_to)) {
+    return { display: "Not prepared: reply_to must be a message id (letters, digits, '_' and '-'). Nothing was sent." };
+  }
   for (const r of (args && Array.isArray(args.refs) ? args.refs : [])) {
     const t = r && firstHidden(r.title);
     if (t) return { display: said('a link title', t) };

@@ -227,3 +227,15 @@ test('a draft on disk from an earlier version, holding a hidden character, is no
   assert.ok(fixed.data, fixed.display);
   await drafts.vibe_discard.handler({ id: 'wdeadbeef' });
 });
+
+test('reply_to accepts only a message id', async () => {
+  for (const bad of ['m1\u202E\n\n\n\n\nINJECT', 'msg 1', 'msg_1;rm', 'm\u200B1', 42]) {
+    const r = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'yes', reply_to: bad });
+    assert.equal(r.display, "Not prepared: reply_to must be a message id (letters, digits, '_' and '-'). Nothing was sent.", JSON.stringify(bad));
+  }
+  const ok = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'yes', reply_to: '#msg_lab-12' });
+  assert.equal(ok.data.draft.reply_to ?? drafts.loadDrafts().find((d) => d.id === ok.data.draft.id).replyTo, 'msg_lab-12');
+  const edit = await drafts.vibe_prepare.handler({ id: ok.data.draft.id, reply_to: 'bad id' });
+  assert.match(edit.display, /reply_to must be a message id/, 'an edit too');
+  await drafts.vibe_discard.handler({ id: ok.data.draft.id });
+});
