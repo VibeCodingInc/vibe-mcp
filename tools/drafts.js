@@ -43,7 +43,7 @@ const crypto = require('crypto');
 const config = require('../config');
 const store = require('../store');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
-const { canonicalHandle, storedRecipientHandle } = require('../protocol/handle');
+const { canonicalHandle, isCanonicalHandle, storedRecipientHandle } = require('../protocol/handle');
 const { inertField } = require('../incoming');
 const { deliver } = require('./deliver');
 const invite = require('../invite');
@@ -344,6 +344,13 @@ async function draftHandler(args) {
   if (message && /\n(?:[ \t]*\n){3,}/.test(message)) return { display: 'Not prepared: the message has more than two blank lines in a row; remove the extra ones. Nothing was sent.' };
   if (args && Array.isArray(args.refs) && args.refs.some((r) => r && (hasHiddenCharacters(r.title) || hasHiddenCharacters(r.url)))) {
     return { display: 'Not prepared: a link title or address contains characters that do not show; remove them. Nothing was sent.' };
+  }
+
+  // A recipient is a canonical ASCII handle (protocol/handle.js): a look-alike
+  // such as a Cyrillic letter would name someone else while reading the same.
+  // Checked before any lookup, and the handle is not echoed back.
+  if (!wantId && args && typeof args.handle === 'string' && args.handle.trim() && !isCanonicalHandle(String(args.handle).trim().replace(/\/claude$/, ''))) {
+    return { display: "Not prepared: that is not a /vibe handle. Handles are plain letters a-z, digits, '_' and '-'. Nothing was sent." };
   }
 
   // Is the person on /vibe at all? Asked only for a NEW draft to a handle

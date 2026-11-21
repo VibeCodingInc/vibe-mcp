@@ -108,3 +108,17 @@ test('more than two blank lines in a row is refused; two are fine', async () => 
   const e = await drafts.vibe_prepare.handler({ id: p.data.draft.id, message: 'short\n\n\n\n\nhidden below' });
   assert.match(e.display, /more than two blank lines/, 'an edit too');
 });
+
+test('a recipient handle must be canonical ASCII: a Cyrillic look-alike is refused, without echoing it', async () => {
+  const lookalike = 's\u0430m';   // Cyrillic a
+  const r = await drafts.vibe_prepare.handler({ handle: lookalike, message: 'hi' });
+  assert.equal(r.display, "Not prepared: that is not a /vibe handle. Handles are plain letters a-z, digits, '_' and '-'. Nothing was sent.");
+  assert.ok(!r.display.includes(lookalike));
+  for (const h of ['linus', '@Linus', ' linus ', 'synth-stan', 'a_b']) {
+    const ok = await drafts.vibe_prepare.handler({ handle: h, message: `hi ${h.trim()}` });
+    assert.ok(!/not a \/vibe handle/.test(ok.display), `${h}: ${ok.display}`);
+    if (ok.data && ok.data.draft) await drafts.vibe_discard.handler({ id: ok.data.draft.id });
+  }
+  const live = await drafts.vibe_prepare.handler({ handle: 'linus/claude', message: 'hi' });
+  assert.match(live.display, /not a live session/, 'the live-session address keeps its own answer');
+});
