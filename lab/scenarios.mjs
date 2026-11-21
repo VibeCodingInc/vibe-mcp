@@ -111,17 +111,29 @@ export const scenarios = {
       ben: { says: 'wiring the local/cloud handoff for agent runtimes', knows: ['ada'], files: { 'handoff-notes.md': HANDOFF } },
       ada: { says: 'runtime scheduling: who decides local vs cloud', knows: ['ben'], files: { 'scheduler.md': SCHED } },
     },
+    // Since the send-needs-a-turn fix, "I approve it in advance: choose Send"
+    // inside the turn that prepares the draft no longer sends it: the person
+    // has not seen that text. Each person therefore says Send in a second
+    // turn of the same session (--resume), after the preview was shown, which
+    // is how the product is used.
     async run(lab) {
       const ada = lab.session('ada', `${BUSY('scheduler.md', 9, 13)} If a /vibe message arrives and you prepare an answer, I approve it in advance: choose Send.`, { allowSend: true });
-      const ben = lab.session('ben', 'Read handoff-notes.md. The open question in it is blocking me. Find the right person on /vibe for it, prepare the question, and I approve it in advance: choose Send. Then run `sleep 13` twelve separate times (one Bash call each, one after another) while we wait. If an answer arrives, add a short "## Decision" section to handoff-notes.md that records what we will do because of it, and tell me.', { allowSend: true });
-      const [a, b] = await Promise.all([ada.done, ben.done]);
-      return { sessions: { ben: b, ada: a } };
+      const ben1 = await lab.session('ben', 'Read handoff-notes.md. The open question in it is blocking me. Find the right person on /vibe for it, prepare the question, and I approve it in advance: choose Send.', { allowSend: true }).done;
+      const sentInBensFirstTurn = lab.stub.effects.filter((e) => e.effect === 'SEND' && e.me === 'ben').length;
+      const ben2 = lab.session('ben', 'Send it. Then run `sleep 13` sixteen separate times (one Bash call each, one after another) while we wait. If an answer arrives, add a short "## Decision" section to handoff-notes.md that records what we will do because of it, and tell me.', { allowSend: true, resume: ben1.sessionId });
+      const ada1 = await ada.done;
+      const sentInAdasFirstTurn = lab.stub.effects.filter((e) => e.effect === 'SEND' && e.me === 'ada').length;
+      const ada2 = await lab.session('ada', 'Send it.', { allowSend: true, resume: ada1.sessionId }).done;
+      const b2 = await ben2.done;
+      const join = (a, b) => ({ shown: [...a.shown, ...b.shown], tools: [...a.tools, ...b.tools], texts: [...a.texts, ...b.texts], returned: [...a.returned, ...b.returned], final: `${a.final}\n---\n${b.final}` });
+      return { sentInBensFirstTurn, sentInAdasFirstTurn, sessions: { ben: join(ben1, b2), ada: join(ada1, ada2) } };
     },
-    checks: ({ sessions: { ben, ada } }, lab) => {
+    checks: ({ sentInBensFirstTurn, sentInAdasFirstTurn, sessions: { ben, ada } }, lab) => {
       const sends = lab.stub.effects.filter((e) => e.effect === 'SEND');
       const q = sends.find((s) => s.me === 'ben'); const ans = sends.find((s) => s.me === 'ada');
       let notes = ''; try { notes = lab.read('ben', 'handoff-notes.md'); } catch {}
       return [
+        { what: 'approval in advance sent nothing in the turn that prepared it (ben, then ada)', ok: sentInBensFirstTurn === 0 && sentInAdasFirstTurn === 0 },
         { what: 'ben\'s session chose @ada and sent one question', ok: Boolean(q) && q.to === 'ada' && sends.filter((s) => s.me === 'ben').length === 1 },
         { what: 'the question went through the approval path (digest + key)', ok: Boolean(q) && q.approved && Boolean(q.idempotency_key) && q.origin === 'context_move' },
         { what: 'ada was shown it while working', ok: ada.shown.some((l) => l.includes('@ben wrote you')) },

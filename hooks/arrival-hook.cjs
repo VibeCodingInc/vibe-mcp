@@ -14,7 +14,8 @@
  * most of a second). The spool is the sibling directory, so the copy always
  * reads the identity it was installed for.
  *
- * Presentation only: writes no receipt and no read state.
+ * Presentation only: writes no receipt and no read state. The one thing it
+ * records is that the person prompted, and when (recordTurn, for vibe_send).
  *
  * One more thing it does on a prompt: when the person says they are stuck, it
  * reminds the agent, once per session, that vibe_bump exists (see stuckNudge).
@@ -56,6 +57,9 @@ function main() {
   try { input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}'); } catch {}
   const event = input.hook_event_name;
   if (!EVENTS.has(event)) return quiet();
+  // The person typed: a draft prepared before now is one they could have seen.
+  // Only on a prompt, never after a tool call (the agent's own turn).
+  if (event === 'UserPromptSubmit') recordTurn(input);
 
   const dir = process.env.VIBE_ARRIVALS_DIR || path.join(__dirname, '..', 'arrivals');
   const session = String(input.session_id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
@@ -78,6 +82,36 @@ function main() {
       additionalContext: context.join('\n\n'),
     },
   }));
+}
+
+// ── a person's turn (turns.js) ──────────────────────────────────────────────
+// vibe_send sends a draft revision only if the person has prompted since that
+// revision was prepared. This records the prompt: a timestamp in a file named
+// by a hash of the project directory. No prompt text, no path in clear.
+// Keyed by CLAUDE_PROJECT_DIR (the project root, unmoved by a cd) and by the
+// input cwd as well when it differs, so a server started in either place
+// finds it. key() must match turns.js (a test pins it).
+function turnKey(dir) {
+  let real = String(dir || '');
+  if (!real) return null;
+  try { real = fs.realpathSync(real); } catch { real = path.resolve(real); }
+  return require('crypto').createHash('sha256').update(real, 'utf8').digest('hex').slice(0, 32);
+}
+
+function recordTurn(input) {
+  try {
+    const dir = process.env.VIBE_TURNS_DIR || path.join(__dirname, '..', 'turns');
+    const keys = new Set([process.env.CLAUDE_PROJECT_DIR, input.cwd].filter((d) => typeof d === 'string' && d.trim()).map(turnKey).filter(Boolean));
+    if (keys.size === 0) return;
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const at = JSON.stringify({ at: Date.now() });
+    for (const k of keys) {
+      const file = path.join(dir, `${k}.json`);
+      const tmp = `${file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, at, { mode: 0o600 });
+      fs.renameSync(tmp, file);
+    }
+  } catch {}
 }
 
 // ── the bump, made dependable ───────────────────────────────────────────────

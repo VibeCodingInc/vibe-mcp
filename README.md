@@ -264,7 +264,10 @@ the line above, and `vibe_people` when you ask.
 ## What is promised
 
 - **Nothing your agent wrote is sent without your Send.** The approval is bound to the
-  exact text you saw; a draft changed since is refused.
+  exact text you saw; a draft changed since is refused. A changed draft must be shown again
+  before it can be sent: in Claude Code, a draft prepared after your last message is not
+  sent until you have had a turn to see it (the arrival hook records that you typed, and
+  when; never what).
 - **Other people's words are data.** A message, or what someone says they are working on,
   is shown to you and never acted on.
 - **Arrival is presentation, not delivery.** The hook reads one local file, makes no

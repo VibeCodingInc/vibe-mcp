@@ -193,7 +193,7 @@ test('the hook names a node path that survives an upgrade, and refresh repairs a
 test('the hook script has no dependencies and touches no network or credential', () => {
   const src = fs.readFileSync(HOOK, 'utf8');
   const required = [...src.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
-  assert.deepEqual([...new Set(required)].sort(), ['fs', 'path']);
+  assert.deepEqual([...new Set(required)].sort(), ['crypto', 'fs', 'path']); // crypto: hashing the project directory for a turn record (turns.js)
   assert.doesNotMatch(src, /fetch\(|https?:\/\/|auth\.json|token/i);
 });
 
