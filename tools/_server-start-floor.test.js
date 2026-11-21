@@ -84,3 +84,19 @@ test('judge: the server start is a floor only where the turn check applies', () 
   assert.deepEqual(turns.judge(before, { env: empty }), { check: 'unavailable', why: 'no_turn_recorded' }, 'no hook-recorded turns: unchanged');
 });
 
+test('a session-start record dated more than 5 seconds ahead is ignored; the server-start floor still applies', async () => {
+  turns.recordSessionStart(PROJECT, Date.now() + 10 * 60_000);
+  assert.equal(turns.lastSessionStart(PROJECT), null, 'ignored');
+  await withWire(async (sends) => {
+    const p = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'not stranded' });
+    tick(); turns.record(PROJECT, Date.now());
+    assert.equal((await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev })).data.sent, true, 'a future record does not strand it');
+    const rev = seed('wf200aaaa', turns.PROCESS_STARTED_AT - 60_000, 'still before the server started');
+    tick(); turns.record(PROJECT, Date.now());
+    assert.equal((await drafts.vibe_send.handler({ id: 'wf200aaaa', rev })).data.reason, 'shown_in_earlier_session');
+    assert.equal(sends.length, 1);
+  });
+  turns.recordSessionStart(PROJECT, Date.now() + 3000);
+  assert.ok(turns.lastSessionStart(PROJECT), 'within 5 seconds: kept (clock skew)');
+  fs.rmSync(startFile());
+});

@@ -128,9 +128,13 @@ function lastSessionStart(dir, env = process.env) {
   } catch {}
   if (at === null) at = Number.isFinite(st.mtimeMs) ? st.mtimeMs : null;
   if (at === null) return { unreadable: true };
+  // A start in the future would strand every draft until then: ignored, as
+  // if missing (the server's own start still sets a floor, sessionFloor).
+  if (at > Date.now() + FUTURE_SLACK_MS) return null;
   return { at };
 }
 
+const FUTURE_SLACK_MS = 5000;
 /** When this process (the MCP server) started: a session start no hook can fail to record. */
 const PROCESS_STARTED_AT = Date.now() - Math.round(process.uptime() * 1000);
 
