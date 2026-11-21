@@ -339,16 +339,20 @@ async function draftHandler(args) {
   const message = rawMessage.trim();
   const wantId = args && args.id;
   // What the person approves must show what it is (showable.js): a body, link
-  // title or link address with characters that do not show is refused, never
-  // echoed back.
-  const { hasHiddenCharacters } = require('../showable');
-  // The raw text: trim() would quietly drop a leading or trailing BOM.
-  if (message && hasHiddenCharacters(rawMessage)) return { display: 'Not prepared: the message contains characters that do not show; remove them. Nothing was sent.' };
+  // title or link address with a character that does not show is refused,
+  // naming the character and where it is, never echoing the text around it.
+  const { firstHidden } = require('../showable');
+  const said = (what, h) => `Not prepared: ${what} contains a character that does not show (${h.codePoint} at character ${h.position}); remove it. Nothing was sent.`;
+  const hiddenInMessage = message ? firstHidden(rawMessage) : null;
+  if (hiddenInMessage) return { display: said('the message', hiddenInMessage) };
   // More than two blank lines in a row could push the rest of the text out of
   // view in the preview.
   if (message && /\n(?:[ \t]*\n){3,}/.test(message)) return { display: 'Not prepared: the message has more than two blank lines in a row; remove the extra ones. Nothing was sent.' };
-  if (args && Array.isArray(args.refs) && args.refs.some((r) => r && (hasHiddenCharacters(r.title) || hasHiddenCharacters(r.url)))) {
-    return { display: 'Not prepared: a link title or address contains characters that do not show; remove them. Nothing was sent.' };
+  for (const r of (args && Array.isArray(args.refs) ? args.refs : [])) {
+    const t = r && firstHidden(r.title);
+    if (t) return { display: said('a link title', t) };
+    const u = r && firstHidden(r.url);
+    if (u) return { display: said('a link address', u) };
   }
 
   // A recipient is a canonical ASCII handle (protocol/handle.js): a look-alike

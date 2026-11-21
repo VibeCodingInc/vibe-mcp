@@ -82,7 +82,8 @@ test('the rule: hidden characters are found; emoji sequences and ordinary text p
 test('vibe_prepare refuses a body with hidden characters, and does not echo it', async () => {
   for (const [what, text] of Object.entries(HIDDEN)) {
     const r = await drafts.vibe_prepare.handler({ handle: 'linus', message: text });
-    assert.equal(r.display, 'Not prepared: the message contains characters that do not show; remove them. Nothing was sent.', what);
+    assert.match(r.display, /^Not prepared: the message contains a character that does not show \(U\+[0-9A-F]{4,6} at character \d+\); remove it\. Nothing was sent\.$/, what);
+    assert.ok(!r.display.includes(text), `${what}: not echoed`);
     assert.ok(!r.data, what);
   }
   assert.equal(drafts.loadDrafts().length, 0, 'nothing was stored');
@@ -99,14 +100,14 @@ test('vibe_prepare accepts emoji sequences', async () => {
 test('an edit with hidden characters is refused, and the draft keeps its text', async () => {
   const p = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'clean text' });
   const r = await drafts.vibe_prepare.handler({ id: p.data.draft.id, message: 'clean text' + tag('x') });
-  assert.match(r.display, /contains characters that do not show/);
+  assert.match(r.display, /contains a character that does not show/);
   assert.equal(drafts.loadDrafts().find((d) => d.id === p.data.draft.id).body, 'clean text');
 });
 
 test('a link title or address with hidden characters is refused', async () => {
   for (const ref of [{ title: 'doc​', url: 'https://example.com/a' }, { title: 'doc', url: 'https://example.com/‮a' }]) {
     const r = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'see the doc', refs: [ref] });
-    assert.equal(r.display, 'Not prepared: a link title or address contains characters that do not show; remove them. Nothing was sent.');
+    assert.match(r.display, /^Not prepared: a link (title|address) contains a character that does not show \(U\+(200B|202E) at character \d+\); remove it\. Nothing was sent\.$/);
   }
 });
 
@@ -192,4 +193,9 @@ test('CRLF is stored as LF; a lone CR is still refused', async () => {
   assert.equal(r.data.draft.body, 'line one\nline two');
   await drafts.vibe_discard.handler({ id: r.data.draft.id });
   assert.ok(!(await drafts.vibe_prepare.handler({ handle: 'linus', message: 'line one\rline two' })).data);
+});
+
+test('the refusal names the first hidden character and its position, counting characters from 1', async () => {
+  const r = await drafts.vibe_prepare.handler({ handle: 'linus', message: '\u{1F600}abc def gh\u200Cij' });
+  assert.equal(r.display, 'Not prepared: the message contains a character that does not show (U+200C at character 12); remove it. Nothing was sent.');
 });
