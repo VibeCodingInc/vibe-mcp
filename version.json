@@ -1,11 +1,12 @@
 {
-  "version": "0.9.18",
-  "updated": "2026-11-20",
-  "changelog": "The first exchange between two new people now works both ways, and /vibe starts to notice when you trust someone.",
+  "version": "0.9.19",
+  "updated": "2026-11-21",
+  "changelog": "Your agent can no longer send wording you have not seen, and /vibe stops repeating itself.",
   "features": [
-    "A message from someone new is no longer stuck waiting once you write back to them, accept their invite or open a line: it reaches you while you work",
-    "A message you have just answered is never announced afterwards as newly arrived",
-    "After you have sent the same person several messages without changing a word and they have answered, /vibe points once at the command that lets your agents ask each other directly. It keeps counts only, on your machine: npx slashvibe-mcp rapport shows them, rapport forget erases them"
+    "A draft can be sent only after you have had a turn to see it. If you say \"send it, but add this\", your agent shows you the new wording first",
+    "A message you have already answered is no longer listed as waiting, and an arrival is announced once, not twice",
+    "Before your agent tells you someone has not replied, it reads the conversation",
+    "When someone you do not know yet writes, /vibe reminds you it may be a person you invited"
   ],
   "deprecated": [],
   "breaking": false,
