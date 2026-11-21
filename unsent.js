@@ -100,12 +100,17 @@ function openReplies(drafts, threads, me, { now = Date.now(), minAgeMs = MIN_AGE
     if (!to || !waitingOn.has(to) || isMuted(to)) continue;
     if (lastSent.has(to) && lastSent.get(to) > (d.createdAt || 0)) continue;
     const at = preparedAt(d);
-    if (at === null || now - (d.createdAt || at) >= DRAFT_TTL_MS || now - at < minAgeMs) continue;
+    if (at === null || now - (d.createdAt || at) >= DRAFT_TTL_MS) continue;
     out.push({ id: d.id, to, at });
   }
+  // The newest open draft per person FIRST, then the age floor on that one
+  // only: an older draft is never announced while a newer one to the same
+  // person was shown a moment ago.
   out.sort((a, b) => b.at - a.at);
   const seen = new Set();
-  return out.filter((r) => (seen.has(r.to) ? false : (seen.add(r.to), true))).slice(0, MAX);
+  return out.filter((r) => (seen.has(r.to) ? false : (seen.add(r.to), true)))
+    .filter((r) => now - r.at >= minAgeMs)
+    .slice(0, MAX);
 }
 
 function ago(at, now = Date.now()) {

@@ -105,6 +105,14 @@ test('openReplies: one per person, the newest', () => {
   assert.deepEqual(r.map((x) => x.id), ['w1111aaaa']);
 });
 
+test('openReplies: the newest per person is chosen before the 30-minute floor', () => {
+  const now = Date.now();
+  const a = draft({ id: 'w0000aaaa', revAt: now - 5 * HOUR, createdAt: now - 5 * HOUR });
+  const b = draft({ id: 'w1111aaaa', revAt: now - 5 * 60e3, createdAt: now - 2 * HOUR });
+  assert.deepEqual(unsent.openReplies([a, b], [{ handle: 'mira', lastFrom: 'mira' }], 'oren', { now }), [], 'B was shown 5 minutes ago: A is not announced instead');
+  assert.deepEqual(unsent.openReplies([a, b], [{ handle: 'mira', lastFrom: 'mira' }], 'oren', { now: now + 30 * 60e3 }).map((r) => r.id), ['w1111aaaa']);
+});
+
 test('render: asks whether to see it again, never invites a blind send', () => {
   const r = unsent.render({ id: 'w1a2b3c4d', to: 'mira', at: Date.now() - 3 * HOUR });
   assert.equal(r.line, LINE);
