@@ -16,7 +16,9 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
-export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// The package under test. VIBE_LAB_PACKAGE points the lab at another checkout, so one
+// runner can compare versions of the package (a variant against the baseline).
+export const REPO = process.env.VIBE_LAB_PACKAGE ? path.resolve(process.env.VIBE_LAB_PACKAGE) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const jwt = (h, days = 1) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Math.floor(Date.now() / 1000) + days * 86400 })).toString('base64url')}.sig`;
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
