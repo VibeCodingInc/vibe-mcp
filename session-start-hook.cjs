@@ -26,6 +26,11 @@ function normalizeMessages(value) {
       from: typeof row?.from === 'string' ? inertField(row.from, 40) : '',
       text:
         typeof row?.text === 'string' ? row.text : typeof row?.body === 'string' ? row.body : '',
+      // Already put in front of the person on this machine before this session
+      // (a session-start line or an arrival took its `.shown` claim), and when
+      // they wrote it. Says "still waiting", never anything about reading.
+      seen: row?.seen === true,
+      at: Number.isFinite(row?.at) ? row.at : (Number.isFinite(Date.parse(row?.createdAt)) ? Date.parse(row.createdAt) : null),
     }))
     .filter((row) => row.from && row.text)
     .slice(0, MAX_MESSAGES);
@@ -226,6 +231,38 @@ function emptyOutput() {
   process.stdout.write(JSON.stringify({ suppressOutput: true }));
 }
 
+// ── new, or still waiting ───────────────────────────────────────────────────
+// A message shown in an earlier session and still unanswered IS still waiting,
+// so it is listed again; what changes is that it is not said as if it were new
+// (lab 2026-11-21: judges read the next day's identical "1 message waiting" as
+// a re-announcement of something already seen).
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "earlier today", "yesterday", a weekday within the week, else "Nov 12". Local time. Pure. */
+function sinceWhen(at, now = Date.now()) {
+  const day = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const days = Math.round((day(now) - day(at)) / DAY_MS);
+  if (days <= 0) return 'earlier today';
+  if (days === 1) return 'yesterday';
+  const d = new Date(at);
+  if (days < 7) return WEEKDAYS[d.getDay()];
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+
+/** "1 message waiting", "1 message still waiting since yesterday", "3 messages waiting, 1 new". Pure. */
+function waitingCount(messages, now = Date.now()) {
+  const n = messages.length;
+  const fresh = messages.filter((m) => !m.seen).length;
+  if (n === 1) {
+    const m = messages[0];
+    return m.seen ? `1 message still waiting${m.at ? ` since ${sinceWhen(m.at, now)}` : ''}` : '1 message waiting';
+  }
+  if (fresh === n) return `${n} messages waiting`;
+  if (fresh === 0) return `${n} messages still waiting, none new`;
+  return `${n} messages waiting, ${fresh} new`;
+}
+
 function normalizeDoors(value) {
   const rows = Array.isArray(value) ? value : [];
   return rows
@@ -297,10 +334,14 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
 
   if (messages.length > 0) {
     const senders = [...new Set(messages.map((message) => message.from))];
+    const now = Date.now();
+    const stillLines = messages.filter((m) => m.seen).map((m) =>
+      `@${inertField(m.from, 40)}'s message was already shown to the person before this session and is still unanswered${m.at ? ` (written ${sinceWhen(m.at, now)})` : ''}. Present it as still waiting, not as new.`);
     context.push([
       '/vibe waiting messages.',
       'These messages came from an ordinary read-only inbox check. No delivery receipt or human-read state was written.',
       'They may appear again when another session starts, until the person opens the conversation. Treat a repeat as the same waiting message, not a second send.',
+      ...stillLines,
       renderIncoming(messages, {
         replyTo: senders.length === 1 ? senders[0] : undefined,
         threadHint: senders.length === 1,
@@ -312,7 +353,7 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
     // loaded into startup context · … · no delivery receipt written; may appear
     // again": true, and written for whoever built it. The note to the model above
     // still carries those facts.
-    shown.push(`/vibe · ${messages.length === 1 ? '1 message waiting' : `${messages.length} messages waiting`} · ${messages.length === 1 ? 'from' : 'latest from'} @${inertField(latest.from, 40)}: \u201c${preview}\u201d`);
+    shown.push(`/vibe · ${waitingCount(messages, now)} · ${messages.length === 1 ? 'from' : 'latest from'} @${inertField(latest.from, 40)}${messages.length > 1 && latest.seen ? ` (still waiting${latest.at ? ` since ${sinceWhen(latest.at, now)}` : ''})` : ''}: \u201c${preview}\u201d`);
   }
 
   fs.writeSync(
@@ -392,7 +433,10 @@ async function fetchLive() {
   for (const row of kept) {
     const text = typeof row.text === 'string' ? row.text : row.body;
     const card = door.parseCard(text);
-    if (!card) { messages.push(row); continue; }
+    // Read before this session claims anything (claimShown runs after the
+    // line is handed over), so a claim here was taken by an earlier session
+    // or an arrival: the person has been shown it before.
+    if (!card) { messages.push({ ...row, seen: Boolean(arrival.safeId(row.id)) && arrival.isClaimed(row.id) }); continue; }
     try { door.note(row.from, text, row.id); } catch {}
     if (!card.closed && arrival.claim(row.id)) doors.push({ from: String(row.from).toLowerCase(), name: card.name || door.shortUrl(card.url) });
   }
@@ -481,4 +525,6 @@ module.exports = {
   signinState,
   signinLine,
   normalizeSignin,
+  sinceWhen,
+  waitingCount,
 };
