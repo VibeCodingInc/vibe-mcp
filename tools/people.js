@@ -101,6 +101,9 @@ async function handler() {
   if (!inbox.ok) lines.push("couldn't read your conversations");
   else if (threads.length === 0) lines.push('no conversations yet');
   else {
+    // A reply the person drafted and never chose about, to someone who wrote last (unsent.js).
+    let drafted = new Map();
+    try { drafted = new Map(require('../unsent').openReplies(require('../unsent').readDrafts(), inbox0, me, { now, isMuted: (h) => reach.isMuted(h) }).map((r) => [r.to, r.id])); } catch {}
     lines.push('your conversations:');
     for (const t of threads) {
       const mine = normalizeHandle(t.lastFrom || '') === me;
@@ -110,6 +113,7 @@ async function handler() {
       if (line.isOpen(t.handle)) bits.push('open line');
       if (reach.isMuted(t.handle)) bits.push('muted');
       if (door.of(t.handle)) { bits.push('\u{1F6AA} door open'); anyDoor = true; }
+      if (drafted.has(normalizeHandle(t.handle))) bits.push(`your reply is drafted but not sent (draft ${drafted.get(normalizeHandle(t.handle))})`);
       lines.push(`@${inertField(t.handle, 39)} · ${bits.filter(Boolean).join(' · ')}${toThem(t.handle)}`);
     }
   }

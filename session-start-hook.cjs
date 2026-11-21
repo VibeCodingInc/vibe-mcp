@@ -212,9 +212,9 @@ function live() {
     // Only a count ever crosses from the reader to the presenter.
     const strangers = Number.isInteger(parsed && parsed.strangers) && parsed.strangers > 0 ? parsed.strangers : 0;
     const invited = Number.isInteger(parsed && parsed.invited) && parsed.invited > 0 ? Math.min(parsed.invited, strangers) : 0;
-    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers, invited, signin: normalizeSignin(parsed && parsed.signin), noted: normalizeNoted(parsed && parsed.noted) };
+    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers, invited, signin: normalizeSignin(parsed && parsed.signin), noted: normalizeNoted(parsed && parsed.noted), unsent: normalizeUnsent(parsed && parsed.unsent) };
   } catch {
-    return { messages: [], here: [], doors: [], strangers: 0, invited: 0, signin: null, noted: [] };
+    return { messages: [], here: [], doors: [], strangers: 0, invited: 0, signin: null, noted: [], unsent: [] };
   }
 }
 
@@ -278,12 +278,13 @@ function normalizeDoors(value) {
  * Up to three things, each one line for the person and a short note for the
  * model: who is here, a door someone left, and messages that were waiting.
  */
-function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null, invited = 0, noted = []) {
+function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null, invited = 0, noted = [], unsent = []) {
   const waitingUnknown = Number.isInteger(strangers) && strangers > 0 ? Math.min(strangers, 99) : 0;
   const mayBeInvited = Number.isInteger(invited) && invited > 0 ? Math.min(invited, waitingUnknown) : 0;
   const signinNotice = signinLine(normalizeSignin(signin));
   const notes = normalizeNoted(noted);
-  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice && notes.length === 0) {
+  const replies = normalizeUnsent(unsent);
+  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice && notes.length === 0 && replies.length === 0) {
     emptyOutput();
     return;
   }
@@ -354,6 +355,14 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
     // again": true, and written for whoever built it. The note to the model above
     // still carries those facts.
     shown.push(`/vibe · ${waitingCount(messages, now)} · ${messages.length === 1 ? 'from' : 'latest from'} @${inertField(latest.from, 40)}${messages.length > 1 && latest.seen ? ` (still waiting${latest.at ? ` since ${sinceWhen(latest.at, now)}` : ''})` : ''}: \u201c${preview}\u201d`);
+  }
+
+  // A reply the person drafted and never chose about (unsent.js): their own
+  // draft, so the line names only who it is for; nothing of the other side.
+  for (const r of replies) {
+    const said = require('./unsent').render(r);
+    shown.push(said.line);
+    context.push(said.context);
   }
 
   fs.writeSync(
@@ -443,7 +452,40 @@ async function fetchLive() {
   const here = await fetchHere(store, me, reach, line);
   let noted = [];
   try { noted = pickNoted(require('./who').all(), { me, muted: reach.muted(), here: here.map((p) => p.handle) }); } catch {}
-  return { messages: normalizeMessages(messages), here, doors, strangers: unknown.size, invited: invited.size, noted };
+  const unsent = await fetchUnsent(store, me, reach);
+  return { messages: normalizeMessages(messages), here, doors, strangers: unknown.size, invited: invited.size, noted, unsent };
+}
+
+/**
+ * Replies the person drafted and never chose about, to someone who wrote last
+ * (unsent.js). The conversation list is asked for only when there is an open
+ * draft at all, so a start without one costs no extra request. A failed read
+ * is nothing to say, never a guess. Never for an agent signed in as itself.
+ */
+async function fetchUnsent(store, me, reach) {
+  try {
+    if (require('./agent-auth').isAgent()) return [];
+    const unsent = require('./unsent');
+    const drafts = unsent.readDrafts().filter((d) => d.status === 'previewed' && String(d.from || '').toLowerCase() === me);
+    if (drafts.length === 0) return [];
+    const inbox = await store.getInboxResult(me);
+    if (!inbox || inbox.ok !== true) return [];
+    return unsent.openReplies(drafts, inbox.threads, me, { isMuted: (h) => reach.isMuted(h) });
+  } catch {
+    return [];
+  }
+}
+
+function normalizeUnsent(value) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows
+    .map((row) => ({
+      id: typeof row?.id === 'string' && /^w[0-9a-f]{4,32}$/.test(row.id) ? row.id : '',
+      to: typeof row?.to === 'string' && HANDLE.test(row.to) ? row.to : '',
+      at: Number.isFinite(row?.at) ? row.at : null,
+    }))
+    .filter((row) => row.id && row.to && row.at !== null)
+    .slice(0, 3);
 }
 
 /** The people this person knows who are in a session now. A failed read is nobody, never a guess. */
@@ -470,9 +512,9 @@ async function main() {
     // Read before anything touches the network: it must survive the service
     // being unreachable, which is exactly when a person needs to be told.
     const signin = readSignin();
-    const found = await fetchLive().catch(() => ({ messages: [], here: [], doors: [], strangers: 0, invited: 0, noted: [] }));
+    const found = await fetchLive().catch(() => ({ messages: [], here: [], doors: [], strangers: 0, invited: 0, noted: [], unsent: [] }));
     if (signin) markSigninShown();
-    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, invited: found.invited || 0, signin, noted: found.noted || [] }));
+    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, invited: found.invited || 0, signin, noted: found.noted || [], unsent: found.unsent || [] }));
     return;
   }
 
@@ -485,8 +527,17 @@ async function main() {
   const fixture = fixtureMessages(process.env.VIBE_SESSION_START_FIXTURE);
   if (fixture !== null) { hookOutput(fixture); return; }
   const now = live();
-  hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited, now.noted);
+  // Once per session per draft: a resume of a session already told says nothing more.
+  const session = input.session_id;
+  const unsent = now.unsent.filter((r) => { try { return !require('./unsent').told(r.id, session); } catch { return false; } });
+  hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited, now.noted, unsent);
   claimShown(now.messages);
+  markTold(unsent, session);
+}
+
+/** Taken only after the line was handed over, like claimShown. */
+function markTold(rows, session) {
+  try { const unsent = require('./unsent'); for (const r of rows || []) unsent.markTold(r.id, session); } catch {}
 }
 
 /**
@@ -527,4 +578,5 @@ module.exports = {
   normalizeSignin,
   sinceWhen,
   waitingCount,
+  normalizeUnsent,
 };

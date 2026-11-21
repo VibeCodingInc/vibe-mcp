@@ -46,10 +46,30 @@ function take(dir, now, session) {
     // A row made for one session (who is near, after THIS person said they
     // were stuck) is shown there and nowhere else; it is left for that session.
     if (typeof row.session === 'string' && row.session !== session) continue;
+    // A reply the person drafted and left unchosen (unsent.js): said only if
+    // the draft is still open now, and not to a session already told at start.
+    const unsent = row.kind === 'unsent' ? unsentState(dir, row, session) : null;
     try { fs.closeSync(fs.openSync(path.join(dir, `${id}.shown`), 'wx', 0o600)); } catch { continue; }
+    if (unsent && !unsent.say) continue;
+    if (unsent && unsent.mark) { try { fs.closeSync(fs.openSync(path.join(dir, `${unsent.mark}.shown`), 'wx', 0o600)); } catch {} }
     rows.push(row);
   }
   return rows;
+}
+
+// ── a reply drafted and not sent (unsent.js) ────────────────────────────────
+// The session mark's name must match unsent.js sessionMark (a test pins it).
+function unsentState(dir, row, session) {
+  try {
+    const draft = typeof row.draft === 'string' && /^w[0-9a-f]{4,32}$/.test(row.draft) ? row.draft : null;
+    if (!draft) return { say: false };
+    const s = String(session || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
+    const mark = s ? `unsent-${draft}-${s}` : null;
+    if (mark && fs.existsSync(path.join(dir, `${mark}.shown`))) return { say: false };
+    const drafts = JSON.parse(fs.readFileSync(path.join(dir, '..', 'drafts.json'), 'utf8'));
+    const d = Array.isArray(drafts) ? drafts.find((x) => x && x.id === draft) : null;
+    return { say: Boolean(d && d.status === 'previewed'), mark };
+  } catch { return { say: false }; }
 }
 
 function main() {
