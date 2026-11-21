@@ -1,11 +1,16 @@
 {
-  "version": "0.9.21",
+  "version": "0.9.22",
   "updated": "2026-11-21",
-  "changelog": "Tell /vibe who someone is to you, and your agent knows who to ask.",
+  "changelog": "A reply you drafted and never sent is brought back, and the rule that nothing goes without you is held more tightly by code.",
   "features": [
-    "npx slashvibe-mcp who @handle \"my dad; runs the business\" keeps one private line about a person on this machine. Your agent sees it, so when the work needs \"the owner\" or \"design\" it can offer to ask the right person",
-    "The line is never sent by the package. An unattended answer over an open line refuses to carry it, and a draft that includes it says so before you choose Send",
-    "npx slashvibe-mcp who lists your notes; who @handle --clear removes one"
+    "A reply you prepared and never sent or dropped, while the other person is still waiting, is brought back once: \"your reply to @handle is drafted but not sent · want to see it again?\". It never sends anything by itself",
+    "A message you already saw and have not answered now reads \"still waiting since yesterday\" instead of looking new",
+    "A draft shown in an earlier conversation must be shown again before it can be sent. Re-showing a draft always needs a fresh typed message from you before it goes",
+    "Only a message you typed counts as your turn. A report from a subagent, a message from another session or a background notice no longer does",
+    "A pick in a question menu does not count as your choice; the agent shows the preview and asks in words",
+    "A message or link carrying characters that do not show, long runs of blank lines, or a look-alike handle is refused when it is prepared. Ordinary emoji and scripts that need joiners still work",
+    "An untouched older /vibe command file is updated when the server starts; one you edited is left alone",
+    "Known gap, stated in SECURITY.md: a wake-up the agent schedules for itself still counts as your turn"
   ],
   "deprecated": [],
   "breaking": false,
