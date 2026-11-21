@@ -47,7 +47,7 @@ const HIDDEN = {
   'a lone zero-width joiner': 'a‍b',
   'a digit and U+FE0F without the keycap': 'step 1\uFE0F next',
   'a letter as a keycap': 'a\uFE0F\u20E3',
-  'a subdivision flag (tag characters)': '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}',
+  'a subdivision flag other than England, Scotland, Wales (Texas)': '\u{1F3F4}\u{E0075}\u{E0073}\u{E0074}\u{E0078}\u{E007F}',
   // Sixth pass: other default-ignorable, private-use, unassigned and lone surrogate code points.
   'combining grapheme joiner (U+034F)': 'pa\u034Fy',
   'Mongolian free variation selector': 'a\u180Bb',
@@ -159,4 +159,37 @@ test('a link title is cut by code point, never into a lone surrogate', async () 
   assert.ok(title.endsWith('\u{1F600}'));
   assert.equal(hasHiddenCharacters(title), false);
   await drafts.vibe_discard.handler({ id: r.data.draft.id });
+});
+
+// Sixth pass: ordinary writing that uses joiners is not refused.
+const flag = (t) => '\u{1F3F4}' + [...t].map((c) => String.fromCodePoint(0xE0000 + c.codePointAt(0))).join('') + '\u{E007F}';
+test('Persian ZWNJ, Indic and Sinhala conjuncts, and the England, Scotland and Wales flags pass', async () => {
+  const ok = {
+    'Persian (ZWNJ between Arabic-script letters)': '\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645',
+    'Sinhala sri (ZWJ after virama)': '\u0DC1\u0DCA\u200D\u0DBB\u0DD3',
+    'Hindi (ZWNJ after virama)': '\u0915\u094D\u200C\u0937',
+    England: flag('gbeng'), Scotland: flag('gbsct'), Wales: flag('gbwls'),
+  };
+  for (const [what, text] of Object.entries(ok)) {
+    assert.equal(hasHiddenCharacters(text), false, what);
+    const r = await drafts.vibe_prepare.handler({ handle: 'linus', message: `note: ${text}` });
+    assert.ok(r.data, `${what}: ${r.display}`);
+    await drafts.vibe_discard.handler({ id: r.data.draft.id });
+  }
+  for (const [what, text] of Object.entries({
+    'ZWNJ between Latin letters': 'a\u200Cb',
+    'ZWJ after a Latin letter': 'a\u200Db',
+    'ZWJ after a virama, Latin letter next': '\u0915\u094D\u200Db',
+    'ZWNJ after an Arabic letter, Latin next': '\u0645\u200Cb',
+    'another tag sequence (Texas)': flag('ustx'),
+    'a tag sequence without its cancel tag': flag('gbeng').slice(0, -2),
+  })) assert.equal(hasHiddenCharacters(text), true, what);
+});
+
+test('CRLF is stored as LF; a lone CR is still refused', async () => {
+  const r = await drafts.vibe_prepare.handler({ handle: 'linus', message: 'line one\r\nline two' });
+  assert.ok(r.data, r.display);
+  assert.equal(r.data.draft.body, 'line one\nline two');
+  await drafts.vibe_discard.handler({ id: r.data.draft.id });
+  assert.ok(!(await drafts.vibe_prepare.handler({ handle: 'linus', message: 'line one\rline two' })).data);
 });

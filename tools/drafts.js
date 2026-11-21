@@ -333,14 +333,17 @@ async function draftHandler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
   const me = config.getHandle();
-  const message = typeof (args && args.message) === 'string' ? args.message.trim() : '';
+  // CRLF is one line break written two ways: stored as LF, so what is checked,
+  // previewed and sent is the same text. A lone CR stays a hidden character.
+  const rawMessage = typeof (args && args.message) === 'string' ? args.message.replace(/\r\n/g, '\n') : '';
+  const message = rawMessage.trim();
   const wantId = args && args.id;
   // What the person approves must show what it is (showable.js): a body, link
   // title or link address with characters that do not show is refused, never
   // echoed back.
   const { hasHiddenCharacters } = require('../showable');
   // The raw text: trim() would quietly drop a leading or trailing BOM.
-  if (message && hasHiddenCharacters(args.message)) return { display: 'Not prepared: the message contains characters that do not show; remove them. Nothing was sent.' };
+  if (message && hasHiddenCharacters(rawMessage)) return { display: 'Not prepared: the message contains characters that do not show; remove them. Nothing was sent.' };
   // More than two blank lines in a row could push the rest of the text out of
   // view in the preview.
   if (message && /\n(?:[ \t]*\n){3,}/.test(message)) return { display: 'Not prepared: the message has more than two blank lines in a row; remove the extra ones. Nothing was sent.' };
