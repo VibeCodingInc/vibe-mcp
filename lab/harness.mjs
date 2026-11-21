@@ -17,10 +17,10 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const jwt = (h) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Math.floor(Date.now() / 1000) + 86400 })).toString('base64url')}.sig`;
+export const jwt = (h, days = 1) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Math.floor(Date.now() / 1000) + days * 86400 })).toString('base64url')}.sig`;
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export function identity(root, handle, says, stubUrl, trusts = [], knows = [], { muted = [], invisible = false, startHook = false, agentMint = null, serverEnv = {} } = {}) {
+export function identity(root, handle, says, stubUrl, trusts = [], knows = [], { muted = [], invisible = false, startHook = false, agentMint = null, serverEnv = {}, tokenDays = 1 } = {}) {
   const home = path.join(root, handle, '.vibe');
   const work = path.join(root, handle, 'work');
   fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(work, { recursive: true });
@@ -31,7 +31,7 @@ export function identity(root, handle, says, stubUrl, trusts = [], knows = [], {
     fs.writeFileSync(mintFile, agentMint, { mode: 0o600 });
     fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ one_liner: says }));
   } else {
-    fs.writeFileSync(path.join(home, 'auth.json'), JSON.stringify({ handle, token: jwt(handle), provider: 'github', authenticated_at: new Date().toISOString() }));
+    fs.writeFileSync(path.join(home, 'auth.json'), JSON.stringify({ handle, token: jwt(handle, tokenDays), provider: 'github', authenticated_at: new Date().toISOString() }));
     fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ handle, one_liner: says }));
   }
   if (knows.length || muted.length || invisible) fs.writeFileSync(path.join(home, 'reach.json'), JSON.stringify({ quiet: false, invisible, muted: Object.fromEntries(muted.map((h) => [h, Date.now()])), known: Object.fromEntries(knows.map((h) => [h, Date.now()])) }));
@@ -50,7 +50,7 @@ export function identity(root, handle, says, stubUrl, trusts = [], knows = [], {
     s.hooks.SessionStart = [{ matcher: 'startup|resume', hooks: [{ type: 'command', timeout: 8, command: `VIBE_HOME=${q(home)} VIBE_API_URL=${q(stubUrl)} CI=1 ${q(process.execPath)} ${q(path.join(REPO, 'cli.js'))} hook run` }] }];
     fs.writeFileSync(settings, JSON.stringify(s, null, 2));
   }
-  return { handle, home, work, mcp, settings, token: jwt(handle), api: stubUrl, mintFile: agentMint ? mintFile : null };
+  return { handle, home, work, mcp, settings, token: jwt(handle, tokenDays), api: stubUrl, mintFile: agentMint ? mintFile : null };
 }
 
 // A person typing a /vibe command in their terminal, as this identity. Async:
@@ -83,20 +83,20 @@ const resultText = (c) => (Array.isArray(c.content) ? c.content.map((y) => y.tex
  * One `claude -p` turn as this identity. Options (all default to the
  * rehearsal behaviour): allowSend, resume (a session id), model, tools
  * (replaces the allowed list), builtins (→ --tools, the built-in tools that
- * exist at all), timeoutMs (the child is killed by pid; resolves with what was
+ * exist at all), settings (a settings file in place of id.settings), timeoutMs (the child is killed by pid; resolves with what was
  * captured and timedOut: true).
  *
  * Resolves with { shown, tools, texts, returned, final } as before, plus
  * sessionId, allTools (every tool_use), events (the turn in order: shown,
  * text, tool, returned), timedOut, isError, stderr.
  */
-export function session(id, prompt, { allowSend = false, resume = null, model = null, tools = null, builtins = null, timeoutMs = 0 } = {}) {
+export function session(id, prompt, { allowSend = false, resume = null, model = null, tools = null, builtins = null, settings = null, timeoutMs = 0 } = {}) {
   const allowed = tools ? [...tools] : [...DEFAULT_TOOLS];
   if (!tools && allowSend) allowed.push('mcp__vibe__vibe_send');
   const args = ['-p', prompt, '--mcp-config', id.mcp, '--strict-mcp-config',
     // Never load the operator's own user settings: their real /vibe arrival hook
     // would run inside a lab session and claim a real message's one announcement.
-    '--setting-sources', 'project,local', '--settings', id.settings,
+    '--setting-sources', 'project,local', '--settings', settings || id.settings,
     '--allowedTools', ...allowed, '--disallowedTools', 'Agent', 'WebSearch', '--output-format', 'stream-json', '--verbose'];
   if (resume) args.push('--resume', resume);
   if (model) args.push('--model', model);
@@ -135,7 +135,7 @@ export function session(id, prompt, { allowSend = false, resume = null, model = 
         if (c.type === 'tool_use') {
           toolNames.set(c.id, c.name);
           t.allTools.push({ name: c.name, input: clip(c.input, 600) });
-          t.events.push({ kind: 'tool', name: c.name, input: c.input });
+          t.events.push({ kind: 'tool', id: c.id, name: c.name, input: c.input });
           if (c.name.includes('vibe')) t.tools.push({ name: c.name.replace('mcp__vibe__', ''), input: c.input });
         }
         if (c.type === 'text') { t.texts.push(c.text); t.events.push({ kind: 'text', text: c.text }); }
@@ -146,8 +146,8 @@ export function session(id, prompt, { allowSend = false, resume = null, model = 
         const x = resultText(c);
         if (/\/vibe|@[a-z]|door/i.test(x) && !/^total \d/.test(x)) t.returned.push(x);
         const name = toolNames.get(c.tool_use_id) || '';
-        if (name.startsWith('mcp__vibe__')) t.events.push({ kind: 'returned', name, text: x, isError: Boolean(c.is_error) });
-        else if (c.is_error) t.events.push({ kind: 'tool_error', name, text: clip(x, 400) });
+        if (name.startsWith('mcp__vibe__')) t.events.push({ kind: 'returned', tool_use_id: c.tool_use_id, name, text: x, isError: Boolean(c.is_error) });
+        else if (c.is_error) t.events.push({ kind: 'tool_error', tool_use_id: c.tool_use_id, name, text: clip(x, 400) });
       }
       if (e.type === 'result') { t.final = e.result || ''; t.isError = Boolean(e.is_error); if (e.session_id) t.sessionId = e.session_id; }
     }
