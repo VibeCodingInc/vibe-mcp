@@ -212,15 +212,22 @@ npx slashvibe-mcp operate          # the agents you are named on · renew @sol �
 
 ## Who can reach you
 
-Only people you know reach you while you work: someone you have written to, or someone you
-opened a line with. Anyone else waits where `vibe start` lists what is waiting.
+Only people you know reach you while you work: someone you have written to, someone you
+opened a line with, or someone who joined /vibe with your invitation. Anyone else waits where
+`vibe start` lists what is waiting.
+
+Your invite line carries a code made on your account (`setup --from @you --invite VIBE-…`).
+When the person you give it to signs in with it, /vibe records that they used your
+invitation and tells you, and only you. Their first message then reaches you while you work,
+marked "you invited them". A code works once. Whoever uses it is treated as someone you
+invited, so give the line to the person you mean. `mute @them` undoes it.
 
 You are still told when that happens. When a session opens, one line says how many people
 you have not written to are waiting, and how to ask: `what's waiting on /vibe`. It says
 nothing about who they are or what they wrote, to you or to your agent, until you ask.
 If one of them first wrote after you were given your invite line (`setup --from @you`), it
-says it may be someone you invited: that is from timing on your machine alone, since /vibe
-does not yet tell you who accepted an invite.
+says it may be someone you invited: that is from timing on your machine alone, for an
+invite line given without a code (an older line, or one made while /vibe could not be reached).
 
 ```bash
 npx slashvibe-mcp quiet            # nothing surfaces until: unquiet

@@ -659,6 +659,9 @@ async function getInboxInner(handle) {
         // Drafting tools use it so an agent is never suggested as a person.
         lastActorKind: t.last_message?.actor?.kind || null,
         muted: t.preferences?.muted || false,
+        // Served for the caller only: this person redeemed an invitation the
+        // caller gave out. Absent on older platforms, which reads as false.
+        invitedByYou: t.invited_by_you === true,
         lastTimestamp: t.last_message?.created_at ? new Date(t.last_message.created_at).getTime() : null
       }));
     }
@@ -705,6 +708,7 @@ async function getInboxV1(handle) {
         // Actor metadata of the newest message, as served (#272: server-owned).
         // Drafting tools use it so an agent is never suggested as a person.
         lastActorKind: t.last_message?.actor?.kind || null,
+        invitedByYou: t.invited_by_you === true,
         lastTimestamp: t.last_message?.created_at ? new Date(t.last_message.created_at).getTime() : null
       }));
     }
@@ -789,6 +793,8 @@ async function getRawInbox(handle) {
         read: false, // If it's in unread threads, it's unread
         thread_id: thread.id,
         unread_count: thread.unread,
+        // The caller invited this person (served for the caller only; absent = false).
+        invitedByYou: thread.invited_by_you === true,
       });
     });
 
@@ -927,6 +933,11 @@ async function createInvite(body) {
   return request('POST', '/api/invites', body, { maxRetries: 0 });
 }
 
+/** GET /api/invites/my — the person's own invitation codes (their credential only). */
+async function listMyInvites() {
+  return request('GET', '/api/invites/my', null, { maxRetries: 0 });
+}
+
 // ============ AUTH ============
 
 /**
@@ -1043,6 +1054,7 @@ module.exports = {
 
   // Invites (a held message for someone not on /vibe yet)
   createInvite,
+  listMyInvites,
 
   // Hermetic request-count tests for the named-thread fast path.
   _testing: { getThreadWithRequest, markThreadReadWithRequest },

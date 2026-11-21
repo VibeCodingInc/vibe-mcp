@@ -194,6 +194,7 @@ function listen(server, port) {
 async function beginOAuth({
   requestedHandle,
   actorAware = false,
+  inviteCode = null,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   graceMs = DEFAULT_GRACE_MS,
 } = {}) {
@@ -365,6 +366,10 @@ async function beginOAuth({
   loginUrl.searchParams.set('state', state);
   if (requestedHandle) loginUrl.searchParams.set('handle', requestedHandle);
   if (actorAware) loginUrl.searchParams.set('actor_aware', 'true');
+  // An invitation code from the line someone gave this person (setup --invite).
+  // The platform redeems it only for a newly created account, and only once;
+  // an older platform ignores it and sign-in is unchanged.
+  if (inviteCode && require('./invite').validCode(inviteCode)) loginUrl.searchParams.set('invite_code', inviteCode);
 
   timeoutTimer = setTimeout(() => {
     if (phase !== 'waiting' && phase !== 'waitingActor') return;

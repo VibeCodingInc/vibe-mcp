@@ -151,7 +151,7 @@ function render(item) {
     ];
   } else {
     lines = [
-      `/vibe — ${who} just wrote to the person you are working with.`,
+      `/vibe — ${who} just wrote to the person you are working with.${item.invited ? ` They joined /vibe with the person's invitation, so this is someone they invited; it is their first message to reach them.` : ''}`,
       '',
       'What to do, in this order:',
       '1. Tell them now, in one line: who wrote, and quote what they said.',
@@ -177,7 +177,8 @@ function render(item) {
   // carry their own mark; anything else is simply something they wrote.
   const verb = lineOpen && line.isAgentAnswer(item.text) ? "'s agent answered"
     : (lineOpen && line.isAgentAsk(item.text) ? "'s agent asked over your open line" : ' wrote you');
-  return { context, line: `/vibe · @${from}${verb}: "${inertField(text, 140)}"` };
+  const invited = item.invited && !lineOpen ? ' (you invited them)' : '';
+  return { context, line: `/vibe · @${from}${invited}${verb}: "${inertField(text, 140)}"` };
 }
 
 // ── the spool ───────────────────────────────────────────────────────────────
@@ -235,6 +236,9 @@ function record(threads, me, { since = 0, roster = [], bindingFor = null, env = 
       at: Date.now(),
       // An open line with this person changes what the agent may do (line.js).
       line: line.isOpen(t.lastFrom, env),
+      // The platform said they redeemed this person's invitation, and that is
+      // what made them known just now (presence.js knownByInvite): said once.
+      invited: t.introducedByInvite === true,
     };
     if (item.line && line.isAgentAnswer(item.text)) {
       // What this side asked, so the answer is read beside its question.

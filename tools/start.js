@@ -107,7 +107,7 @@ async function handler(args = {}) {
     // the message sent next reaches the friend while they work instead of
     // waiting as "1 person you have not written to". Without a usable handle
     // the bare install still works; it just cannot name anyone.
-    const bring = invite.line(myHandle);
+    const bring = invite.line(myHandle, await invite.codeFor(myHandle));
     if (bring) invite.noteGiven();
     display += `\n\nno conversations yet. /vibe takes two: send the person you work with this, then message them.\n  ${bring ? bring.command : 'npx slashvibe-mcp setup'}`;
   }

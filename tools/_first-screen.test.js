@@ -44,6 +44,9 @@ const withStore = (stubs, fn) => async () => {
     registerSession: async () => ({}),
     getLiveBroadcastCount: async () => 0,
     getIdentityKind: async () => null, // no network in the first-screen tests
+    // The invite line asks for a code (invite.codeFor): never the network here.
+    listMyInvites: async () => ({ success: false, error: 'offline' }),
+    createInvite: async () => { throw new Error('first-screen tests mint nothing'); },
   };
   const merged = { ...base, ...stubs };
   // start reads getInboxResult (which keeps the read OUTCOME); a test that
@@ -154,6 +157,17 @@ test('a genuinely new arrival is told it takes two and given the line to send â€
   // When it was shown is remembered locally (invite.js), so a first message
   // from whoever installs from it can be called "may be someone you invited".
   assert.ok(require('../invite').givenAt() !== null, 'the moment the line was given is noted on this machine');
+}));
+
+test('the newcomer line carries a code from the person\'s own account, so whoever installs from it is someone they know', withStore({
+  getInbox: async () => [],
+  listMyInvites: async () => ({ success: true, can_generate: true, codes: [
+    { code: 'VIBE-NAMEDFORSOM-ADA', status: 'available', named_for: 'someone', expires_at: new Date(Date.now() + 9 * 86400000).toISOString() },
+    { code: 'VIBE-PLAINCODE23-ADA', status: 'available', named_for: null, expires_at: new Date(Date.now() + 9 * 86400000).toISOString() },
+  ] }),
+}, async () => {
+  const { text } = await run();
+  assert.match(text, /^  npx slashvibe-mcp setup --from @ada --invite VIBE-PLAINCODE23-ADA$/m, 'a plain live code of theirs is reused, never one named for someone else');
 }));
 
 test('the newcomer line degrades to the bare install when there is no usable handle to name', withStore({
