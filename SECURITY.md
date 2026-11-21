@@ -59,5 +59,9 @@ running as the person:
 - The record is per project folder, not per session or window. A prompt in one
   window of a project counts for a draft shown in another window of the same
   project.
+- The session-start record is per project folder too. A session started in one
+  window of a project counts as a new session for every window of that project.
+- The person sees the exact text, but spacing and word choice can carry
+  information the person will not notice.
 - On a host other than Claude Code, or where the arrival hook has never recorded a
   turn, there is no turn check: a draft id and rev are enough to send.

@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Turns — has the person had a turn since this exact text was prepared?
+ * Turns — has the person had a turn since this exact text was last shown?
  *
  * The promise: nothing is sent unless the person saw the exact text and chose
  * Send. The rev binds Send to bytes, but on its own it cannot tell whether the
@@ -15,7 +15,7 @@
  *   <VIBE_HOME>/turns/<hash of the project directory>.json = {"at": T};
  *
  *   vibe_send sends a rev only if a turn was recorded for this project
- *   strictly AFTER that rev was prepared.
+ *   strictly AFTER that rev was last shown.
  *
  * What is stored: a timestamp, in a file named by a hash of the directory.
  * No prompt text, no path in clear, no session id. Mode 0600.
@@ -90,8 +90,9 @@ function record(dir, at = Date.now(), env = process.env) {
 // to send it without showing it here first. The session-start hook records
 // when a session started for the project, under
 // <turns dir>/<hash of the project directory>.start.json = {"at": T}, on the
-// SessionStart sources startup, resume and clear; never on compact (after a
-// compaction the person did see the text in this session).
+// SessionStart sources startup, resume, clear and fork; never on compact (after
+// a compaction the person did see the text in this session). One record per
+// project folder: two sessions open in the same folder share it.
 
 function startFile(dir, env = process.env) {
   const k = key(dir);
@@ -183,7 +184,7 @@ function sessionFloor(dir, env = process.env) {
 }
 
 /**
- * May a revision prepared at `revAt` be sent now?
+ * May a revision last shown at `revAt` be sent now?
  *   { check: 'passed' }       a turn for this project came strictly after it
  *   { check: 'needs_turn' }   no turn since (or none at all for this project)
  *   { check: 'unavailable' }  the hook has never recorded a turn here, or this

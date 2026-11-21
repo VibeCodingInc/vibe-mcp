@@ -19,9 +19,9 @@
  *    never leave the machine.
  *  - The approval is bound to bytes: Send names the rev of the preview the
  *    person saw; a draft changed since is refused.
- *  - Seen, not just bound: Send goes only if the person has had a turn (a
- *    prompt, recorded by the arrival hook) after the rev was prepared, so an
- *    agent cannot prepare and send in one turn (turns.js).
+ *  - Shown, then a typed turn: Send goes only if the person has had a turn (a
+ *    prompt, recorded by the arrival hook) after the rev was last shown, so an
+ *    agent cannot show and send in one turn (turns.js).
  *  - Exactly once: Send claims the draft under a whole-file lock, sends with
  *    an idempotency key derived from the exact text, and finalizes against
  *    the latest stored state. A draft whose delivery could not be confirmed
@@ -495,7 +495,7 @@ function stampRev(d) {
   d.reshown = d.revFor === rev && Number.isFinite(d.revAt);
   d.revFor = rev; d.revAt = Date.now();
 }
-/** When the stored text was prepared. A draft from before revAt existed: its creation (or now, if edited since). */
+/** When the stored text was last shown (revAt, stamped at every showing). A draft from before revAt existed: its creation (or now, if edited since). */
 function revPreparedAt(d) {
   if (d.revFor === revOf(d) && Number.isFinite(d.revAt)) return d.revAt;
   return d.edited ? Date.now() : (d.createdAt || Date.now());
@@ -619,10 +619,11 @@ async function send(args, { byPerson }) {
     if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — not sending it twice.` };
     if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.` };
     if (!rev) return { display: `Send needs the rev shown in the preview of draft ${d.id} — open it with vibe_prepare and send with that rev. Nothing sent.` };
-    // Never name the current rev here: a rev handed out without a showing
-    // would let an agent send text the person was never shown (review
-    // 2026-11-21: probe a wrong rev, read the right one, send). Every rev an
-    // agent receives comes with the preview, and that showing is stamped.
+    // The current rev is not named here, but that is not what protects the
+    // person: a rev is a hash of the text, so an agent can compute it. The
+    // control is the shown-time stamp plus the turn check below: a rev goes
+    // only after a typed turn that came after its last showing (review
+    // 2026-11-21: probe a wrong rev, read the right one, send).
     if (rev !== revOf(d)) return { display: `Draft ${d.id} is not the version that rev names. Show it again with vibe_prepare {id: "${d.id}"}, and send only what the person approves after seeing it. Nothing sent.` };
     if (d.status === 'sending') {
       // The claiming process died mid-send: the SAME text under the SAME key
@@ -638,8 +639,8 @@ async function send(args, { byPerson }) {
       // honest options are to cancel (with the warning) or write anew.
       return { display: `Draft ${d.id}: the earlier Send to @${d.to} did not confirm, and this transport cannot deduplicate a retry. Cancel it (the earlier attempt may have reached them) and open a new draft if you still want to say it. Nothing sent.` };
     }
-    // The person must have had a turn since THIS text was prepared (turns.js):
-    // an agent cannot prepare a new rev and send it inside one turn.
+    // The person must have had a turn since THIS text was last shown
+    // (turns.js): an agent cannot show a new rev and send it inside one turn.
     turn = turnCheck(d, byPerson);
     if (turn.check === 'needs_turn') {
       // The refusal shows the preview with its rev: that is a showing, and it
@@ -721,9 +722,9 @@ function withTurn(result, turn) {
   return { ...result, data: { ...(result.data || {}), turn_check: turn.check } };
 }
 /**
- * Not sent: this text was prepared after the person's last turn, so they have
- * not seen it. Normal, not an error: the preview is shown again, and the next
- * Send after their answer goes. Nothing reached the network on this path.
+ * Not sent: this text was last shown after the person's last turn (or in an
+ * earlier session). Normal, not an error: the preview is shown again, and the
+ * next Send after their answer goes. Nothing reached the network on this path.
  */
 async function unseenRefusal(d, why = null) {
   const changed = typeof d.firstRev === 'string' && d.firstRev !== revOf(d);
