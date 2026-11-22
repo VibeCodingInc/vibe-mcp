@@ -44,6 +44,9 @@ const SHIPPED_COMMAND_SHA256 = new Set([
   // v0.9.22 asked in words, but said nothing about a thread's "you": a new
   // session read the person's own earlier message as unexplained.
   '0d1de22e0c970a5ee750c5b5b38fe7e3f25730f00b51aa175ba875c44f5a78df', // v0.9.22
+  // v0.9.23 did not tell the agent to keep out of what the person types in
+  // the box (0.9.24 asks the person to type the recipient's first letters).
+  '36823d773eacc14d7b08bf5796acf7d3c6636b21eb22fc8efab6e7bc55028425', // v0.9.23
 ]);
 
 function claudeDir(env = process.env) {

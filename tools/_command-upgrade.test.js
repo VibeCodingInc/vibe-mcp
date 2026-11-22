@@ -97,9 +97,10 @@ test('the shipped list matches every tagged release, where the tags are present'
   if (!tags.includes('v0.9.22')) { t.skip('release tags not available in this checkout'); return; }
   const { SHIPPED_COMMAND_SHA256 } = require('../setup.js');
   const seen = new Set();
-  // Releases up to v0.9.22: v0.9.21 was the last to ship a question-control
-  // command, v0.9.22 the last without the line on a thread's "you".
-  const upTo = (tag) => { const [a, b, c] = tag.slice(1).split('.').map(Number); return a === 0 && (b < 9 || (b === 9 && c <= 22)); };
+  // Releases up to v0.9.23: v0.9.21 was the last to ship a question-control
+  // command, v0.9.22 the last without the line on a thread's "you", v0.9.23
+  // the last without "or what to type in it".
+  const upTo = (tag) => { const [a, b, c] = tag.slice(1).split('.').map(Number); return a === 0 && (b < 9 || (b === 9 && c <= 23)); };
   for (const tag of tags.filter(upTo)) {
     let body;
     try { body = execFileSync('git', ['show', `${tag}:hosts/vibe-command.md`], { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { continue; }
