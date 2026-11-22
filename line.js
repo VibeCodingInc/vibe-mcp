@@ -87,10 +87,34 @@ function receipts({ sinceMs = 24 * HOUR, env = process.env, now = Date.now() } =
   return raw.split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } })
     .filter((r) => r && now - r.at <= sinceMs);
 }
-/** How many unattended messages went to this person in the last hour. */
+/**
+ * Slots taken by unattended messages still in flight in this process. A slot
+ * is reserved synchronously, before any await, so calls in parallel cannot
+ * all pass the hourly cap and then all send. It is released when the receipt
+ * is written, or when delivery definitely failed; a send that may have gone
+ * keeps its slot for the hour.
+ */
+const _reserved = new Map();   // token -> { with, at }
+function reserve(handle) {
+  const token = Symbol('line-slot');
+  _reserved.set(token, { with: norm(handle), at: Date.now() });
+  return token;
+}
+function release(token) { _reserved.delete(token); }
+function reservedThisHour(handle, now = Date.now()) {
+  const h = norm(handle);
+  let n = 0;
+  for (const [t, r] of _reserved) {
+    if (now - r.at > HOUR) { _reserved.delete(t); continue; }
+    if (r.with === h) n += 1;
+  }
+  return n;
+}
+
+/** How many unattended messages went (or are going) to this person in the last hour. */
 function sentThisHour(handle, env = process.env) {
   const h = norm(handle);
-  return receipts({ sinceMs: HOUR, env }).filter((r) => r.with === h).length;
+  return receipts({ sinceMs: HOUR, env }).filter((r) => r.with === h).length + reservedThisHour(h);
 }
 
 // ── what may cross unattended ───────────────────────────────────────────────
@@ -121,7 +145,7 @@ const isAgentAsk = (body) => /\(asked by @[a-z0-9_-]+'s agent from their current
 const stripMark = (body) => String(body || '').replace(/\n\n\((asked|answered) by @[a-z0-9_-]+'s agent from their current work, over an open line\.[^)]*\)\s*$/i, '');
 
 module.exports = {
-  open, close, list, isOpen, record, receipts, sentThisHour, looksSecret,
+  open, close, list, isOpen, record, receipts, sentThisHour, reserve, release, looksSecret,
   ASKED, ANSWERED, isAgentAnswer, isAgentAsk, stripMark, norm, validHandle,
   MAX_PER_HOUR, MAX_CHARS, ANSWER_WINDOW_MS,
 };
