@@ -82,7 +82,7 @@ test('the five voice switches exist, are on, and turn off by name only against a
 
 const CHARTER = 'When you speak about /vibe matters, be brief and concrete, use names rather than roles ("Kenji", not "your teammate"), use no exclamation marks, and never say "quick question", "just checking in", "ping", "great question" or "nothing in this session covers that" (search first).';
 const NOTICING = 'When you offer a message because someone holds the answer, lead with one line on why this person, at most about 90 characters, saying only what their own status line, note or conversation actually says (quote or closely paraphrase it), for example "Jonas already has the CRLF fix on a branch. Faster than figuring it out twice."; never say someone solved or knows something unless their own words say so.';
-const LANDED_START = 'When a reply the person received leads to a concrete change in this session (they edit a file, change a plan or a number, or hold an action because of it), and only once that change has actually been made, you may offer one note back to the sender for that reply: vibe_prepare with handle, message, reply_to (their reply\'s id) and kind "landed".';
+const LANDED_START = 'Finishing work that used a reply includes saying so. When a reply the person received has been used in this session (a file changed, a plan or a number changed, or an action held because of it), then once that change has actually been made, end that reply of yours with one line offering to tell the sender it was used, and open that note with vibe_prepare: handle, message, reply_to (their reply\'s id), kind "landed" and asked: false. Exactly once per reply they received.';
 
 test('SERVER_INSTRUCTIONS carries each guidance sentence, and each goes with its switch', () => {
   const { serverInstructions } = require('../index.js');
@@ -92,6 +92,9 @@ test('SERVER_INSTRUCTIONS carries each guidance sentence, and each goes with its
   assert.ok(now.includes(LANDED_START), 'itLanded');
   assert.ok(now.includes('That landed: I\'m keeping tool_choice on auto and dropping the retry wrapper.'));
   assert.ok(now.includes('never send it without their choice'));
+  // A normal part of finishing the work, no longer a maybe; every limit kept.
+  assert.ok(!/you may offer one note back/.test(now));
+  for (const limit of ['once that change has actually been made', 'one line, at most about 100 characters', "in the person's own terms", 'no file paths, code', 'invented feelings or claimed savings', 'if they declined one for that reply, do not offer it again']) assert.ok(now.includes(limit), limit);
   assert.ok(!serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'voiceCharter' }).includes(CHARTER));
   assert.ok(serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'voiceCharter' }).includes(NOTICING));
   assert.ok(!serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'noticingLine' }).includes(NOTICING));
@@ -107,6 +110,11 @@ test('the /vibe command leads an offer with the line on why this person, and des
   assert.ok(cmd.includes('Never say someone solved or knows something unless their own words say so.'));
   assert.ok(cmd.includes('`kind: "landed"`'));
   assert.ok(cmd.includes('If they declined one for that reply, do not offer it again.'));
+  assert.ok(cmd.includes('end that reply of yours with one line offering to tell the sender it was used'));
+  assert.ok(cmd.includes('`kind: "landed"` and `asked: false`'));
+  assert.ok(cmd.includes('Exactly once per reply they received.'));
+  assert.ok(cmd.includes('once that change has actually been made'));
+  assert.ok(!cmd.includes('you may offer one note back'));
   assert.ok(!/!(?!\[)/.test(cmd.replace(/`[^`]*`/g, '')), 'no exclamation mark in the command text');
 });
 
