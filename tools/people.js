@@ -21,6 +21,10 @@ const line = require('../line');
 const reach = require('../reach');
 const door = require('../door');
 const who = require('../who');
+const notice = require('../notice');
+
+/** Nobody else in a session, when presence was read (notice.js emptyStates). docs/VOICE.md. */
+const JUST_YOU = "Just you in here right now; notes wait till they're back.";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -85,7 +89,7 @@ async function handler() {
   const lines = [];
   // A read that failed is not an empty room and not an empty history.
   if (!presence.ok) lines.push("couldn't see who is here right now");
-  else if (here.length === 0) lines.push(others > 0 ? `nobody you know is in a session right now (${others} other ${others === 1 ? 'person is' : 'people are'})` : 'nobody else is in a session right now');
+  else if (here.length === 0) lines.push(others > 0 ? `nobody you know is in a session right now (${others} other ${others === 1 ? 'person is' : 'people are'})` : (notice.on('emptyStates') ? JUST_YOU : 'nobody else is in a session right now'));
   else {
     lines.push(`people you know, in a session now (${here.length}):`);
     for (const u of here) {
@@ -152,4 +156,4 @@ async function handler() {
   };
 }
 
-module.exports = { definition, handler };
+module.exports = { definition, handler, JUST_YOU };

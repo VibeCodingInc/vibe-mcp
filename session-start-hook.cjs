@@ -248,9 +248,9 @@ function live() {
     // Only a count ever crosses from the reader to the presenter.
     const strangers = Number.isInteger(parsed && parsed.strangers) && parsed.strangers > 0 ? parsed.strangers : 0;
     const invited = Number.isInteger(parsed && parsed.invited) && parsed.invited > 0 ? Math.min(parsed.invited, strangers) : 0;
-    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers, invited, signin: normalizeSignin(parsed && parsed.signin), noted: normalizeNoted(parsed && parsed.noted), unsent: normalizeUnsent(parsed && parsed.unsent) };
+    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers, invited, signin: normalizeSignin(parsed && parsed.signin), noted: normalizeNoted(parsed && parsed.noted), unsent: normalizeUnsent(parsed && parsed.unsent), nothingWaiting: Boolean(parsed && parsed.nothingWaiting === true) };
   } catch {
-    return { messages: [], here: [], doors: [], strangers: 0, invited: 0, signin: null, noted: [], unsent: [] };
+    return { messages: [], here: [], doors: [], strangers: 0, invited: 0, signin: null, noted: [], unsent: [], nothingWaiting: false };
   }
 }
 
@@ -332,11 +332,45 @@ function normalizeDoors(value) {
     .slice(0, 3);
 }
 
+// ── nothing waiting ─────────────────────────────────────────────────────────
+// docs/VOICE.md. The wry form, at a clean session start, at most once a day
+// per machine (a small local file, like the sign-in notice). Said only when
+// the conversations were actually read and none holds an unread message of
+// someone else's: a read that failed is silence, never "nothing waiting".
+const QUIET_MOMENT = 'Nothing waiting. Rare moment \u2014 enjoy it.';
+const MOMENT_FILE = 'nothing-waiting.json';
+function localDay(now = Date.now()) {
+  const d = new Date(now);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+/** True when the wry line has not been shown on this machine today. */
+function momentFree(now = Date.now()) {
+  try {
+    const path = require('node:path');
+    const file = path.join(require('./vibe-home').vibeHome(), MOMENT_FILE);
+    try { if (JSON.parse(fs.readFileSync(file, 'utf8')).day === localDay(now)) return false; } catch {}
+    return true;
+  } catch { return false; }
+}
+/** Recorded only once the line was handed over. */
+function markMoment(now = Date.now()) {
+  try {
+    const path = require('node:path');
+    fs.writeFileSync(path.join(require('./vibe-home').vibeHome(), MOMENT_FILE), JSON.stringify({ day: localDay(now) }), { mode: 0o600 });
+  } catch {}
+}
+/** Pure: the conversation list was read and nobody else's message in it is unread. */
+function inboxEmpty(result, me) {
+  if (!result || result.ok !== true || !Array.isArray(result.threads)) return false;
+  const mine = String(me || '').toLowerCase();
+  return !result.threads.some((t) => t && t.unread > 0 && String(t.lastFrom || '').toLowerCase() !== mine);
+}
+
 /**
  * Up to three things, each one line for the person and a short note for the
  * model: who is here, a door someone left, and messages that were waiting.
  */
-function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null, invited = 0, noted = [], unsent = []) {
+function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null, invited = 0, noted = [], unsent = [], { quietMoment = false } = {}) {
   const waitingUnknown = Number.isInteger(strangers) && strangers > 0 ? Math.min(strangers, 99) : 0;
   const mayBeInvited = Number.isInteger(invited) && invited > 0 ? Math.min(invited, waitingUnknown) : 0;
   const signinNotice = signinLine(normalizeSignin(signin));
@@ -349,7 +383,10 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
     const unsentMod = require('./unsent');
     reminders = normalizeUnsent(unsent).map((r) => ({ id: r.id, ...unsentMod.render(r) }));
   } catch { reminders = []; }
-  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice && notes.length === 0 && reminders.length === 0) {
+  // Nothing waiting, said at most once a day (notice.js emptyStates): the
+  // caller decides that the inbox was read and found empty (quietMoment).
+  const moment = quietMoment === true && messages.length === 0 && waitingUnknown === 0 && reminders.length === 0 && notice.on('emptyStates');
+  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice && notes.length === 0 && reminders.length === 0 && !moment) {
     emptyOutput();
     return [];
   }
@@ -423,6 +460,11 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
   for (const r of reminders) {
     shown.push(r.line);
     context.push(r.context);
+  }
+
+  if (moment) {
+    shown.push(`/vibe · ${QUIET_MOMENT}`);
+    context.push('/vibe: the person has been shown that nothing is waiting for them on /vibe. Do not repeat it.');
   }
 
   fs.writeSync(
@@ -522,7 +564,15 @@ async function fetchLive() {
   // covers its whole life, module loading included), not from this function.
   const left = boundedDeadline(process.env.VIBE_SESSION_START_DEADLINE_MS) - Math.ceil(process.uptime() * 1000) - 400;
   const unsent = await within(unsentP, left);
-  return { messages: normalizeMessages(messages), here, doors, strangers: unknown.size, invited: invited.size, noted, unsent };
+  // Nothing waiting is a claim about the conversations, so it is made only from
+  // a read that succeeded (notice.js emptyStates); one extra request, only
+  // when the inbox above came back empty.
+  let nothingWaiting = false;
+  if (rows.length === 0 && notice.on('emptyStates')) {
+    const rest = boundedDeadline(process.env.VIBE_SESSION_START_DEADLINE_MS) - Math.ceil(process.uptime() * 1000) - 400;
+    try { nothingWaiting = inboxEmpty(await within(store.getInboxResult(me), rest), me); } catch { nothingWaiting = false; }
+  }
+  return { messages: normalizeMessages(messages), here, doors, strangers: unknown.size, invited: invited.size, noted, unsent, nothingWaiting };
 }
 
 /**
@@ -599,7 +649,7 @@ async function main() {
     if (signin) markSigninShown();
     // Exit once written: a conversation-list read given up on (within) must
     // not hold this reader open until the parent's deadline kills everything.
-    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, invited: found.invited || 0, signin, noted: found.noted || [], unsent: found.unsent || [] }), () => process.exit(0));
+    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, invited: found.invited || 0, signin, noted: found.noted || [], unsent: found.unsent || [], nothingWaiting: found.nothingWaiting === true }), () => process.exit(0));
     return;
   }
 
@@ -618,7 +668,9 @@ async function main() {
   // Once per session per draft, and at most two session starts per draft on
   // this machine (also when the host gives no session id).
   const unsent = now.unsent.filter((r) => { try { return require('./unsent').mayMentionAtStart(r.id, session); } catch { return false; } });
-  const said = hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited, now.noted, unsent);
+  const quietMoment = now.nothingWaiting && unsent.length === 0 && momentFree();
+  const said = hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited, now.noted, unsent, { quietMoment });
+  if (quietMoment) markMoment();
   claimShown(now.messages);
   markTold((said || []).map((id) => ({ id })), session);
 }
@@ -692,6 +744,11 @@ module.exports = {
   sinceWhen,
   waitingCount,
   startNoteLine,
+  QUIET_MOMENT,
+  momentFree,
+  markMoment,
+  inboxEmpty,
+  localDay,
   noteWhen,
   normalizeUnsent,
   noteSessionStart,

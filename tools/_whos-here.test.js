@@ -34,7 +34,7 @@ function run(vh, apiUrl, args, stdin = null) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       stdio: [stdin === null ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-      env: { PATH: process.env.PATH, HOME: path.dirname(vh), VIBE_HOME: vh, VIBE_API_URL: apiUrl, CI: '1', VIBE_SETUP_NO_AUTORUN: '1' },
+      env: { PATH: process.env.PATH, HOME: path.dirname(vh), VIBE_HOME: vh, VIBE_API_URL: apiUrl, CI: '1', VIBE_SETUP_NO_AUTORUN: '1', VIBE_NOTICE_OFF: 'emptyStates' /* the once-a-day "Nothing waiting" line is tested in _voice.test.js */ },
     });
     let out = ''; let err = '';
     child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { err += d; });
