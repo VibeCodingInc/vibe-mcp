@@ -53,6 +53,13 @@ const invite = require('../invite');
 
 const DRAFTS_FILE = path.join(config.VIBE_DIR, 'drafts.json');
 const BINDINGS_FILE = path.join(config.VIBE_DIR, 'return-bindings.json');
+// Replies a note back ("landed") was offered for: { replyId: { draft, at } }.
+// Read and written only inside the drafts lock (transact). Kept longer than a
+// draft lives, so "once per reply" outlasts the draft itself.
+const LANDED_FILE = path.join(config.VIBE_DIR, 'landed.json');
+const LANDED_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const LANDED_KEEP = 500;
+const LANDED_MAX = 160;   // one line; the guidance asks for about 100
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const BINDING_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const LOCK_STALE_MS = 10 * 1000;         // a transaction never takes this long
@@ -288,9 +295,48 @@ const draftDefinition = {
       project: { type: 'string', description: 'Optional: the name of the work this comes from, kept locally so the reply can be shown beside it. Never sent.' },
       refs: { type: 'array', description: 'Links the person explicitly wants attached', items: { type: 'object', properties: { title: { type: 'string' }, url: { type: 'string' } } } },
       id: { type: 'string', description: 'An existing draft id, to edit it' },
+      kind: { type: 'string', enum: ['landed'], description: 'Only "landed": a one-line note back to someone whose reply led to a concrete change made in this session. Needs reply_to (their reply). Once per reply. It changes nothing about how the message is checked or sent.' },
     },
   },
 };
+
+/**
+ * The note back (notice.js itLanded): a draft the agent opened to tell someone
+ * their reply was used. A label on an ordinary draft: it is previewed, chosen
+ * and sent exactly like any other, and is not part of the rev or the digest.
+ * The field is validated here; the once-per-reply rule is kept in transact.
+ * Returns { landed: boolean } or { refuse: text }.
+ */
+function landedArgs(args, wantId) {
+  const kind = args ? args.kind : undefined;
+  if (kind === undefined || kind === null || kind === '') return { landed: false };
+  if (!require('../notice').on('itLanded')) return { landed: false };   // switched off: an ordinary draft
+  if (kind !== 'landed') return { refuse: 'Not prepared: kind may only be "landed" (a note back to say their reply was used). Nothing was sent.' };
+  if (wantId) return { landed: true, edit: true };
+  if (!isMessageId(args.reply_to)) return { refuse: 'Not prepared: a note back ("landed") needs reply_to, the id of the reply it is about. Nothing was sent.' };
+  return { landed: true };
+}
+function landedTextProblem(text) {
+  if (/\n/.test(text)) return 'Not prepared: a note back ("landed") is one line. Nothing was sent.';
+  if (Array.from(text).length > LANDED_MAX) return `Not prepared: a note back ("landed") is one short line, at most ${LANDED_MAX} characters. Nothing was sent.`;
+  return null;
+}
+function readLanded(now = Date.now()) {
+  const raw = readJson(LANDED_FILE, {});
+  const out = {};
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw)) if (v && Number.isFinite(v.at) && now - v.at < LANDED_TTL_MS) out[k] = v;
+  }
+  return out;
+}
+/** Key: who offered it, to whom, for which reply. */
+const landedKey = (me, to, replyId) => `${String(me || '').toLowerCase()}>${String(to || '').toLowerCase()}#${replyId}`;
+function noteLanded(me, d, now = Date.now()) {
+  const all = readLanded(now);
+  all[landedKey(me, d.to, d.replyTo)] = { draft: d.id, at: now };
+  const kept = Object.entries(all).sort((a, b) => b[1].at - a[1].at).slice(0, LANDED_KEEP);
+  writeJsonAtomic(LANDED_FILE, Object.fromEntries(kept));
+}
 
 const cleanId = (v) => (typeof v === 'string' ? v.trim().replace(/^#/, '') : '') || null;
 /** A message id as the platform mints them: letters, digits, '_' and '-' (a leading '#' is allowed). */
@@ -325,13 +371,17 @@ function arrivalLine(to, person) {
   return `**How it reaches them:** ${person ? `@${to} does not show as in a session now; it` : `it`} waits for them, and they are told when they next open a session or pause in one, never over what they are typing.\n`;
 }
 
+/** What a note back is, in the preview (notice.js itLanded). */
+const LANDED_LABEL = 'A note back to say their answer was used.';
+
 function preview(d, person, { boxy = false, note = '', before = '' } = {}) {
   const where = person ? (isHereNow(person) ? 'here now' : (person.status === 'away' ? 'away' : 'not around — it waits for their next turn')) : 'presence unknown — it waits for their next turn';
   const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
   const message = compose(d);
   const rev = revOf(d);
   const answers = d.replyTo ? `\n**Answers:** #${inertField(d.replyTo, 60)}` : '';
-  const head = `**To:** @${d.to} (${where})\n**Message (exact):**\n${message}\n**Attachments:** ${att}${answers}\n${noteLine(message)}${arrivalLine(d.to, person)}${note}\n`;
+  const landed = d.kind === 'landed' ? `${LANDED_LABEL}\n` : '';
+  const head = `**To:** @${d.to} (${where})\n${landed}**Message (exact):**\n${message}\n**Attachments:** ${att}${answers}\n${noteLine(message)}${arrivalLine(d.to, person)}${note}\n`;
   if (d.status === 'unknown') {
     // The earlier Send did not confirm: it may already have reached them.
     // Only the two honest actions exist (codex P2).
@@ -342,7 +392,7 @@ function preview(d, person, { boxy = false, note = '', before = '' } = {}) {
   }
   return {
     display: `${head}${before}Send to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_${boxNote(d, boxy)}`,
-    data: { draft: { id: d.id, to: d.to, body: d.body, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to}`, tool: 'vibe_send', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_prepare', args: { id: d.id, message: '<new body text — links are kept separately>' } }, { label: 'Cancel', tool: 'vibe_discard', args: { id: d.id } }] },
+    data: { draft: { id: d.id, to: d.to, body: d.body, message, refs: d.refs || [], status: d.status, rev, ...(d.kind === 'landed' ? { kind: 'landed' } : {}) }, actions: [{ label: `Send to @${d.to}`, tool: 'vibe_send', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_prepare', args: { id: d.id, message: '<new body text — links are kept separately>' } }, { label: 'Cancel', tool: 'vibe_discard', args: { id: d.id } }] },
   };
 }
 
@@ -393,6 +443,9 @@ async function draftHandler(args, ctx = {}) {
   if (args && args.reply_to !== undefined && args.reply_to !== null && args.reply_to !== '' && !isMessageId(args.reply_to)) {
     return { display: "Not prepared: reply_to must be a message id (letters, digits, '_' and '-'). Nothing was sent." };
   }
+  const landed = landedArgs(args, wantId);
+  if (landed.refuse) return { display: landed.refuse };
+  if (landed.landed && message) { const bad = landedTextProblem(message); if (bad) return { display: bad }; }
   for (const r of (args && Array.isArray(args.refs) ? args.refs : [])) {
     const t = r && firstHidden(r.title);
     if (t) return { display: said('a link title', t) };
@@ -459,6 +512,21 @@ async function draftHandler(args, ctx = {}) {
       // so an earlier offer in the same work can be named (earlierOffer).
       d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), from: me, to, body: message, replyTo: cleanId(args.reply_to), refs: cleanContext({ refs: args.refs }).refs, context: { project }, firstRev: null, dir: projectKey() };
       if (tooManyBlankLines(compose(d))) return { display: BLANK_LINES };
+      if (landed.landed) {
+        // Once per reply: an earlier note back for it, offered, sent or declined, is the one.
+        if (absent) return { display: `Not prepared: @${to} is not on /vibe, so there is no reply of theirs to send a note back about. Nothing was sent.` };
+        const prior = drafts.find((x) => x && x.kind === 'landed' && x.from === me && x.to === to && x.replyTo === d.replyTo);
+        const known = readLanded()[landedKey(me, to, d.replyTo)];
+        if (prior || known) {
+          const id = prior ? prior.id : known.draft;
+          return { display: prior && prior.status === 'previewed'
+            ? `Not prepared: a note back for that reply is already open (draft ${id}). Edit it with vibe_prepare {id: "${id}", message: "..."} or leave it. Nothing was sent.`
+            : `Not prepared: a note back for that reply was already offered (draft ${id}). Once per reply. Nothing was sent.`,
+          data: { landed_already: { id } } };
+        }
+        d.kind = 'landed';
+        noteLanded(me, d);
+      }
       // Nothing to answer in a conversation that does not exist yet.
       if (absent) { d.held = true; d.replyTo = null; }
       drafts.push(d);
@@ -490,9 +558,17 @@ async function draftHandler(args, ctx = {}) {
         // it is never shown again as it is.
         const stored = firstHidden(compose({ body, refs }));
         if (stored) return { display: storedHidden(d.id, stored) };
+        if (d.kind === 'landed') {
+          // The reply it is about is fixed when it is opened (once per reply).
+          if (args.reply_to !== undefined && args.reply_to !== null && args.reply_to !== '' && cleanId(args.reply_to) !== d.replyTo) return { display: `Not changed: draft ${d.id} is a note back about one reply; it cannot be moved to another. Nothing was sent.` };
+          const bad = message ? landedTextProblem(body) : null;
+          if (bad) return { display: bad };
+        } else if (landed.landed) {
+          return { display: `Not changed: draft ${d.id} is an ordinary message; a note back ("landed") is opened as a new draft with handle, message and reply_to. Nothing was sent.` };
+        }
         if (message) { d.body = body; d.edited = true; }
         if (args.refs) d.refs = refs;
-        if (args.reply_to !== undefined && !d.held) d.replyTo = cleanId(args.reply_to);
+        if (args.reply_to !== undefined && !d.held && d.kind !== 'landed') d.replyTo = cleanId(args.reply_to);
         d.status = 'previewed';
       }
     }
