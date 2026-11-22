@@ -714,7 +714,8 @@ const ALREADY_SAID_MAX = 400;
 function clipWords(text, max, asWritten = false) {
   const flat = asWritten ? visible(text) : inertQuoted(text, Number.MAX_SAFE_INTEGER);
   if (flat.length <= max) return flat;
-  const cut = flat.slice(0, max - 1);
+  let cut = flat.slice(0, max - 1);
+  if (/[\ud800-\udbff]$/.test(cut)) cut = cut.slice(0, -1);   // never half of a pair
   const sp = cut.lastIndexOf(' ');
   return `${(sp > 0 ? cut.slice(0, sp) : cut).replace(/[\s,;:.\u2014-]+$/u, '')}\u2026`;
 }

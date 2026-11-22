@@ -13,7 +13,7 @@ const config = require('../config');
 const store = require('../store');
 const { requireInit } = require('./_shared');
 const { canonicalHandle } = require('../protocol/handle');
-const { neutralize, inertField, inertQuoted, inertLine, fence, fenceIntro, fidelity, MSG_OPEN, MSG_CLOSE } = require('../incoming');
+const { neutralize, inertField, inertQuoted, inertLine, fence, fenceIntro, fidelity, visible, MSG_OPEN, MSG_CLOSE } = require('../incoming');
 
 const definition = {
   name: 'vibe_thread',
@@ -114,10 +114,10 @@ function render(me, them, thread) {
     out += `**${who}** · ${store.formatTimeAgo(m.timestamp)}${m.id ? ` · #${m.id}` : ''}${isMe ? ` · ${whereFrom(m)}` : ''}\n`;
     if (m.reply_to) {
       out += (m.reply_to.from || m.reply_to.text)
-        ? `answering #${m.reply_to.id} @${m.reply_to.from}: ${fid ? inertLine(m.reply_to.text || '', 48) : `"${inertQuoted(m.reply_to.text || '', 48)}"`}\n`
+        ? `answering #${inertField(m.reply_to.id, 40)} @${inertField(m.reply_to.from, 40)}: ${fid ? inertLine(m.reply_to.text || '', 48) : `"${inertQuoted(m.reply_to.text || '', 48)}"`}\n`
         : 'answering a message that is no longer available\n';
     }
-    if (m.body && isMe) out += `${m.body}\n`;
+    if (m.body && isMe) out += `${visible(m.body, { keepLines: true })}\n`;
     else if (m.body && fid) {
       const f = fence(m.body, { keepLines: true });
       out += `(${fenceIntro(f)})\n${f.block}\n`;
