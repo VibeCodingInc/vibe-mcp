@@ -144,15 +144,27 @@ function wrapLine(line, width = WRAP_COLUMNS) {
   return out;
 }
 
-/** The text as the box shows it: line breaks as " ↵ ", wrapped by display columns. */
+/**
+ * Whitespace, for display: every Unicode space (including tab and the
+ * no-break and ideographic spaces), and the blanks that render empty (U+2800
+ * braille blank, the Hangul fillers U+115F, U+1160, U+3164, U+FFA0).
+ */
+const DISPLAY_SPACE = /[\s\u2800\u115F\u1160\u3164\uFFA0]+/gu;
+
+/**
+ * The text as the box shows it: line breaks as " ↵ ", every run of whitespace
+ * as one space (so padding cannot push the text out of the visible lines),
+ * wrapped by display columns. Display only.
+ */
 function textLines(text) {
-  return wrapLine(String(text).split('\n').join(NEWLINE_MARK));
+  const shown = String(text).split('\n').map((l) => l.replace(DISPLAY_SPACE, ' ').trim()).join(NEWLINE_MARK);
+  return wrapLine(shown.replace(DISPLAY_SPACE, ' ').trim());
 }
 
 // ── the words in the box ────────────────────────────────────────────────────
 
-/** Characters as the person would count them: code points of the text that is sent. */
-const charCount = (text) => Array.from(String(text)).length;
+/** Characters as a person would count them: grapheme clusters of the text that is sent (code points without Intl.Segmenter). */
+const charCount = (text) => graphemes(text).length;
 
 /**
  * Line 1 is fixed server text, never the agent's: who it goes to, that it goes
@@ -269,13 +281,99 @@ function settingsFiles(env = process.env, cwd = process.cwd) {
   return files;
 }
 
+// ── hooks in skill, agent and command frontmatter ────────────────────────────
+// Claude Code can also take hooks from the YAML frontmatter of a skill
+// (.claude/skills/<name>/SKILL.md), a subagent (.claude/agents/<name>.md) or a
+// command (.claude/commands/<name>.md). Whether the host honours an
+// Elicitation hook there is not verified; any mention is refused.
+
+const FRONTMATTER_MAX_FILES = 200;
+const FRONTMATTER_MAX_BYTES = 64 * 1024;
+
+/** The frontmatter (between the first two `---` lines), or null. */
+function frontmatter(text) {
+  const lines = String(text).replace(/^\uFEFF/, '').split(/\r?\n/);
+  if (!lines.length || lines[0].trim() !== '---') return null;
+  const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---');
+  return end > 0 ? lines.slice(1, end).join('\n') : null;
+}
+/** Does this file's frontmatter mention elicitation (any case, \\uXXXX decoded)? */
+function frontmatterAnswersBox(text) {
+  const fm = frontmatter(text);
+  if (fm === null) return false;
+  return /elicitation/i.test(fm.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16))));
+}
+
+/** The base folders whose .claude-style skill, agent and command files are scanned. */
+function frontmatterBases(env = process.env, cwd = process.cwd) {
+  const bases = [];
+  let project = null;
+  try { project = require('./turns').projectDir(env, cwd); } catch {}
+  if (project) bases.push(path.join(project, '.claude'));
+  const named = typeof env.CLAUDE_CONFIG_DIR === 'string' && env.CLAUDE_CONFIG_DIR.trim();
+  bases.push(named || path.join(os.homedir(), '.claude'));
+  return bases;
+}
+
+/**
+ * Candidate files under one base: skills/<name>/SKILL.md, agents/*.md,
+ * commands/*.md. Bounded; a file or folder whose real path leaves the base
+ * is skipped.
+ */
+function frontmatterFiles(base, budget) {
+  const out = [];
+  let realBase;
+  try { realBase = fs.realpathSync(base); } catch { return out; }
+  const inside = (p) => { try { const r = fs.realpathSync(p); return r === realBase || r.startsWith(realBase + path.sep) ? r : null; } catch { return null; } };
+  const list = (dir) => { try { return fs.readdirSync(dir).sort(); } catch { return []; } };
+  const add = (file) => { if (budget.left <= 0) return false; const r = inside(file); if (r) { out.push({ file, real: r }); budget.left -= 1; } return budget.left > 0; };
+  const skills = path.join(base, 'skills');
+  if (inside(skills)) for (const name of list(skills)) { if (!add(path.join(skills, name, 'SKILL.md'))) return out; }
+  for (const sub of ['agents', 'commands']) {
+    const dir = path.join(base, sub);
+    if (!inside(dir)) continue;
+    for (const name of list(dir)) if (name.endsWith('.md') && !add(path.join(dir, name))) return out;
+  }
+  return out;
+}
+
+function readBounded(real) {
+  let fd;
+  try {
+    if (!fs.statSync(real).isFile()) return null;
+    fd = fs.openSync(real, 'r');
+    const buf = Buffer.alloc(FRONTMATTER_MAX_BYTES);
+    const n = fs.readSync(fd, buf, 0, FRONTMATTER_MAX_BYTES, 0);
+    return buf.subarray(0, n).toString('utf8');
+  } catch { return null; } finally { if (fd !== undefined) { try { fs.closeSync(fd); } catch {} } }
+}
+
+/** The first skill, agent or command file whose frontmatter mentions elicitation, or null. */
+function frontmatterHook(env = process.env, cwd = process.cwd) {
+  const budget = { left: FRONTMATTER_MAX_FILES };
+  for (const base of frontmatterBases(env, cwd)) {
+    for (const { file, real } of frontmatterFiles(base, budget)) {
+      const text = readBounded(real);
+      if (text !== null && frontmatterAnswersBox(text)) return shortPath(file);
+    }
+    if (budget.left <= 0) break;
+  }
+  return null;
+}
+
 /**
  * The first settings file with a hook that could answer /vibe's box, as a
- * path to show the person, or null. Files are read through their real path;
- * nothing is written. A file that is missing or cannot be read is skipped:
- * the host cannot read it either.
+ * path to show the person, or null; then the first skill, agent or command
+ * file whose frontmatter mentions one. Files are read through their real
+ * path; nothing is written. A file that is missing or cannot be read is
+ * skipped: the host cannot read it either.
  */
 function answeringHook(env = process.env, cwd = process.cwd) {
+  const fromSettings = settingsHook(env, cwd);
+  return fromSettings || frontmatterHook(env, cwd);
+}
+
+function settingsHook(env = process.env, cwd = process.cwd) {
   for (const file of settingsFiles(env, cwd)) {
     let real;
     try { real = fs.realpathSync(file); } catch { continue; }
@@ -309,5 +407,6 @@ module.exports = {
   declaresForm, noteClient, available, clientState,
   displayWidth, wrapLine, textLines, question, message, fits, request, ask, isOpen,
   settingsAnswerBox, settingsFiles, answeringHook, labAllowsHook,
+  frontmatter, frontmatterAnswersBox, frontmatterHook, FRONTMATTER_MAX_FILES, FRONTMATTER_MAX_BYTES,
   _resetForTest,
 };
