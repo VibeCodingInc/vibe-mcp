@@ -32,8 +32,7 @@ const definition = {
  */
 const FROM = {
   this_session: 'you chose Send on this in this session',
-  earlier_session: 'you chose Send on this in an earlier session on this machine',
-  this_machine: 'you chose Send on this from this machine',
+  this_machine: 'you chose Send on this from this machine, in this session or an earlier one',
 };
 const FROM_ELSEWHERE = 'sent from your account; this machine keeps no record of it (it may have come from another device, the app, or an earlier send)';
 function whereFrom(m) {

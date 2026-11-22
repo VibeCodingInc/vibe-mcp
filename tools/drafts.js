@@ -901,10 +901,10 @@ async function createHeld(s) {
 //                    been recorded for the project since (a /clear or another
 //                    session in the folder moves that record, and then this
 //                    is not claimed)
-//   earlier_session  a draft on this machine sent it, not this process, and
-//                    before the latest session start recorded for the project
-//   this_machine     a draft on this machine sent it; which session cannot be
-//                    told
+//   this_machine     any other send with a record on this machine. Which
+//                    session is never claimed: "earlier" can be false (a host
+//                    that starts a server per turn, plus a second session in
+//                    the folder), so the wording is true either way
 //   null             no record here: another device, the app, a typed
 //                    command, or older than the local records (drafts are
 //                    kept a day, the latest send to each person a week)
@@ -933,8 +933,7 @@ function sentProvenance(messageId, env = process.env) {
   if (mine !== undefined) return (startAt !== null && mine >= startAt) ? 'this_session' : 'this_machine';
   let at = null;
   try { at = sentFromHere(id); } catch {}
-  if (at === null) return null;
-  return (startAt !== null && at < startAt) ? 'earlier_session' : 'this_machine';
+  return at === null ? null : 'this_machine';
 }
 
 module.exports = {

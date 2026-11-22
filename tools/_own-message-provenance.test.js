@@ -73,7 +73,7 @@ test('(a) after a new session starts in the folder, the same send no longer clai
   assert.doesNotMatch(out, ALARM);
 });
 
-test('(b) sent in an earlier session on this machine: the line says so', () => {
+test('(b) sent in an earlier session on this machine: one wording, true for either session', () => {
   const start = Date.now() - MIN;
   turns.recordSessionStart(PROJECT, start);
   drafts.transact((d) => { d.push({ id: 'wearlier1', from: 'ada', to: 'oren', body: 'ship it', status: 'sent', createdAt: start - 6 * MIN, sentAt: start - 4 * MIN, messageId: 'msg_lab_1' }); });
@@ -81,7 +81,8 @@ test('(b) sent in an earlier session on this machine: the line says so', () => {
     { id: 'msg_lab_2', from: 'oren', body: 'ok', timestamp: Date.now() },
     { id: 'msg_lab_1', from: 'ada', body: 'ship it', timestamp: start - 4 * MIN },
   ]);
-  assert.match(lineOf(out, 'msg_lab_1'), /^\*\*you\*\* · 5m ago · #msg_lab_1 · you chose Send on this in an earlier session on this machine$/);
+  assert.equal(lineOf(out, 'msg_lab_1'), '**you** · 5m ago · #msg_lab_1 · you chose Send on this from this machine, in this session or an earlier one');
+  assert.doesNotMatch(out, /in an earlier session on this machine/, 'which session is never claimed from a stored record');
   assert.doesNotMatch(out, ALARM);
 });
 
@@ -90,10 +91,10 @@ test('(b) a send known only from the week-long return note counts too', () => {
   turns.recordSessionStart(PROJECT, start);
   fs.writeFileSync(drafts.BINDINGS_FILE, JSON.stringify({ oren: { from: 'ada', sentAt: start - 3 * 24 * 60 * MIN, messageId: 'msg_old_1', firstLine: 'x' } }));
   const out = thread([{ id: 'msg_old_1', from: 'ada', body: 'x', timestamp: start - 3 * 24 * 60 * MIN }]);
-  assert.match(lineOf(out, 'msg_old_1'), / · #msg_old_1 · you chose Send on this in an earlier session on this machine$/);
+  assert.match(lineOf(out, 'msg_old_1'), / · #msg_old_1 · you chose Send on this from this machine, in this session or an earlier one$/);
 });
 
-test('a local record with no session start on file: "from this machine", nothing about which session', () => {
+test('a local record with no session start on file: the same "from this machine" wording', () => {
   fs.rmSync(path.join(HOME, 'turns'), { recursive: true, force: true });
   const out = thread([{ id: 'msg_lab_1', from: 'ada', body: 'ship it', timestamp: Date.now() - 4 * MIN }]);
   assert.equal(lineOf(out, 'msg_lab_1'), `**you** · 4m ago · #msg_lab_1 · ${FROM.this_machine}`);
