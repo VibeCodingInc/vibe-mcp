@@ -239,7 +239,10 @@ class VibeMCPServer {
   /** The Send box for vibe_send (confirm-box.js) on this connection. */
   box() {
     const state = confirmBox.clientState();
+    // VIBE_BOX_TIMEOUT_MS may only shorten the timeout (tests, the lab).
+    const short = Number(process.env.VIBE_BOX_TIMEOUT_MS);
     return {
+      ...(Number.isFinite(short) && short > 0 && short < confirmBox.TIMEOUT_MS ? { timeoutMs: short } : {}),
       protocolVersion: state && state.protocolVersion,
       request: (params, opts) => this.requestClient('elicitation/create', params, opts),
     };
