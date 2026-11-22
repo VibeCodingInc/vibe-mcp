@@ -158,8 +158,13 @@ const DISPLAY_SPACE = /[\s\u2800\u115F\u1160\u3164\uFFA0]+/gu;
  */
 function textLines(text) {
   const shown = String(text).split('\n').map((l) => l.replace(DISPLAY_SPACE, ' ').trim()).join(NEWLINE_MARK);
-  return wrapLine(shown.replace(DISPLAY_SPACE, ' ').trim());
+  return wrapLine(shown.replace(DISPLAY_SPACE, ' ').trim(), WRAP_COLUMNS - QUOTE.length);
 }
+/**
+ * Each line of the person's text starts with "> ", so the text cannot pose
+ * as /vibe's own wording or the host's. Counted in the wrap width.
+ */
+const QUOTE = '> ';
 
 // ── the words in the box ────────────────────────────────────────────────────
 
@@ -172,14 +177,16 @@ const charCount = (text) => graphemes(text).length;
  */
 function question({ to, held = false, retry = false, reply = false, text }) {
   const n = charCount(text);
-  const len = `(${n} character${n === 1 ? '' : 's'})`;
-  if (held) return `Keep this for @${to} until they join /vibe? ${len}`;
-  return `Send ${reply ? 'this reply ' : ''}to @${to}${retry ? ' again' : ''} now? ${len}`;
+  // Both facts, always: how long it is, and whether all of it is below.
+  // Short enough for 72 columns with a 15-character handle and a 4-digit count.
+  const len = `(${n} char${n === 1 ? '' : 's'}, ${fits(text) ? 'all shown' : 'only start shown'})`;
+  if (held) return `Keep for @${to} till they join? ${len}`;
+  return `${reply ? 'Reply' : 'Send'} to @${to}${retry ? ' again' : ''} now? ${len}`;
 }
 
-/** The box's whole message: the question, then the whole text, wrapped. */
+/** The box's whole message: the question, then the whole text, each line quoted, wrapped. */
 function message(opts) {
-  return [question(opts), ...textLines(opts.text)].join('\n');
+  return [question(opts), ...textLines(opts.text).map((l) => QUOTE + l)].join('\n');
 }
 
 /** Does the whole text show in the lines the host displays under the question? */

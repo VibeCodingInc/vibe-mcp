@@ -673,8 +673,11 @@ function boxMessageFor(d) {
  * lines, so the full text is the preview above.
  */
 const BOX_PARTIAL = 'The confirmation box will show the first lines of this; the full text is above.';
+/** On a connection that cannot show the box: sending rests on the person's typed reply. */
+const BOX_NONE = "This app cannot show /vibe's confirmation box, so sending relies on your typed reply.";
 function boxNote(d, boxy) {
-  if (!boxy) return '';
+  if (isAgentIdentity()) return '';
+  if (!boxy) return `\n${BOX_NONE}`;
   try { return require('../confirm-box').fits(compose(d).trim()) ? '' : `\n${BOX_PARTIAL}`; } catch { return ''; }
 }
 
@@ -702,11 +705,20 @@ function openBox(id, rev, me) {
     const message = compose(d).trim();
     const hidden = firstHidden(message);
     if (hidden) return { display: storedHidden(d.id, hidden) };
-    const turn = turnCheck(d, false);
+    // The person must be able to see every word that will be sent: in the
+    // box itself when all of it fits there, or else in the preview followed
+    // by their own typed message (the turn check).
+    // A draft once answered with anything but Accept needs the turn check
+    // again (shown again, then the person types), even when it fits.
+    const whole = confirmBox.fits(message) && !Number.isFinite(d.boxRefusedAt);
+    let turn = turnCheck(d, false);
     if (turn.check === 'needs_turn') {
-      const reshown = Boolean(d.reshown);
-      stampRev(d);
-      return { unseen: { ...d, reshown }, why: turn.why || null };
+      if (!whole) {
+        const reshown = Boolean(d.reshown);
+        stampRev(d);
+        return { unseen: { ...d, reshown }, why: turn.why || null };
+      }
+      turn = { check: 'whole_text_in_box' };
     }
     const now = Date.now();
     const live = (x) => x.box && Number.isFinite(x.box.at) && now - x.box.at < confirmBox.TIMEOUT_MS + 5000;
@@ -717,9 +729,12 @@ function openBox(id, rev, me) {
     if (!superseding && boxBlocked(d)) return { refused: boxRefusal(BOX_NOT_ACCEPTED(d.to), 'box_not_accepted') };
     // After any answer but Accept, no box for any draft until the person
     // types again (or, with no turn record to go by, for a while).
-    if (blockedAfterNonAccept(drafts, turn, now)) return { refused: boxRefusal(BOX_NOT_ACCEPTED(d.to), 'box_not_accepted') };
+    if (blockedAfterNonAccept(drafts, now)) return { refused: boxRefusal(BOX_NOT_ACCEPTED(d.to), 'box_not_accepted') };
     if (confirmBox.isOpen() || drafts.some((x) => x !== d && live(x))) return { refused: boxRefusal(BOX_BUSY, 'box_busy') };
+    // At most MAX_BOXES_PER_TURN boxes per person turn, for all drafts.
+    if (boxesThisTurn(drafts) >= MAX_BOXES_PER_TURN) return { refused: boxRefusal(BOX_NOT_ACCEPTED(d.to), 'box_not_accepted') };
     const nonce = crypto.randomBytes(16).toString('hex');
+    noteBoxOpened(d, now);
     d.boxAt = now;
     d.box = { nonce, at: now, rev, sha: sha256(message), me, turn: turn.check };
     return { boxed: { id: d.id, to: d.to, nonce, text: boxMessageFor(d), turn } };
@@ -732,21 +747,44 @@ function boxBlocked(d) {
 }
 /** How long a non-accept blocks boxes for other drafts when there is no turn record to go by. */
 const NON_ACCEPT_COOLDOWN_MS = 5 * 60 * 1000;
+/** Is there a person-turn record to go by here (Claude Code, with the hook)? */
+function turnsTracked() {
+  try { return require('../turns').judge(0).check !== 'unavailable'; } catch { return false; }
+}
+function lastPersonTurn() {
+  try { const turns = require('../turns'); return turns.lastTurn(turns.projectDir()); } catch { return null; }
+}
 /**
  * The latest answer but Accept, for any draft, blocks every box until a
- * person's turn recorded after it. Where the turn check is unavailable (no
- * turn record on this host), until NON_ACCEPT_COOLDOWN_MS has passed.
+ * person's turn recorded after it. Where there is no turn record to go by
+ * (another host, or no hook), until NON_ACCEPT_COOLDOWN_MS has passed.
  */
-function blockedAfterNonAccept(drafts, turn, now = Date.now()) {
+function blockedAfterNonAccept(drafts, now = Date.now()) {
   const last = drafts.reduce((m, x) => (Number.isFinite(x.boxRefusedAt) && x.boxRefusedAt > m ? x.boxRefusedAt : m), 0);
   if (!last) return false;
-  if (turn && turn.check === 'passed') {
-    const turns = require('../turns');
-    const at = turns.lastTurn(turns.projectDir());
+  if (turnsTracked()) {
+    const at = lastPersonTurn();
     return !(at !== null && at > last);
   }
   return now - last < NON_ACCEPT_COOLDOWN_MS;
 }
+
+/**
+ * Boxes per person turn, for all drafts together: counted from the last
+ * recorded person turn, or, where none was ever recorded, per server process.
+ */
+const MAX_BOXES_PER_TURN = 3;
+let boxesThisProcess = 0;
+function noteBoxOpened(d, at) {
+  d.boxOpens = [...(Array.isArray(d.boxOpens) ? d.boxOpens : []), at].slice(-MAX_BOXES_PER_TURN - 1);
+  boxesThisProcess += 1;
+}
+function boxesThisTurn(drafts) {
+  const since = lastPersonTurn();
+  if (since === null) return boxesThisProcess;
+  return drafts.reduce((n, x) => n + (Array.isArray(x.boxOpens) ? x.boxOpens.filter((t) => t >= since).length : 0), 0);
+}
+function _resetBoxCountForTest() { boxesThisProcess = 0; }
 
 /**
  * The person's answer to the box, under the lock. The box is closed whatever
@@ -1206,5 +1244,6 @@ module.exports = {
   sendByPerson,
   // for the arrival path, the thread view, and Buddy's `vibe-draft` CLI
   isQaHandle, getReturnBinding, clearReturnBinding, loadDrafts, transact, DRAFTS_FILE, BINDINGS_FILE,
+  MAX_BOXES_PER_TURN, _resetBoxCountForTest,
   compose, revOf, reconcileAbandoned, sentProvenance,
 };

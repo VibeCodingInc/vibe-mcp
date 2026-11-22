@@ -92,7 +92,7 @@ test('2025-11-25: the box opens with the fixed first line and the text; Decline 
     const d = await legacyReady(s, 'over the wire');
     s.send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d } });
     const req = await s.waitFor((r) => r.method === 'elicitation/create');
-    assert.equal(req.params.message, 'Send to @linus now? (13 characters)\nover the wire');
+    assert.equal(req.params.message, 'Send to @linus now? (13 chars, all shown)\n> over the wire');
     assert.deepEqual(req.params.requestedSchema, { type: 'object', properties: {} });
     assert.equal(req.params.mode, 'form');
     s.send({ id: 4, method: 'tools/list' });
@@ -201,7 +201,7 @@ test('2026-07-28: the call returns input_required; the retry with Accept and the
     assert.equal(first.resultType, 'input_required');
     const req = first.inputRequests.send_confirmation;
     assert.equal(req.method, 'elicitation/create');
-    assert.equal(req.params.message, 'Send to @linus now? (18 characters)\nstateless and sent');
+    assert.equal(req.params.message, 'Send to @linus now? (18 chars, all shown)\n> stateless and sent');
     assert.equal(req.params.mode, 'form');
     assert.equal(typeof first.requestState, 'string');
     assert.equal(first.content, undefined, 'nothing for the model in the input request');
@@ -255,7 +255,8 @@ test('2026-07-28: the host is read from each request\'s _meta clientInfo (no dis
   try {
     const caps = { elicitation: { form: {} } };
     const m = { ...meta(caps), 'io.modelcontextprotocol/clientInfo': { name: 'claude-code', version: '2.1.330' } };
-    s.send({ id: 2, method: 'tools/call', params: { name: 'vibe_prepare', arguments: { handle: 'linus', message: 'one agent turn only' }, _meta: m } });
+    const text = `one agent turn only: ${'long enough that the box shows only its start, so the turn check applies. '.repeat(2).trim()}`;
+    s.send({ id: 2, method: 'tools/call', params: { name: 'vibe_prepare', arguments: { handle: 'linus', message: text }, _meta: m } });
     const d = draftOf(await s.waitFor((r) => r.id === 2));
     s.send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d, _meta: m } });
     const res = (await s.waitFor((r) => r.id === 3)).result;

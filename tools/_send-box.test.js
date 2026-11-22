@@ -68,6 +68,8 @@ function fakeBox(answer, { protocolVersion = '2025-11-25', timeoutMs } = {}) {
 }
 const accept = { action: 'accept', content: {} };
 const NOT_ACCEPTED = 'Not sent. It is still a draft for @linus. Do not send it again unless they ask.';
+/** A message too long for the box to show whole: the turn check applies on top of the box. */
+const LONG = (tag) => `${tag}: ${'this one is long enough that the box shows only its start, so the preview matters. '.repeat(2).trim()}`;
 const prepare = (o, ctx) => drafts.vibe_prepare.handler({ handle: 'linus', message: 'the lease fixed it', ...o }, ctx);
 const sendIn = (p, box, extra = {}) => drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, { box, ...extra });
 const status = (p) => drafts.loadDrafts().find((d) => d.id === p.data.draft.id).status;
@@ -104,7 +106,7 @@ test('a typed turn, then Accept: sends exactly the text in the box', async () =>
     const r = await sendIn(p, box);
     assert.equal(box.asked.length, 1, 'one box');
     const { params } = box.asked[0];
-    assert.equal(params.message, 'Send to @linus now? (24 characters)\ncloud owns placement now');
+    assert.equal(params.message, 'Send to @linus now? (24 chars, all shown)\n> cloud owns placement now');
     assert.deepEqual(params.requestedSchema, { type: 'object', properties: {} });
     assert.equal(params.mode, 'form', '2025-11-25 names the form mode');
     assert.equal(r.data.sent, true);
@@ -125,9 +127,9 @@ test('on 2025-06-18 the request carries no mode field', async () => {
   });
 });
 
-test('no typed turn since it was shown: refused by the turn check, and no box opens', async () => {
+test('no typed turn, and the box cannot show all of it: refused by the turn check, and no box opens', async () => {
   await withWire(async (sends) => {
-    const p = await prepare({ message: 'shown and sent in one turn' });
+    const p = await prepare({ message: LONG('shown and sent in one turn') });
     const box = fakeBox(accept);
     const r = await sendIn(p, box);
     assert.equal(r.data.reason, 'no_turn_since_shown');
@@ -136,9 +138,9 @@ test('no typed turn since it was shown: refused by the turn check, and no box op
   });
 });
 
-test('shown before this session started: refused by the turn check, and no box opens', async () => {
+test('shown before this session started, too long for the box: refused by the turn check, and no box opens', async () => {
   await withWire(async (sends) => {
-    const p = await prepare({ message: 'from before the restart' });
+    const p = await prepare({ message: LONG('from before the restart') });
     tick();
     turns.recordSessionStart(PROJECT, Date.now(), process.env, 'later-session');
     personTurn();
@@ -195,7 +197,7 @@ test('after a non-accept, no new box until vibe_prepare shows it again AND the p
     assert.equal(box.asked.length, 1);
     await drafts.vibe_prepare.handler({ id: p.data.draft.id });
     const selfShown = await sendIn(p, box);
-    assert.equal(selfShown.data.turn_check, 'needs_turn', 'shown again by the agent, nobody typed');
+    assert.equal(selfShown.data.turn_check, 'needs_turn', 'shown again by the agent, nobody typed since: a declined draft keeps the turn check even when it fits');
     assert.equal(box.asked.length, 1);
     personTurn();
     const ok = await sendIn(p, fakeBox(accept));
@@ -370,7 +372,7 @@ test('VIBE_AGENT_HANDLE with no credential, the person\'s token in VIBE_HOME: a 
     agentAuth._resetForTest();
     assert.equal(agentAuth.isAgent(), true, 'configured');
     assert.equal(agentAuth.signedInAsAgent(), false, 'not signed in as one');
-    const p = await prepare({ message: 'not an agent really' });
+    const p = await prepare({ message: LONG('not an agent really') });
     const box = fakeBox(accept);
     const r = await sendIn(p, box);
     assert.equal(r.data.reason, 'no_turn_since_shown', 'the turn check applies');
@@ -483,13 +485,20 @@ test('with both lab conditions a lab hook is allowed; with a non-loopback API th
 // ── the words in the box ─────────────────────────────────────────────────────
 
 test('line 1 is fixed server text: who, now, and how long; the text starts on line 2', () => {
-  assert.equal(confirmBox.message({ to: 'sam', text: 'hi' }), 'Send to @sam now? (2 characters)\nhi');
-  assert.equal(confirmBox.message({ to: 'sam', text: 'x' }), 'Send to @sam now? (1 character)\nx');
-  assert.equal(confirmBox.message({ to: 'sam', reply: true, text: 'yes' }), 'Send this reply to @sam now? (3 characters)\nyes');
-  assert.equal(confirmBox.message({ to: 'sam', retry: true, text: 'yes' }), 'Send to @sam again now? (3 characters)\nyes');
-  assert.equal(confirmBox.message({ to: 'sam-x', held: true, text: 'yes' }), 'Keep this for @sam-x until they join /vibe? (3 characters)\nyes');
-  assert.equal(confirmBox.message({ to: 'sam', text: 'a\nb' }), 'Send to @sam now? (3 characters)\na ↵ b', 'a line break is a mark, not a line; it counts as one character');
-  assert.equal(confirmBox.message({ to: 'sam', text: '\u{1F600}\u{1F600}' }), 'Send to @sam now? (2 characters)\n\u{1F600}\u{1F600}', 'characters, not UTF-16 units');
+  assert.equal(confirmBox.message({ to: 'sam', text: 'hi' }), 'Send to @sam now? (2 chars, all shown)\n> hi');
+  assert.equal(confirmBox.message({ to: 'sam', text: 'x' }), 'Send to @sam now? (1 char, all shown)\n> x');
+  assert.equal(confirmBox.message({ to: 'sam', reply: true, text: 'yes' }), 'Reply to @sam now? (3 chars, all shown)\n> yes');
+  assert.equal(confirmBox.message({ to: 'sam', retry: true, text: 'yes' }), 'Send to @sam again now? (3 chars, all shown)\n> yes');
+  assert.equal(confirmBox.message({ to: 'sam', reply: true, retry: true, text: 'yes' }), 'Reply to @sam again now? (3 chars, all shown)\n> yes');
+  assert.equal(confirmBox.message({ to: 'sam-x', held: true, text: 'yes' }), 'Keep for @sam-x till they join? (3 chars, all shown)\n> yes');
+  assert.equal(confirmBox.message({ to: 'sam', text: 'a\nb' }), 'Send to @sam now? (3 chars, all shown)\n> a ↵ b', 'a line break is a mark, not a line; it counts as one character');
+  assert.equal(confirmBox.message({ to: 'sam', text: '\u{1F600}\u{1F600}' }), 'Send to @sam now? (2 chars, all shown)\n> \u{1F600}\u{1F600}', 'characters, not UTF-16 units');
+  const long = 'word '.repeat(60).trim();
+  assert.match(confirmBox.message({ to: 'sam', text: long }), /^Send to @sam now\? \(299 chars, only start shown\)\n> word/);
+  for (const o of [{}, { reply: true }, { retry: true }, { reply: true, retry: true }, { held: true }]) {
+    const q = confirmBox.question({ to: 'a'.repeat(15), text: 'x '.repeat(999) + 'x', ...o });
+    assert.ok(q.length <= 72, `${q.length}: ${q}`);
+  }
 });
 
 test('a reply says so in line 1', async () => {
@@ -497,40 +506,41 @@ test('a reply says so in line 1', async () => {
     const p = await shown({ message: 'yes it did', reply_to: 'msg_arrived1' });
     const box = fakeBox({ action: 'decline' });
     await sendIn(p, box);
-    assert.equal(box.asked[0].params.message, 'Send this reply to @linus now? (10 characters)\nyes it did');
+    assert.equal(box.asked[0].params.message, 'Reply to @linus now? (10 chars, all shown)\n> yes it did');
   });
 });
 
 test('fits(): the whole text shows in the two lines under the question, or it does not', () => {
   assert.equal(confirmBox.VISIBLE_LINES, 3);
   const text = (n) => Array(n).fill('word').join(' ');
-  // 4-letter words: 14 to a 72-column line (14*5-1 = 69).
+  // 4-letter words: 14 to a 70-column text line ("> " takes 2 of 72; 14*5-1 = 69).
   assert.equal(confirmBox.textLines(text(28)).length, 2);
   assert.equal(confirmBox.fits(text(28)), true);
   assert.equal(confirmBox.textLines(text(29)).length, 3);
   assert.equal(confirmBox.fits(text(29)), false);
+  for (const l of confirmBox.message({ to: 'sam', text: text(80) }).split('\n').slice(1)) assert.ok(l.startsWith('> ') && l.length <= 72, l);
   assert.equal(confirmBox.fits('one\ntwo\nthree\nfour'), true, 'line breaks do not use up lines');
 });
 
 test('wrapping is by display columns: wide characters count 2, graphemes and surrogate pairs are never split, a long token is broken', () => {
   const cjk = '漢'.repeat(50);   // 100 columns
   const lines = confirmBox.textLines(cjk);
-  assert.deepEqual(lines.map((l) => confirmBox.displayWidth(l)), [72, 28]);
+  assert.deepEqual(lines.map((l) => confirmBox.displayWidth(l)), [70, 30]);
   assert.equal(lines.join(''), cjk);
   const emoji = '\u{1F469}‍\u{1F4BB}'.repeat(40);   // a ZWJ sequence, 2 columns each
   const el = confirmBox.textLines(emoji);
   assert.equal(el.join(''), emoji, 'nothing dropped or split');
   for (const l of el) {
-    assert.ok(confirmBox.displayWidth(l) <= 72);
+    assert.ok(confirmBox.displayWidth(l) <= 70);
     assert.doesNotMatch(l, /^‍|‍$/, 'no grapheme cut at a joiner');
     assert.doesNotMatch(l, /[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/, 'no surrogate pair split');
   }
   const url = `see https://example.com/${'a'.repeat(120)}`;
   const ul = confirmBox.textLines(url);
   assert.equal(ul[0], 'see', 'the word before the token');
-  assert.ok(ul.every((l) => l.length > 0 && confirmBox.displayWidth(l) <= 72), 'no empty line, none too wide');
+  assert.ok(ul.every((l) => l.length > 0 && confirmBox.displayWidth(l) <= 70), 'no empty line, none too wide');
   const lone = confirmBox.textLines('x'.repeat(100));
-  assert.equal(lone[0], 'x'.repeat(72), 'line 2 of the box is never left empty for a long first token');
+  assert.equal(lone[0], 'x'.repeat(70), 'line 2 of the box is never left empty for a long first token');
 });
 
 test('wrapping and the newline mark are display only: what is sent is unchanged', async () => {
@@ -543,7 +553,7 @@ test('wrapping and the newline mark are display only: what is sent is unchanged'
     const msg = box.asked[0].params.message;
     for (const l of msg.split('\n').slice(1)) assert.ok(confirmBox.displayWidth(l) <= confirmBox.WRAP_COLUMNS, `wrapped: ${l}`);
     assert.equal((msg.match(/↵/g) || []).length, 2, 'each line break shown as a mark');
-    assert.equal(msg.split('\n').slice(1).join('').replace(/\s+|↵/g, ''), text.replace(/\s+/g, ''), 'the whole text is in the message');
+    assert.equal(msg.split('\n').slice(1).map((l) => l.replace(/^> /, '')).join('').replace(/\s+|↵/g, ''), text.replace(/\s+/g, ''), 'the whole text is in the message');
     assert.equal(sends[0].body, text, 'sent exactly as prepared');
   });
 });
@@ -556,7 +566,7 @@ test('a long message is not refused: the box shows its opening, and the whole te
     const r = await sendIn(p, box);
     assert.equal(r.data.sent, true);
     assert.equal(sends[0].body, long);
-    assert.ok(box.asked[0].params.message.startsWith(`Send to @linus now? (${long.length} characters)\nabcdefghi`));
+    assert.ok(box.asked[0].params.message.startsWith(`Send to @linus now? (${long.length} chars, only start shown)\n> abcdefghi`));
   });
 });
 
@@ -582,7 +592,7 @@ test('tool results never carry the box text, the message, or the rev', async () 
       const p = await shown({ message: `${secret} ${answer.action}` });
       const r = await sendIn(p, fakeBox(answer));
       assert.ok(!r.display.includes('zebra'), r.display);
-      assert.ok(!r.display.includes('now? ('), r.display);
+      assert.ok(!r.display.includes('now? (') && !r.display.includes('> '), r.display);
       assert.ok(!r.display.includes(p.data.draft.rev), r.display);
       assert.ok(!/accept/i.test(r.display), 'never names the button');
     }
@@ -601,7 +611,7 @@ test('stateless: the first call returns the box as an input request; the retry w
     assert.ok(first.inputRequired, 'input required');
     const req = first.inputRequired.inputRequests[confirmBox.INPUT_KEY];
     assert.equal(req.method, 'elicitation/create');
-    assert.deepEqual(req.params, { message: 'Send to @linus now? (23 characters)\nover the stateless path', requestedSchema: { type: 'object', properties: {} }, mode: 'form' });
+    assert.deepEqual(req.params, { message: 'Send to @linus now? (23 chars, all shown)\n> over the stateless path', requestedSchema: { type: 'object', properties: {} }, mode: 'form' });
     assert.equal(typeof first.inputRequired.requestState, 'string');
     assert.equal(sends.length, 0, 'nothing sent by the first call');
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(first, accept));
@@ -645,7 +655,7 @@ test('stateless: a box older than the timeout is not accepted', async () => {
 
 test('stateless: the turn check still comes first', async () => {
   await withWire(async () => {
-    const p = await prepare({ message: 'no turn yet' });
+    const p = await prepare({ message: LONG('no turn yet') });
     const first = await sendIn(p, null, stateless);
     assert.equal(first.inputRequired, undefined);
     assert.equal(first.data.reason, 'no_turn_since_shown');
@@ -694,15 +704,21 @@ test('one prompt, five drafts, the first box declined: the other four get the no
   });
 });
 
-test('one prompt, five drafts, every box accepted: all five go', async () => {
+test('one prompt, five drafts, every box accepted: three boxes per person turn, the rest wait for the next', async () => {
   await withWire(async (sends) => {
+    assert.equal(drafts.MAX_BOXES_PER_TURN, 3);
     const ps = [];
     for (let i = 0; i < 5; i++) ps.push(await prepare({ message: `accepted draft ${i}` }));
     personTurn();
     const box = fakeBox(accept);
-    for (const p of ps) assert.equal((await sendIn(p, box)).data.sent, true);
-    assert.equal(box.asked.length, 5);
-    assert.equal(sends.length, 5);
+    const rs = [];
+    for (const p of ps) rs.push(await sendIn(p, box));
+    assert.deepEqual(rs.map((r) => r.data.sent), [true, true, true, false, false]);
+    assert.equal(rs[3].display, NOT_ACCEPTED);
+    assert.equal(box.asked.length, 3);
+    personTurn();
+    assert.equal((await sendIn(ps[3], box)).data.sent, true, 'the next person turn allows more');
+    assert.equal(sends.length, 4);
   });
 });
 
@@ -712,19 +728,19 @@ test('padding cannot push the text out of the visible lines: whitespace runs sho
     const p = await shown({ message: text });
     const box = fakeBox(accept);
     await sendIn(p, box);
-    assert.equal(box.asked[0].params.message, `Send to @linus now? (${Array.from(text).length} characters)\nhi the real text`);
+    assert.equal(box.asked[0].params.message, `Send to @linus now? (${Array.from(text).length} chars, all shown)\n> hi the real text`, 'every word is shown');
     assert.equal(sends[0].body, text, 'sent exactly as prepared');
   });
 });
 
 test('every kind of blank shows as one space in the box, whatever vibe_prepare would allow', () => {
   const text = 'hi \u2800\u2800\u3164\u115F\u1160\uFFA0\t\u00a0\u3000\u2003 the real text';
-  assert.equal(confirmBox.message({ to: 'sam', text }).split('\n')[1], 'hi the real text');
+  assert.equal(confirmBox.message({ to: 'sam', text }).split('\n')[1], '> hi the real text');
 });
 
 test('the count is grapheme clusters: a family emoji is one character, a combining mark is part of its letter', () => {
-  assert.match(confirmBox.message({ to: 'sam', text: '\u{1F468}‍\u{1F469}‍\u{1F467}' }), /^Send to @sam now\? \(1 character\)\n/);
-  assert.match(confirmBox.message({ to: 'sam', text: 'café' }), /^Send to @sam now\? \(4 characters\)\n/);
+  assert.match(confirmBox.message({ to: 'sam', text: '\u{1F468}‍\u{1F469}‍\u{1F467}' }), /^Send to @sam now\? \(1 char, all shown\)\n/);
+  assert.match(confirmBox.message({ to: 'sam', text: 'café' }), /^Send to @sam now\? \(4 chars, all shown\)\n/);
 });
 
 test('an accepted box whose delivery did not confirm: "send it again" goes through the turn check and a new "again" box', async () => {
@@ -740,7 +756,7 @@ test('an accepted box whose delivery did not confirm: "send it again" goes throu
     const box = fakeBox(accept);
     const again = await sendIn(p, box);
     assert.equal(box.asked.length, 1, 'not the not-accepted refusal: a new box');
-    assert.equal(box.asked[0].params.message, 'Send to @linus again now? (14 characters)\ndid it arrive?');
+    assert.equal(box.asked[0].params.message, 'Send to @linus again now? (14 chars, all shown)\n> did it arrive?');
     assert.equal(again.data.sent, true);
     assert.deepEqual(sends.map((x) => x.body), ['did it arrive?']);
   });
@@ -837,7 +853,7 @@ test('Keep (a message held for someone not on /vibe yet) goes through the box to
     personTurn();
     const box = fakeBox(accept);
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, { box });
-    assert.equal(box.asked[0].params.message, 'Keep this for @newbie-dev until they join /vibe? (14 characters)\nwelcome aboard');
+    assert.equal(box.asked[0].params.message, 'Keep for @newbie-dev till they join? (14 chars, all shown)\n> welcome aboard');
     assert.equal(r.data.held, true);
     assert.equal(invites.filter((b) => !b.dry_run).length, 1);
   } finally { global.fetch = origFetch; store.createInvite = origInvite; }
@@ -883,4 +899,54 @@ test('frontmatter only: "elicitation" in the body is not a hook; a link out of t
     fs.writeFileSync(path.join(agents, 'zzz-last.md'), hookFront);
     assert.equal(confirmBox.frontmatterHook(), null, 'past the file bound: not read');
   } finally { fs.rmSync(agents, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
+});
+
+// ── addendum: when the box shows everything, Accept alone is enough ─────────
+
+test('the whole text fits in the box: no typed turn needed, Accept sends (one gesture)', async () => {
+  await withWire(async (sends) => {
+    const p = await prepare({ message: 'the TTL is 7 min' });
+    const box = fakeBox(accept);
+    const r = await sendIn(p, box);
+    assert.equal(box.asked[0].params.message, 'Send to @linus now? (16 chars, all shown)\n> the TTL is 7 min');
+    assert.equal(r.data.sent, true);
+    assert.equal(r.data.turn, 'whole_text_in_box');
+    assert.deepEqual(sends.map((x) => x.body), ['the TTL is 7 min']);
+  });
+});
+
+test('fits, after a typed turn: Accept sends, and the turn check is reported as passed', async () => {
+  await withWire(async () => {
+    const p = await shown({ message: 'fits and typed' });
+    const r = await sendIn(p, fakeBox(accept));
+    assert.equal(r.data.sent, true);
+    assert.equal(r.data.turn, 'passed');
+  });
+});
+
+test('does not fit: no box without a typed turn; with one, the box says only the start is shown and Accept sends', async () => {
+  await withWire(async (sends) => {
+    const p = await prepare({ message: LONG('too long for the box') });
+    const box = fakeBox(accept);
+    const r = await sendIn(p, box);
+    assert.equal(r.data.turn_check, 'needs_turn');
+    assert.equal(box.asked.length, 0);
+    personTurn();
+    const ok = await sendIn(p, box);
+    assert.match(box.asked[0].params.message, /^Send to @linus now\? \(\d+ chars, only start shown\)\n> too long for the box: /);
+    assert.equal(ok.data.sent, true);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('the preview on a connection with no box says sending relies on the typed reply; never where a box can be shown', async () => {
+  const NONE = "This app cannot show /vibe's confirmation box, so sending relies on your typed reply.";
+  await withWire(async () => {
+    const plain = await prepare({ message: 'no box connection' });
+    assert.ok(plain.display.endsWith(`\n${NONE}`), plain.display);
+    const boxy = await prepare({ message: 'box connection' }, { box: { mode: 'input_required' } });
+    assert.ok(!boxy.display.includes(NONE));
+    const legacy = await prepare({ message: 'legacy box connection' }, { box: fakeBox(accept) });
+    assert.ok(!legacy.display.includes(NONE));
+  });
 });
