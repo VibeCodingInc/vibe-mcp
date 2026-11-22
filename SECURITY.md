@@ -49,6 +49,26 @@ depends on the host:
 | No box, turns recorded | The turn check |
 | No box, turns not recorded | Nothing beyond the agent's call: the preview says so |
 
+Where the box is requested. MCP has two ways for a server to ask the person
+something, and /vibe uses only the one where the box has been seen on screen:
+
+- On the `initialize` protocol path (2025-11-25), /vibe sends the host an
+  `elicitation/create` request during `vibe_send`. Claude Code 2.1.330 was
+  seen to show this box to the person (tested by hand, 2026-11-21). This is
+  the only path on which /vibe asks for the box.
+- On the newer stateless protocol path (2026-07-28), the tool call would
+  return `input_required` and the host would answer on the retry. Claude Code
+  2.1.330 was seen to answer that request "accept" about two seconds later
+  without showing anything to the person. So /vibe does not serve that
+  protocol: it answers `server/discover` as a server that does not implement
+  it, which makes Claude Code use `initialize` instead. Even if that path
+  were turned on, an answer arriving there is never counted as the person's
+  Accept until a host has been seen to show the box on it.
+- A host that answers a box without showing it to the person defeats the
+  box, on any path, and /vibe cannot detect that from the answer. That is
+  why, wherever person turns are recorded, the typed-turn check is required
+  as well as the box.
+
 What the box shows. The box is opened by /vibe, not by the agent. Its first
 line is fixed /vibe text: the recipient, the length, and whether all of the
 text is below ("Send to @handle? (N chars, all shown)" or "(N chars, start
@@ -78,21 +98,20 @@ What the box does:
   opens for any draft until the person types again (five minutes where turns
   are not recorded). The record of a box not accepted lives with its draft and
   lapses when the draft expires, 24 hours after it was opened.
-- One box is open at a time in a project folder, a stateless request still
-  waiting for its answer included; another project is not held up by it. A
+- One box is open at a time in a project folder; another project is not
+  held up by it. A
   box nobody will answer (past its five minutes, or left by a server that
   exited) is closed the next time a box would open, and counts as not
   accepted.
 - After an accepted box whose delivery could not be confirmed, a "Resend"
   box can open for the same draft without a new typed message: it is the same
   showing, and the retry delivers at most once.
-- The agent learns only whether it was sent, with two exceptions that can
+- The agent learns only whether it was sent, with one exception that can
   only follow an Accept: the signed-in account changed while the box was
-  open, and (on 2026-07-28) a hook found when the Accept came back.
+  open.
 
 The hook tripwire. Claude Code lets a hook answer a box with no dialog
-(`Elicitation` and `ElicitationResult` hooks). Before a box opens, and again
-when an Accept comes back on 2026-07-28, `vibe_send` reads exactly these four
+(`Elicitation` and `ElicitationResult` hooks). Before a box opens, `vibe_send` reads exactly these four
 files as JSON and refuses to send if one has an `Elicitation` or
 `ElicitationResult` key under `hooks`, or exists and cannot be read as JSON
 (it names the file):

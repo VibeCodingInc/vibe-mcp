@@ -11,7 +11,9 @@
 // unchanged EXCEPT that the client's elicitation capability is removed:
 //   - `params.capabilities.elicitation` on `initialize` (protocol 2025-*);
 //   - `params._meta["io.modelcontextprotocol/clientCapabilities"].elicitation`
-//     on any request (2026-07-28 declares capabilities per request).
+//     on any request (2026-07-28 declares capabilities per request; the
+//     server as shipped does not serve 2026-07-28, so Claude Code's sessions
+//     run on `initialize` and the first rule is the one that applies).
 // A line that is not JSON, or carries no elicitation capability, is forwarded
 // byte for byte. Ids and order are kept; a message split across chunks is
 // reassembled at its newline. The client closing stdin closes the server's;
