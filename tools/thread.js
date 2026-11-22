@@ -25,6 +25,31 @@ const definition = {
   },
 };
 
+/**
+ * Where one of the person's own messages came from, saying only what this
+ * machine knows (drafts.js sentProvenance). A new session did not send it and
+ * must never read it as unexplained: it is theirs, from wherever they sent it.
+ */
+const FROM = {
+  this_session: 'you chose Send on this in this session',
+  earlier_session: 'you chose Send on this in an earlier session on this machine',
+  this_machine: 'you chose Send on this from this machine',
+};
+const FROM_ELSEWHERE = 'sent from your account; this machine keeps no record of it (it may have come from another device, the app, or an earlier send)';
+function whereFrom(m) {
+  try {
+    const line = require('../line');
+    if (line.isAgentAsk(m.body) || line.isAgentAnswer(m.body)) return 'sent by your agent over an open line';
+  } catch (e) {}
+  let p = null;
+  try { p = require('./drafts').sentProvenance(m.id); } catch (e) {}
+  // An agent signed in as itself has no person who chose Send.
+  let agent = false;
+  try { agent = require('../agent-auth').isAgent(); } catch (e) {}
+  if (p && agent) return 'sent from this account on this machine';
+  return FROM[p] || FROM_ELSEWHERE;
+}
+
 function render(me, them, thread) {
   const sorted = [...thread].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
   if (sorted.length === 0) return `No messages with @${them} yet.`;
@@ -51,7 +76,8 @@ function render(me, them, thread) {
   for (const m of sorted) {
     const isMe = m.from === me;
     const who = isMe ? 'you' : `@${m.from}${m.isAgent ? ' (agent)' : ''}`;
-    out += `**${who}** · ${store.formatTimeAgo(m.timestamp)}${m.id ? ` · #${m.id}` : ''}\n`;
+    // Same time wording for both sides; a line of yours also says where it came from.
+    out += `**${who}** · ${store.formatTimeAgo(m.timestamp)}${m.id ? ` · #${m.id}` : ''}${isMe ? ` · ${whereFrom(m)}` : ''}\n`;
     if (m.reply_to) {
       out += (m.reply_to.from || m.reply_to.text)
         ? `answering #${m.reply_to.id} @${m.reply_to.from}: "${inertField(m.reply_to.text || '', 48)}"\n`
@@ -86,4 +112,4 @@ async function handler(args) {
   return { display: render(me, them, thread) };
 }
 
-module.exports = { definition, handler, render };
+module.exports = { definition, handler, render, FROM, FROM_ELSEWHERE };
