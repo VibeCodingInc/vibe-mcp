@@ -481,6 +481,92 @@ test('vibe_prepare advertises kind with the one allowed value', () => {
   assert.match(k.description, /changes nothing about how the message is checked or sent/);
 });
 
+// ── 5b the note-back hook, at the moment it matters ─────────────────────────
+
+const HOOK_FOR = (id) => `If their answer changes what you do here, then once the change is made you can offer one note back (vibe_prepare, kind landed, reply_to ${id}, asked: false).`;
+
+test('arrival: a reply to the person\'s own message carries the note-back hook, for the agent only', () => {
+  const now = Date.now();
+  const mine = { project: 'agent loop', firstLine: 'auto or any for tool_choice?', sentAt: now - 30 * MIN, messageId: 'msg_mine1' };
+  const r = arrival.render(item({ context: mine, sentAt: now - 2 * MIN }));
+  assert.ok(r.context.includes(HOOK_FOR('msg_abc123')), r.context);
+  assert.equal(arrival.landedHook('msg_abc123'), HOOK_FOR('msg_abc123'));
+  assert.ok(!r.line.includes('note back') && !arrival.headerLine(r.header, now).includes('note back'), 'never in what the person is shown');
+  // Absent: first contact, nothing of theirs known here, undecidable, an agent, an open line, someone just invited, switched off.
+  assert.ok(!arrival.render(item({ sentAt: now })).context.includes('note back'), 'no record of a message of theirs');
+  assert.ok(!arrival.render(item({ context: { ...mine, messageId: null }, sentAt: now })).context.includes('note back'), 'no message id: cannot be decided');
+  assert.ok(!arrival.render(item({ context: mine })).context.includes('note back'), 'no time on the arrival: cannot be decided');
+  assert.ok(!arrival.render(item({ context: mine, sentAt: now - 40 * MIN })).context.includes('note back'), 'written before the person\'s message');
+  assert.ok(!arrival.render(item({ context: mine, sentAt: now, kind: 'agent' })).context.includes('note back'), 'an agent');
+  assert.ok(!arrival.render(item({ context: mine, sentAt: now, line: true })).context.includes('note back'), 'an open line');
+  assert.ok(!arrival.render(item({ context: mine, sentAt: now, invited: true })).context.includes('note back'), 'a first message after an invitation');
+  return withOff('itLanded', () => {
+    assert.ok(!arrival.render(item({ context: mine, sentAt: now })).context.includes('note back'), 'switched off');
+  });
+});
+
+test('arrival.record: the binding of what the person sent decides the hook', () => {
+  const vh = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-voice-hook2-'));
+  const env = { VIBE_HOME: vh };
+  const now = Date.now();
+  const row = (id, ts) => ({ handle: 'mira', unread: 1, lastMessage: 'auto is fine; drop the retry wrapper', lastMessageId: id, lastFrom: 'mira', lastActorKind: 'human', muted: false, lastTimestamp: ts });
+  const binding = { from: 'ada', project: 'agent loop', firstLine: 'auto or any?', sentAt: now - 20 * MIN, messageId: 'msg_mine2' };
+  const [withB] = arrival.record([row('msg_reply1', now - MIN)], 'ada', { since: now - 2 * MIN, env, bindingFor: () => binding });
+  assert.ok(withB.context.includes(HOOK_FOR('msg_reply1')), withB.context);
+  const [without] = arrival.record([row('msg_reply2', now - MIN)], 'ada', { since: now - 2 * MIN, env, bindingFor: () => null });
+  assert.ok(!without.context.includes('note back'));
+  fs.rmSync(vh, { recursive: true, force: true });
+});
+
+test('vibe_thread: the hook for their newest message when it answers one sent from here; absent otherwise', () => {
+  const thread = require('./thread');
+  const lineMod = require('../line');
+  const now = Date.now();
+  const bindings = drafts.BINDINGS_FILE;
+  const prev = fs.existsSync(bindings) ? fs.readFileSync(bindings) : null;
+  fs.writeFileSync(bindings, JSON.stringify({ mira: { from: 'ada', project: 'agent loop', firstLine: 'auto or any?', sentAt: now - 20 * MIN, messageId: 'msg_mine3' } }));
+  try {
+    const mineMsg = { id: 'msg_mine3', from: 'ada', body: 'auto or any for tool_choice?', timestamp: now - 20 * MIN };
+    const reply = (over = {}) => ({ id: 'msg_r9', from: 'mira', body: 'auto; drop the retry wrapper', reply_to: { id: 'msg_mine3', from: 'ada', text: 'auto or any?' }, timestamp: now - 5 * MIN, ...over });
+    const shown = thread.render('ada', 'mira', [mineMsg, reply()]);
+    assert.ok(shown.includes(HOOK_FOR('msg_r9')), shown);
+    assert.ok(shown.indexOf(HOOK_FOR('msg_r9')) < shown.indexOf('Conversation with @mira'), 'before the conversation');
+    // reply_to as a bare id works the same.
+    assert.ok(thread.render('ada', 'mira', [mineMsg, reply({ reply_to: 'msg_mine3' })]).includes(HOOK_FOR('msg_r9')));
+    // Absent: not a reply (first contact), a reply to something not sent from here, an agent, an open-line ask or answer.
+    assert.ok(!thread.render('ada', 'mira', [reply({ reply_to: null })]).includes('note back'), 'not a reply');
+    assert.ok(!thread.render('ada', 'mira', [mineMsg, reply({ reply_to: { id: 'msg_elsewhere', from: 'ada', text: 'x' } })]).includes('note back'), 'no local record of the message it answers');
+    assert.ok(!thread.render('ada', 'mira', [mineMsg, reply({ isAgent: true })]).includes('note back'), 'an agent');
+    assert.ok(!thread.render('ada', 'mira', [mineMsg, reply({ body: `auto${lineMod.ANSWERED('mira')}` })]).includes('note back'), 'an open-line answer');
+    assert.ok(!thread.render('ada', 'mira', [mineMsg, reply({ body: `auto?${lineMod.ASKED('mira')}` })]).includes('note back'), 'an open-line ask');
+    // Their newest message decides: a later plain message without reply_to hides it.
+    assert.ok(!thread.render('ada', 'mira', [mineMsg, reply(), { id: 'msg_r10', from: 'mira', body: 'also', timestamp: now - MIN }]).includes('note back'));
+    // Switched off.
+    withOff('itLanded', () => { assert.ok(!thread.render('ada', 'mira', [mineMsg, reply()]).includes('note back')); });
+  } finally {
+    if (prev === null) fs.rmSync(bindings, { force: true }); else fs.writeFileSync(bindings, prev);
+  }
+});
+
+test('vibe_thread: once a note back was opened for that reply, the hook is gone', async () => {
+  const thread = require('./thread');
+  const now = Date.now();
+  const bindings = drafts.BINDINGS_FILE;
+  const prev = fs.existsSync(bindings) ? fs.readFileSync(bindings) : null;
+  fs.writeFileSync(bindings, JSON.stringify({ mira: { from: 'ada', sentAt: now - 20 * MIN, messageId: 'msg_mine4', firstLine: 'q' } }));
+  try {
+    const msgs = [{ id: 'msg_mine4', from: 'ada', body: 'q', timestamp: now - 20 * MIN }, { id: 'msg_r11', from: 'mira', body: 'a', reply_to: 'msg_mine4', timestamp: now - MIN }];
+    assert.ok(thread.render('ada', 'mira', msgs).includes(HOOK_FOR('msg_r11')));
+    const r = await prep({ handle: 'mira', message: 'That landed: keeping auto.', reply_to: 'msg_r11', kind: 'landed', asked: false });
+    assert.equal(r.data.draft.kind, 'landed');
+    assert.ok(!thread.render('ada', 'mira', msgs).includes('note back'));
+    await drafts.vibe_discard.handler({ id: r.data.draft.id });
+    assert.ok(!thread.render('ada', 'mira', msgs).includes('note back'), 'declined is still offered');
+  } finally {
+    if (prev === null) fs.rmSync(bindings, { force: true }); else fs.writeFileSync(bindings, prev);
+  }
+});
+
 // ── 6 the lab ───────────────────────────────────────────────────────────────
 
 test('lab: arrival header forms are named in the transcript; notes back are counted per world', async () => {

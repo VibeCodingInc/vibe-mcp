@@ -346,6 +346,12 @@ function noteLanded(me, d, now = Date.now()) {
   writeJsonAtomic(LANDED_FILE, Object.fromEntries(kept));
 }
 
+/** Was a note back already opened for this reply (the ledger, any state)? Read only; for the thread view's hook. */
+function landedOffered(to, replyId) {
+  if (!replyId) return false;
+  try { return Boolean(readLanded()[landedKey(config.getHandle(), to, replyId)]); } catch { return false; }
+}
+
 const cleanId = (v) => (typeof v === 'string' ? v.trim().replace(/^#/, '') : '') || null;
 /** A message id as the platform mints them: letters, digits, '_' and '-' (a leading '#' is allowed). */
 const isMessageId = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]+$/.test(cleanId(v) || '');
@@ -1490,5 +1496,5 @@ module.exports = {
   isQaHandle, getReturnBinding, clearReturnBinding, loadDrafts, transact, DRAFTS_FILE, BINDINGS_FILE,
   compose, revOf, reconcileAbandoned, sentProvenance,
   // the note back (notice.js itLanded)
-  LANDED_LABEL, LANDED_FILE, LANDED_MAX,
+  LANDED_LABEL, LANDED_FILE, LANDED_MAX, landedOffered,
 };

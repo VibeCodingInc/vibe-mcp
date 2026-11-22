@@ -94,6 +94,33 @@ function isSpooled(id, env = process.env) {
 // ── what the person and their agent are told ────────────────────────────────
 
 /**
+ * The moment a note back matters (notice.js itLanded): a reply to something
+ * the person here sent. One agent-facing line naming the reply's id, never in
+ * what the person is shown. Lab 2026-11-21: in 20 worlds no agent offered a
+ * note back although replies visibly changed the receiver's work; the general
+ * guidance was too far from the moment.
+ */
+function landedHook(replyId) {
+  const id = safeId(replyId);
+  if (!id) return null;
+  return `If their answer changes what you do here, then once the change is made you can offer one note back (vibe_prepare, kind landed, reply_to ${id}, asked: false).`;
+}
+
+/**
+ * Is this arrival a reply to the person's own earlier message, by local records
+ * only? The inbox row carries no reply_to, so the record is the return binding
+ * (tools/drafts.js): what the person here last sent this sender from this
+ * machine, with its message id and time. Their message, written after that
+ * send, is the reply to it. Anything not known (no binding, no message id, no
+ * time on either side) is "cannot be decided": false.
+ */
+function repliesToOwn(context, sentAt) {
+  return Boolean(context && context.messageId && Number.isFinite(context.sentAt) &&
+    Number.isFinite(sentAt) && sentAt > context.sentAt);
+}
+
+
+/**
  * The guidance is OURS and comes first; their words come after, fenced, as
  * data (incoming.js rule 1). The guidance asks for one line now and, when the
  * session's own work has something true to say, a reply prepared from it —
@@ -193,6 +220,12 @@ function render(item) {
   if (!lineOpen && item.context && item.context.sentAt) {
     const project = item.context.project ? ` from ${inertField(item.context.project, 60)}` : '';
     lines.push(`Context: the person here wrote @${from}${project} earlier: "${inertField(item.context.firstLine || '', 80)}"`);
+  }
+  // A reply to the person's own message, from a person (not an agent, not over
+  // an open line, not a door, not a first message): the hook for a note back.
+  if (!lineOpen && !doorCard && item.kind !== 'agent' && !item.invited && notice.on('itLanded') && repliesToOwn(item.context, item.sentAt)) {
+    const hook = landedHook(item.id);
+    if (hook) lines.push(hook);
   }
   const more = item.unread > 1 ? ` (+${item.unread - 1} more unread in this thread)` : '';
   const context = lines.join('\n') + renderIncoming([{ from: item.from, text: text + more }]);
@@ -295,7 +328,7 @@ function record(threads, me, { since = 0, roster = [], bindingFor = null, env = 
       unread: t.unread,
       kind: t.lastActorKind || null,
       building: person ? (person.one_liner || person.activity || person.workingOn || '') : '',
-      context: context && context.sentAt ? { project: context.project || null, firstLine: context.firstLine || '', sentAt: context.sentAt } : null,
+      context: context && context.sentAt ? { project: context.project || null, firstLine: context.firstLine || '', sentAt: context.sentAt, messageId: context.messageId || null } : null,
       at: Date.now(),
       // An open line with this person changes what the agent may do (line.js).
       line: line.isOpen(t.lastFrom, env),
@@ -463,6 +496,6 @@ async function wroteLastPeople(threads, me, { kindOf = null, limit = 3, ...opts 
 module.exports = {
   wroteLastPeople,
   spoolDir, safeId, claim, isClaimed, isSpooled, told,
-  render, pickArrivals, record, prune, wroteLast, countReply, countWaiting, headerLine, ago,
+  render, pickArrivals, record, prune, wroteLast, countReply, countWaiting, headerLine, ago, landedHook, repliesToOwn,
   SPOOL_TTL_MS, ARRIVAL_SLACK_MS,
 };
