@@ -1,13 +1,13 @@
 {
-  "version": "0.9.26",
+  "version": "0.9.27",
   "updated": "2026-11-22",
-  "changelog": "Setup now ends by telling you to open a fresh session and whether a note is waiting, the Send box says it is the confirmation, and your agent offers a note back when an answer changed your work.",
+  "changelog": "Code in a message now arrives exactly as written, and a note back is a plain receipt of what changed.",
   "features": [
-    "Setup ends with: open a fresh Claude Code session to load /vibe; sessions already open will not see it",
-    "If a note is already waiting when you finish setup, it says so and from whom (people you know by name; never the message text)",
-    "The Send box's first line now reads Confirm: send to @name?, so it reads as the confirmation of the send you just asked for",
-    "When someone's answer changed what you did, your agent offers a one-line note back as a draft; it goes only if you choose",
-    "That offer now also works for answers you first saw at the start of a session"
+    "Regexes, JSON, backticks and brackets in a message reach the other person and their agent exactly as written, instead of with look-alike characters",
+    "Each arriving message is given to the agent inside a block closed by a one-time code, so its text cannot pass for instructions or for /vibe's own lines",
+    "Invisible and look-alike characters that could fake a second /vibe line on your screen are removed",
+    "A note back is a one-sentence receipt of what changed on your side; one that carries a question is refused, and a real question becomes its own draft",
+    "Replies stay linked to the message they answer"
   ],
   "deprecated": [],
   "breaking": false,
