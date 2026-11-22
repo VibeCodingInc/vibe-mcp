@@ -864,6 +864,21 @@ async function getThread(myHandle, theirHandle) {
   }
 }
 
+/**
+ * The conversation, read once with a short timeout and no retry, for a
+ * caller that must not be slowed by it (vibe_prepare's "already said"). A
+ * read only: nothing is marked read. Failure is a readFailed empty list.
+ */
+async function getThreadBounded(myHandle, theirHandle, { timeoutMs = 1500 } = {}) {
+  let timer;
+  const late = new Promise((resolve) => { timer = setTimeout(() => resolve(failedThread()), timeoutMs + 250); timer.unref?.(); });
+  try {
+    return await Promise.race([getThreadWithRequest((m, p, d) => requestOnce(m, p, d, { timeout: timeoutMs }), myHandle, theirHandle), late]);
+  } catch (e) {
+    return failedThread();
+  } finally { clearTimeout(timer); }
+}
+
 async function markThreadReadWithRequest(
   makeRequest,
   myHandle,
@@ -1048,6 +1063,7 @@ module.exports = {
   getRawInbox,
   getUnreadCount,
   getThread,
+  getThreadBounded,
   markThreadRead,
   formatTimeAgo,
 

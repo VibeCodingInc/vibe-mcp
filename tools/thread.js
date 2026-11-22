@@ -111,4 +111,4 @@ async function handler(args) {
   return { display: render(me, them, thread) };
 }
 
-module.exports = { definition, handler, render, FROM, FROM_ELSEWHERE };
+module.exports = { definition, handler, render, whereFrom, FROM, FROM_ELSEWHERE };
