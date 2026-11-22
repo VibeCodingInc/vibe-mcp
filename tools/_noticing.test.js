@@ -47,6 +47,32 @@ test('VIBE_NOTICE_VARIANT=off turns every change off, and only against a loopbac
   assert.equal(notice.on('no-such-change', LOCAL), false);
 });
 
+test('VIBE_NOTICE_OFF=name1,name2 turns off just those changes, and only against a loopback API', () => {
+  const names = Object.keys(notice.NOTICE);
+  assert.ok(names.includes('quietArrival') && names.includes('showYourWork'));
+  for (const name of names) {
+    const others = names.filter((n) => n !== name);
+    assert.equal(notice.on(name, { ...LOCAL, VIBE_NOTICE_OFF: name }), false, `${name} not turned off by name`);
+    for (const o of others) assert.equal(notice.on(o, { ...LOCAL, VIBE_NOTICE_OFF: name }), true, `turning off ${name} turned off ${o}`);
+    assert.equal(notice.on(name, { VIBE_API_URL: 'http://localhost:4000', VIBE_NOTICE_OFF: `x, ${name} ,y` }), false);
+    assert.equal(notice.on(name, { VIBE_API_URL: 'http://[::1]:4000', VIBE_NOTICE_OFF: `${name}` }), false);
+    assert.equal(notice.on(name, { ...PROD, VIBE_NOTICE_OFF: name }), true, `${name}: a real account had it turned off`);
+    assert.equal(notice.on(name, { VIBE_API_URL: 'http://127.0.0.1.evil.dev/', VIBE_NOTICE_OFF: name }), true);
+    // Names are exact: a different case or a prefix is not the name.
+    assert.equal(notice.on(name, { ...LOCAL, VIBE_NOTICE_OFF: name.toUpperCase() }), true);
+    assert.equal(notice.on(name, { ...LOCAL, VIBE_NOTICE_OFF: name.slice(0, -1) }), true);
+  }
+  assert.equal(notice.on('quietArrival', { ...LOCAL, VIBE_NOTICE_OFF: 'quietArrival,showYourWork' }), false);
+  assert.equal(notice.on('showYourWork', { ...LOCAL, VIBE_NOTICE_OFF: 'quietArrival,showYourWork' }), false);
+  assert.equal(notice.on('triggers', { ...LOCAL, VIBE_NOTICE_OFF: 'quietArrival,showYourWork' }), true);
+  // Both switches together: off still wins.
+  assert.equal(notice.on('triggers', { ...LOCAL, VIBE_NOTICE_VARIANT: 'off', VIBE_NOTICE_OFF: 'quietArrival' }), false);
+  // Not a way to name something that is not a switch.
+  assert.equal(notice.on('toString', LOCAL), false);
+  assert.equal(notice.on('constructor', LOCAL), false);
+  assert.deepEqual(notice.offNames({ VIBE_NOTICE_OFF: ' a, b  c,,' }), ['a', 'b', 'c']);
+});
+
 // ── the here-line ───────────────────────────────────────────────────────────
 
 const LONG = 'Tuning Graviton autoscaler memory headroom for the ingest worker, and keeping notes on the ARM64 build for the image worker nodes';
@@ -216,4 +242,29 @@ test('the /vibe command: the preview is the offer, with the numbers and names fr
   assert.ok(cmd.includes('with the concrete numbers or names from the work, so it is easy to answer when they next look'));
   assert.ok(cmd.includes('Nothing sends without a preview the person chose to send.'));
   assert.ok(cmd.includes('**Send** → `vibe_send` with the draft `id` and `rev` from the preview.'));
+});
+
+test('SERVER_INSTRUCTIONS: show your work, and how a message reaches someone; each off by name', () => {
+  const { serverInstructions } = require('../index.js');
+  const SYW = 'A question to someone says in a few words what was already checked or tried here, then asks one specific thing they can answer in a line; still one or two sentences, with no apology, no preamble and no "quick question".';
+  const QA = 'If the person hesitates to bother someone, you may tell them how a message reaches the other person: in their session it shows at a pause (their next prompt or tool step), never over what they are typing, and if they are not in a session it waits for them. The preview says which.';
+  const now = serverInstructions(LOCAL);
+  assert.ok(now.includes(SYW), now);
+  assert.ok(now.includes(QA), now);
+  const noQuiet = serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'quietArrival' });
+  assert.ok(!noQuiet.includes(QA) && noQuiet.includes(SYW));
+  const noWork = serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'showYourWork' });
+  assert.ok(!noWork.includes(SYW) && noWork.includes(QA));
+  assert.equal(serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'quietArrival,showYourWork' }), now.replace(` ${SYW}`, '').replace(` ${QA}`, ''));
+  const off = serverInstructions({ ...LOCAL, VIBE_NOTICE_VARIANT: 'off' });
+  assert.ok(!off.includes(SYW) && !off.includes(QA));
+  assert.equal(serverInstructions({ ...PROD, VIBE_NOTICE_OFF: 'quietArrival,showYourWork' }), serverInstructions(PROD));
+  // Never a promise about other apps: only what happens in a session.
+  assert.ok(!/ring|buzz|phone|notification/i.test(QA));
+});
+
+test('the /vibe command: a question shows what was already checked, then asks one answerable thing', () => {
+  const cmd = fs.readFileSync(path.join(ROOT, 'hosts', 'vibe-command.md'), 'utf8');
+  assert.ok(cmd.includes('A question says in a few words what was already checked or tried here, then asks one specific thing they can answer in a line: no apology, no preamble, no "quick question".'));
+  assert.ok(cmd.includes('Write one or two sentences (three at most)'));
 });
