@@ -22,8 +22,9 @@
  *  - Shown, then a typed turn: Send goes only if the person has had a turn (a
  *    prompt, recorded by the arrival hook) after the rev was last shown, so an
  *    agent cannot show and send in one turn (turns.js). Where the host can
- *    show a box (confirm-box.js), the person's Accept in a box /vibe opens
- *    is the choice instead, bound to the id, rev and text in the box.
+ *    show a box (confirm-box.js), the person must ALSO press Accept in a box
+ *    /vibe opens, bound to the id, rev and text in it: a typed turn AND
+ *    Accept wherever turns are recorded; the box alone where they are not.
  *  - Exactly once: Send claims the draft under a whole-file lock, sends with
  *    an idempotency key derived from the exact text, and finalizes against
  *    the latest stored state. A draft whose delivery could not be confirmed
@@ -572,7 +573,7 @@ async function discardHandler(args) {
 
 const sendDefinition = {
   name: 'vibe_send',
-  description: "Send a prepared draft: pass id AND rev from the preview vibe_prepare showed. Call this only when the person chose Send; that choice is the approval, do not ask again. It sends exactly the previewed text, once. A changed draft must be shown again before it can be sent: a rev prepared after the person's last message is not sent, and the preview comes back to show them. Where the host supports it, a box opens for the person to confirm the exact text; you cannot answer it, and if they decline, do not call again unless they ask. There is no other way to send: to write to someone, even in words the person dictated, open a draft with vibe_prepare first.",
+  description: "Send a prepared draft: pass id AND rev from the preview vibe_prepare showed. Call this only when the person chose Send; that choice is the approval, do not ask again. It sends exactly the previewed text, once. A changed draft must be shown again before it can be sent: a rev prepared after the person's last message is not sent, and the preview comes back to show them. Where the host supports it, a box opens for the person to confirm; you cannot answer it. After a not-sent result, only if they ask again: show it with vibe_prepare and wait for them to say send. There is no other way to send: to write to someone, even in words the person dictated, open a draft with vibe_prepare first.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -659,7 +660,7 @@ function claimDraft(d, rev) {
 // found, the account changed.
 
 const sha256 = (t) => crypto.createHash('sha256').update(String(t), 'utf8').digest('hex');
-const BOX_NOT_ACCEPTED = (to) => `Not sent. It is still a draft for @${to}. Do not send it again unless they ask.`;
+const BOX_NOT_ACCEPTED = (to) => `Not sent. It is still a draft for @${to}. Only if they ask again: show it with vibe_prepare and wait for them to say send.`;
 const BOX_BUSY = 'Not sent: another /vibe confirmation box is open. Wait until it is answered.';
 const BOX_HOOK = (file) => `Not sent: a hook on this machine is set to answer /vibe's confirmation box (${file}). Remove it to send.`;
 const BOX_JSON = (file) => `Not sent: a settings file on this machine cannot be read as JSON (${file}), so /vibe cannot check it for a hook that would answer its confirmation box. Fix the file to send.`;
@@ -718,15 +719,46 @@ function openBox(id, rev, me) {
       return { unseen: { ...d, reshown }, why: turn.why || null };
     }
     const now = Date.now();
-    const live = (x) => x.box && Number.isFinite(x.box.at) && now - x.box.at < confirmBox.TIMEOUT_MS + 5000;
-    // One box at a time, this draft's own outstanding request included.
-    if (confirmBox.isOpen() || drafts.some(live)) return { refused: boxRefusal(BOX_BUSY, 'box_busy') };
+    // A box nobody will answer any more (past its window, or left by a server
+    // that exited) is closed first, as a non-accept at this moment: the
+    // per-draft and cross-draft rules then apply to it.
+    closeAbandoned(drafts, now);
+    // One box at a time per project folder, this draft's own outstanding
+    // request included. Another project is not held up by it.
+    const here = projectKey();
+    if (confirmBox.isOpen() || drafts.some((x) => x.box && (!x.box.project || x.box.project === here))) return { refused: boxRefusal(BOX_BUSY, 'box_busy') };
     if (boxBlocked(d) || blockedAfterNonAccept(drafts, now)) return { refused: notAccepted(d.to) };
     const nonce = crypto.randomBytes(16).toString('hex');
     d.boxAt = now;
-    d.box = { nonce, at: now, rev, sha: sha256(message), me, turn: turn.check };
+    d.box = { nonce, at: now, rev, sha: sha256(message), me, turn: turn.check, project: here, pid: process.pid };
     return { boxed: { id: d.id, to: d.to, nonce, text: boxMessageFor(d) } };
   });
+}
+
+/** How long after it opened a box counts as abandoned. */
+const BOX_WINDOW_SLACK_MS = 5000;
+function projectKey() {
+  try { const turns = require('../turns'); return turns.key(turns.projectDir()); } catch { return null; }
+}
+/**
+ * Close every recorded box that will not be answered: past its window, or
+ * opened by a server process that is gone. Each is recorded as a non-accept
+ * now. Returns how many were closed.
+ */
+function closeAbandoned(drafts, now = Date.now()) {
+  const confirmBox = require('../confirm-box');
+  let n = 0;
+  for (const x of drafts) {
+    if (!x.box) continue;
+    const expired = !Number.isFinite(x.box.at) || now - x.box.at >= confirmBox.TIMEOUT_MS + BOX_WINDOW_SLACK_MS;
+    const orphaned = Number.isFinite(x.box.pid) && x.box.pid !== process.pid && !pidAlive(x.box.pid);
+    if (!expired && !orphaned) continue;
+    delete x.box;
+    x.boxAnsweredAt = now;
+    x.boxRefusedAt = now;
+    n += 1;
+  }
+  return n;
 }
 
 /** A box was opened for this draft (and not accepted) since vibe_prepare last showed it. */
@@ -882,9 +914,9 @@ async function send(args, { byPerson, ctx = {} }) {
     return { ...p, display: `${lead}\n\n${p.display}`, data: { ...(p.data || {}), sent: false, definite: true } };
   }
 
-  // Where the host can show a box, the person accepts in one (with the turn
-  // check too when the box cannot show the whole text; openBox). An agent
-  // really signed in as itself has no person to ask
+  // Where the host can show a box, the person accepts in one: on top of the
+  // turn check wherever turns are recorded (openBox), alone where they are
+  // not. An agent really signed in as itself has no person to ask
   // and keeps its own rule (turnCheck: agent_identity).
   if (!byPerson && !isAgentIdentity()) {
     if (ctx && ctx.retry && typeof ctx.retry.requestState === 'string') return sendStateless(id, rev, me, ctx);
