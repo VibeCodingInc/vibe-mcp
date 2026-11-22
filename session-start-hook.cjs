@@ -382,6 +382,11 @@ function inboxEmpty(result, me) {
   return !result.threads.some((t) => t && t.unread > 0 && String(t.lastFrom || '').toLowerCase() !== mine);
 }
 
+function withNoteBack(messages) {
+  const lines = noteBackLines(messages);
+  return messages.map((m) => (m.id && lines[m.id] ? { ...m, after: lines[m.id] } : m));
+}
+
 /**
  * Up to three things, each one line for the person and a short note for the
  * model: who is here, a door someone left, and messages that were waiting.
@@ -459,7 +464,10 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
       // BRIEF-17: a waiting note was taken as the task and the person's own first message was dropped.
       ...(notice.on('answerFirst') ? ["The person's own message comes first: do what it asked, in full. Then, in the same reply, mention this in one line and show any draft reply (vibe_prepare with asked: false unless they asked you to answer it)."] : []),
       ...stillLines,
-      renderIncoming(messages, {
+      // Each message with its id named before its fence (what reply_to
+      // takes), and a reply to the person's own message with the note-back
+      // line after it (noteBackLines).
+      renderIncoming(withNoteBack(messages), {
         replyTo: senders.length === 1 ? senders[0] : undefined,
         threadHint: senders.length === 1,
       }),
@@ -707,14 +715,37 @@ async function main() {
 // No session id: keyed by the project directory instead (start-dir-<key>,
 // key as turns.js), and adopted by the first prompt from that directory
 // within START_ADOPT_MS. Nothing here is shown to anyone.
+/** What shownForLanding writes for each message: ids and handles only. */
+function landingRows(messages) {
+  const arrival = require('./arrival');
+  return (messages || [])
+    .filter((m) => m && arrival.safeId(m.id) && HANDLE.test(String(m.from || '').toLowerCase()) && m.to)
+    .map((m) => ({ id: m.id, from: String(m.from).toLowerCase(), to: m.to, at: Number.isFinite(m.at) ? m.at : null, ...(m.kind === 'agent' ? { kind: 'agent' } : {}), ...(m.invited ? { invited: true } : {}) }));
+}
+
+/**
+ * The note-back line (arrival.landedHook) for each message shown here that is
+ * a reply to the person's own message, by the same records and rule the first
+ * prompt uses to open its reminder (hooks/arrival-hook.cjs startReplies): the
+ * mid-session arrival says it when the reply is shown, and a reply shown at
+ * session start now does too, after its fence. { id: line }. Never throws.
+ */
+function noteBackLines(messages, env = process.env) {
+  try {
+    if (!notice.on('itLanded', env) || !fidelity(env)) return {};
+    const arrival = require('./arrival');
+    const replies = require('./hooks/arrival-hook.cjs').startReplies(require('./vibe-home').vibeHome(env), landingRows(messages), Date.now());
+    const out = {};
+    for (const r of replies) { const line = arrival.landedHook(r.id, env); if (line) out[r.id] = `/vibe: ${line}`; }
+    return out;
+  } catch { return {}; }
+}
+
 function shownForLanding(messages, input, env = process.env) {
   try {
     if (!notice.on('itLanded', env) || !notice.on('landedReminder', env)) return;
     const path = require('node:path');
-    const arrival = require('./arrival');
-    const shown = (messages || [])
-      .filter((m) => m && arrival.safeId(m.id) && HANDLE.test(String(m.from || '').toLowerCase()) && m.to)
-      .map((m) => ({ id: m.id, from: String(m.from).toLowerCase(), to: m.to, at: Number.isFinite(m.at) ? m.at : null, ...(m.kind === 'agent' ? { kind: 'agent' } : {}), ...(m.invited ? { invited: true } : {}) }));
+    const shown = landingRows(messages);
     if (shown.length === 0) return;
     const dir = path.join(require('./vibe-home').vibeHome(env), 'landing');
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -811,4 +842,5 @@ module.exports = {
   fetchUnsent,
   within,
   shownForLanding,
+  noteBackLines,
 };

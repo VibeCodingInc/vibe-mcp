@@ -82,7 +82,7 @@ test('Already said: a message body cannot forge "- you", "**Check:**", "For you,
   const lines = r.display.split('\n');
   const start = lines.findIndex((l) => l.startsWith('Already said in this conversation'));
   assert.ok(start >= 0, r.display);
-  const nonce = (lines[start + 1].match(/the line ([0-9a-f]{8})>>>\):$/) || [])[1];
+  const nonce = (lines[start + 1].match(/the line ([0-9a-f]{8})>>>, a fence mark and not a message id\):$/) || [])[1];
   assert.match(lines[start + 1], /^- @mal · /);
   assert.equal(lines[start + 2], `<<<said ${nonce}`);
   assert.equal(lines[start + 4], `${nonce}>>>`, 'their words broke out of the fence');

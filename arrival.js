@@ -245,17 +245,24 @@ function render(item) {
   // A reply to the person's own message, from a person (not an agent, not over
   // an open line, not a door, not a first message): the hook for a note back.
   let landed = null;
+  let noteBack = null;
   if (!lineOpen && !doorCard && item.kind !== 'agent' && !item.invited && notice.on('itLanded') && repliesToOwn(item.context, item.sentAt)) {
     const hook = landedHook(item.id);
-    if (hook) lines.push(hook);
+    // codeFidelity: after the fence, the last thing the agent reads for this
+    // arrival (the fence's closing line is /vibe's, so nothing of theirs can
+    // follow it); before, above their words with the rest of the guidance.
+    if (hook && fid) noteBack = `/vibe: ${hook}`;
+    else if (hook) lines.push(hook);
     // The arrival hook keeps this in front of the agent on the next prompts
     // of the session where it is shown (notice.js landedReminder): by the
     // time the reply has changed the work, this text is many turns back.
     if (hook && notice.on('landedReminder')) landed = { id: safeId(item.id), from, ...(notice.on('landedAsDraft') ? { asDraft: true } : {}), ...(notice.on('landedReceipt') ? { receipt: true } : {}) };
   }
   const more = item.unread > 1 ? ` (+${item.unread - 1} more unread in this thread)` : '';
-  // The unread count is /vibe's, so it goes after the fence, not inside it.
-  const context = lines.join('\n') + renderIncoming([fid ? { from: item.from, text, after: more.trim() } : { from: item.from, text: text + more }]);
+  // The unread count and the note-back line are /vibe's, so they go after the
+  // fence, not inside it; the message id is named before it (reply_to).
+  const after = [more.trim(), noteBack].filter(Boolean).join('\n');
+  const context = lines.join('\n') + renderIncoming([fid ? { from: item.from, text, ...(id ? { id } : {}), after } : { from: item.from, text: text + more }]);
   // Say only what the message is: an agent's question and an agent's answer
   // carry their own mark; anything else is simply something they wrote.
   const verb = lineOpen && line.isAgentAnswer(item.text) ? "'s agent answered"

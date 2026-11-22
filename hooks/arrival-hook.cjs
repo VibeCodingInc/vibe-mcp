@@ -234,27 +234,42 @@ function adoptStart(dir, session, input, now = Date.now()) {
       }
     }
     if (!start || !Array.isArray(start.shown) || !Number.isFinite(start.at) || !(now - start.at <= LANDED_TTL_MS)) return;
-    const home = path.join(dir, '..');
-    let bindings = {};
-    let lines = {};
-    try { bindings = JSON.parse(fs.readFileSync(path.join(home, 'return-bindings.json'), 'utf8')) || {}; } catch {}
-    try { lines = JSON.parse(fs.readFileSync(path.join(home, 'lines.json'), 'utf8')) || {}; } catch {}
     const file = landingFile(dir, session);
     let open = readLanding(file);
-    for (const m of start.shown.slice(0, 10)) {
-      if (!m || !SAFE_ID.test(m.id) || !SAFE_HANDLE.test(m.from) || m.kind === 'agent' || m.invited === true) continue;
-      const from = normHandle(m.from);
-      const to = normHandle(m.to);
-      if (!to || Object.prototype.hasOwnProperty.call(lines, from)) continue;
-      const b = bindings && typeof bindings === 'object' ? bindings[from] : null;
-      if (!b || typeof b !== 'object' || !b.messageId || !Number.isFinite(b.sentAt)) continue;
-      if (b.from && normHandle(b.from) !== to) continue;
-      if (now - b.sentAt > BINDING_TTL_MS || !Number.isFinite(m.at) || !(m.at > b.sentAt)) continue;
+    for (const m of startReplies(path.join(dir, '..'), start.shown, now)) {
       open = open.filter((r) => r.id !== m.id);
-      open.push({ id: m.id, from, to, at: start.at, told: 0, ...(start.asDraft === true ? { asDraft: true } : {}), ...(start.receipt === true ? { receipt: true } : {}) });
+      open.push({ id: m.id, from: m.from, to: m.to, at: start.at, told: 0, ...(start.asDraft === true ? { asDraft: true } : {}), ...(start.receipt === true ? { receipt: true } : {}) });
     }
     writeLanding(file, open.slice(-10));
   } catch {}
+}
+
+/**
+ * Which of the messages shown at session start are replies to the person's
+ * own message, by this machine's records under `home` (VIBE_HOME). Shared
+ * with session-start-hook.cjs, which says the note-back line beside such a
+ * reply when it shows it; adoptStart opens the reminder record from it.
+ * `shown`: [{id, from, to, at, kind?, invited?}]. Returns [{id, from, to}].
+ */
+function startReplies(home, shown, now = Date.now()) {
+  if (!Array.isArray(shown)) return [];
+  let bindings = {};
+  let lines = {};
+  try { bindings = JSON.parse(fs.readFileSync(path.join(home, 'return-bindings.json'), 'utf8')) || {}; } catch {}
+  try { lines = JSON.parse(fs.readFileSync(path.join(home, 'lines.json'), 'utf8')) || {}; } catch {}
+  const out = [];
+  for (const m of shown.slice(0, 10)) {
+    if (!m || !SAFE_ID.test(m.id) || !SAFE_HANDLE.test(m.from) || m.kind === 'agent' || m.invited === true) continue;
+    const from = normHandle(m.from);
+    const to = normHandle(m.to);
+    if (!to || Object.prototype.hasOwnProperty.call(lines, from)) continue;
+    const b = bindings && typeof bindings === 'object' ? bindings[from] : null;
+    if (!b || typeof b !== 'object' || !b.messageId || !Number.isFinite(b.sentAt)) continue;
+    if (b.from && normHandle(b.from) !== to) continue;
+    if (now - b.sentAt > BINDING_TTL_MS || !Number.isFinite(m.at) || !(m.at > b.sentAt)) continue;
+    out.push({ id: m.id, from, to });
+  }
+  return out;
 }
 
 /** Was a note back already opened for this reply, on this machine? */
@@ -436,4 +451,4 @@ function stuckNudge(input, dir) {
 }
 
 if (require.main === module) { try { main(); } catch { quiet(); } }
-module.exports = { personWrote, shownLine, headerLine, ago, landedReminders, openLanded, adoptStart, LANDED_TIMES, LANDED_TTL_MS, START_ADOPT_MS, LANDED_RECEIPT_SHORT };
+module.exports = { personWrote, shownLine, headerLine, ago, landedReminders, openLanded, adoptStart, startReplies, LANDED_TIMES, LANDED_TTL_MS, START_ADOPT_MS, LANDED_RECEIPT_SHORT };
