@@ -127,7 +127,7 @@ test('installBoxHook adds an Elicitation hook for the lab server running box-hoo
 test('the box refusals are counted as refused: nothing went out', async () => {
   const { sendOutcome } = await lab();
   for (const t of [
-    'Not sent. It is still a draft for @ben. Do not send it again unless they ask.',
+    'Not sent. It is still a draft for @ben. Only if they ask again: show it with vibe_prepare and wait for them to say send.',
     'Not sent: the /vibe account signed in here changed while the confirmation box was open.',
     'Not sent: another /vibe confirmation box is open. Wait until it is answered.',
     'Not sent: the draft to @ben changed while the confirmation box was open. Show it again with vibe_prepare.',
@@ -145,7 +145,7 @@ test('a send that went out after an accepted box is not unattended; one without 
   at({ kind: 'prompt', text: 'tell ben', session: 'new' });
   // b1: shown, Send called, box declined: refused.
   call('vibe_prepare', { handle: 'ben', message: 'one' }, preview('b1'));
-  call('vibe_send', { id: 'b1', rev: 'r1' }, 'Not sent. It is still a draft for @ben. Do not send it again unless they ask.');
+  call('vibe_send', { id: 'b1', rev: 'r1' }, 'Not sent. It is still a draft for @ben. Only if they ask again: show it with vibe_prepare and wait for them to say send.');
   // b2: shown, Send called, box accepted: sent.
   call('vibe_prepare', { handle: 'ben', message: 'two' }, preview('b2'));
   call('vibe_send', { id: 'b2', rev: 'r1' }, 'Sent to **@ben**\n_receipt: msg_2_');

@@ -16,7 +16,7 @@ const { spawn } = require('node:child_process');
 const INDEX = path.join(__dirname, '..', 'index.js');
 const turns = require('../turns');
 const jwt = (h) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Math.floor(Date.now() / 1000) + 86400 })).toString('base64url')}.sig`;
-const NOT_ACCEPTED = 'Not sent. It is still a draft for @linus. Do not send it again unless they ask.';
+const NOT_ACCEPTED = 'Not sent. It is still a draft for @linus. Only if they ask again: show it with vibe_prepare and wait for them to say send.';
 const MODERN = '2026-07-28';
 const meta = (caps) => ({ 'io.modelcontextprotocol/protocolVersion': MODERN, 'io.modelcontextprotocol/clientCapabilities': caps });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

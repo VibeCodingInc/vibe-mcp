@@ -67,7 +67,7 @@ function fakeBox(answer, { protocolVersion = '2025-11-25', timeoutMs } = {}) {
   return box;
 }
 const accept = { action: 'accept', content: {} };
-const NOT_ACCEPTED = 'Not sent. It is still a draft for @linus. Do not send it again unless they ask.';
+const NOT_ACCEPTED = 'Not sent. It is still a draft for @linus. Only if they ask again: show it with vibe_prepare and wait for them to say send.';
 /** A message too long for the box to show whole: the turn check applies on top of the box. */
 const LONG = (tag) => `${tag}: ${'this one is long enough that the box shows only its start, so the preview matters. '.repeat(2).trim()}`;
 const prepare = (o, ctx) => drafts.vibe_prepare.handler({ handle: 'linus', message: 'the lease fixed it', ...o }, ctx);
@@ -822,34 +822,11 @@ test('the preview on a connection with no box says sending relies on the typed r
   });
 });
 
-// ── the hook scan reaches parent folders, managed settings and plugins ──────
+// ── the hook scan: managed settings ───────────────────────────────────────
 
 test('the managed settings file is in the scan, for macOS and Linux', () => {
   assert.ok(confirmBox.settingsFiles(process.env, process.cwd, { platform: 'darwin' }).includes('/Library/Application Support/ClaudeCode/managed-settings.json'));
   assert.ok(confirmBox.settingsFiles(process.env, process.cwd, { platform: 'linux' }).includes('/etc/claude-code/managed-settings.json'));
-});
-
-test('a plugin\'s hooks/hooks.json with an Elicitation hook refuses the send; links are not followed', async () => {
-  const file = path.join(USERDIR, 'plugins', 'marketplaces', 'some-market', 'helper', 'hooks', 'hooks.json');
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ hooks: { ElicitationResult: [hookEntry('')] } }));
-  try {
-    await withWire(async (sends) => {
-      const p = await shown({ message: 'plugin hook' });
-      const box = fakeBox(accept);
-      const r = await sendIn(p, box);
-      assert.equal(r.data.reason, 'box_hook');
-      assert.ok(r.display.includes('hooks.json'), r.display);
-      assert.equal(box.asked.length, 0);
-      assert.equal(sends.length, 0);
-    });
-    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-box-plugin-out-'));
-    fs.mkdirSync(path.join(outside, 'hooks'));
-    fs.writeFileSync(path.join(outside, 'hooks', 'hooks.json'), '{}');
-    fs.symlinkSync(outside, path.join(USERDIR, 'plugins', 'linked'));
-    assert.ok(!confirmBox.pluginHookFiles(USERDIR).some((f) => f.includes(`${path.sep}linked${path.sep}`)));
-    fs.rmSync(outside, { recursive: true, force: true });
-  } finally { fs.rmSync(path.join(USERDIR, 'plugins'), { recursive: true, force: true }); }
 });
 
 // ── fourth pass (review 2026-11-22): removed shortcuts stay removed ──────────
@@ -958,17 +935,10 @@ test('a skill, agent or command that mentions "elicitation" does not block sendi
   } finally { for (const f of files) fs.rmSync(f, { force: true }); }
 });
 
-test('the files scanned: the project\'s two, the user\'s settings.json, managed settings, plugins\' hooks.json; no parent folders', () => {
+test('the files scanned: exactly the project\'s two, the user\'s settings.json and managed settings; no parent folders, no plugins', () => {
   const listed = confirmBox.settingsFiles(process.env, process.cwd, { platform: 'linux' });
-  assert.deepEqual(listed.slice(0, 4), [path.join(PROJECT, '.claude', 'settings.json'), path.join(PROJECT, '.claude', 'settings.local.json'), path.join(USERDIR, 'settings.json'), '/etc/claude-code/managed-settings.json']);
+  assert.deepEqual(listed, [path.join(PROJECT, '.claude', 'settings.json'), path.join(PROJECT, '.claude', 'settings.local.json'), path.join(USERDIR, 'settings.json'), '/etc/claude-code/managed-settings.json']);
   assert.ok(!listed.some((f) => f.startsWith(path.join(path.dirname(PROJECT), '.claude'))), 'no parent folder');
-});
-
-test('plugins: node_modules is not walked', () => {
-  const file = path.join(USERDIR, 'plugins', 'p', 'node_modules', 'x', 'hooks', 'hooks.json');
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ hooks: { Elicitation: [] } }));
-  try { assert.deepEqual(confirmBox.pluginHookFiles(USERDIR), []); } finally { fs.rmSync(path.join(USERDIR, 'plugins'), { recursive: true, force: true }); }
 });
 
 test('the no-box preview line is true where turns are not recorded', async () => {
@@ -977,5 +947,69 @@ test('the no-box preview line is true where turns are not recorded', async () =>
     require('../host').setClientInfo({ name: 'cursor', version: 'test' });
     const p = await prepare({ message: 'no box, no turns' });
     assert.ok(p.display.endsWith(`\n${UNTRACKED}`), p.display);
+  });
+});
+
+test('a plugin\'s hooks/hooks.json is not read (plugin hooks are listed as not covered)', async () => {
+  const file = path.join(USERDIR, 'plugins', 'marketplaces', 'm', 'helper', 'hooks', 'hooks.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ hooks: { Elicitation: [] } }));
+  try { assert.equal(confirmBox.answeringHook(), null); } finally { fs.rmSync(path.join(USERDIR, 'plugins'), { recursive: true, force: true }); }
+});
+
+// ── fifth pass: a box nobody answers ────────────────────────────────────────
+
+test('an abandoned stateless box: after its window it is closed as a non-accept; other drafts wait for a person turn, the draft needs a new showing', async () => {
+  await withWire(async (sends) => {
+    const p = await shown({ message: 'never answered' });
+    const other = await prepare({ message: 'another draft' });
+    personTurn();
+    const first = await sendIn(p, null, stateless);
+    assert.ok(first.inputRequired);
+    const busy = await sendIn(other, null, stateless);
+    assert.equal(busy.data.reason, 'box_busy', 'within the window: one box at a time');
+    // The host never answers; the window passes.
+    drafts.transact((all) => { const d = all.find((x) => x.id === p.data.draft.id); d.box.at -= confirmBox.TIMEOUT_MS + 6000; });
+    const after = await sendIn(other, null, stateless);
+    assert.equal(after.display, NOT_ACCEPTED, 'closed as a non-accept: no box until the person types');
+    assert.equal(drafts.loadDrafts().find((x) => x.id === p.data.draft.id).box, undefined, 'the abandoned box is gone');
+    personTurn();
+    const next = await sendIn(other, null, stateless);
+    assert.ok(next.inputRequired, 'after a person turn another draft may be boxed');
+    drafts.transact((all) => { for (const d of all) delete d.box; });
+    personTurn();
+    const same = await sendIn(p, fakeBox(accept));
+    assert.equal(same.display, NOT_ACCEPTED, 'the abandoned draft itself needs showing again');
+    assert.equal(sends.length, 0);
+  });
+});
+
+test('a box left on disk by a server that exited is closed as a non-accept', async () => {
+  await withWire(async (sends) => {
+    const p = await shown({ message: 'server went away' });
+    const other = await shown({ message: 'next draft' });
+    drafts.transact((all) => { const d = all.find((x) => x.id === p.data.draft.id); d.boxAt = Date.now(); d.box = { nonce: 'n'.repeat(32), at: Date.now(), rev: p.data.draft.rev, sha: 'x', me: 'ada', turn: 'passed', project: 'whatever', pid: 2147483646 }; });
+    const r = await sendIn(other, fakeBox(accept));
+    assert.equal(r.display, NOT_ACCEPTED, 'not "another box is open": closed, and recorded as a non-accept');
+    assert.equal(drafts.loadDrafts().find((x) => x.id === p.data.draft.id).box, undefined);
+    assert.equal(sends.length, 0);
+  });
+});
+
+test('another project is not held up by this project\'s outstanding box', async () => {
+  await withWire(async (sends) => {
+    const p = await shown({ message: 'project one' });
+    const first = await sendIn(p, null, stateless);
+    assert.ok(first.inputRequired);
+    const SECOND = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-box-project2-'));
+    const before = process.env.CLAUDE_PROJECT_DIR;
+    process.env.CLAUDE_PROJECT_DIR = SECOND;
+    try {
+      const q = await prepare({ message: 'project two' });
+      tick(); turns.record(SECOND, Date.now());
+      const r = await sendIn(q, fakeBox(accept));
+      assert.equal(r.data.sent, true, 'not "another box is open"');
+      assert.deepEqual(sends.map((x) => x.body), ['project two']);
+    } finally { process.env.CLAUDE_PROJECT_DIR = before; fs.rmSync(SECOND, { recursive: true, force: true }); }
   });
 });
