@@ -20,7 +20,7 @@ test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
 let n = 0;
 
 /** Run the hook with a stub player command; returns { action, log, out }. */
-function runHook({ cmd, message = 'Send to @ben now? (18 characters)\nthe lease fixed it', input, ctx = {}, env = {} }) {
+function runHook({ cmd, message = 'Send to @ben? (18 chars, all shown)\nthe lease fixed it', input, ctx = {}, env = {} }) {
   const k = ++n;
   const ctxFile = path.join(DIR, `ctx-${k}.json`);
   const logFile = path.join(DIR, `boxes-${k}.jsonl`);
@@ -45,7 +45,7 @@ test('the player presses Accept: the hook answers accept, in the hook output sha
   assert.equal(r.code, 0);
   assert.deepEqual(r.o, { hookSpecificOutput: { hookEventName: 'Elicitation', action: 'accept', content: {} } });
   assert.equal(r.log.length, 1);
-  assert.equal(r.log[0].message, 'Send to @ben now? (18 characters)\nthe lease fixed it');
+  assert.equal(r.log[0].message, 'Send to @ben? (18 chars, all shown)\nthe lease fixed it');
   assert.equal(r.log[0].decision, 'accept');
   assert.equal(r.log[0].why, 'that is what I asked for');
 });
@@ -80,7 +80,7 @@ for (const [name, opts, error] of [
 test('the player is asked with the persona, what they typed, and the box as the host draws it; it sees no /vibe variables', async () => {
   const rec = path.join(DIR, 'rec');
   fs.mkdirSync(rec, { recursive: true });
-  const message = 'Send to @ben now? (40 characters)\nline two\nline three\nline four\nline five';
+  const message = 'Send to @ben? (40 chars, all shown)\nline two\nline three\nline four\nline five';
   const cmd = `cat > ${JSON.stringify(path.join(rec, 'stdin.txt'))}; env > ${JSON.stringify(path.join(rec, 'env.txt'))}; echo '{"press":"decline","why":"t"}'`;
   const r = await runHook({ cmd, message, env: { VIBE_HOME: '/nope/.vibe', SLASHVIBE_X: 'y' } });
   assert.equal(r.action, 'decline');
@@ -88,7 +88,7 @@ test('the player is asked with the persona, what they typed, and the box as the 
   const { HUMAN_SYSTEM } = await player();
   assert.ok(stdin.startsWith(`${HUMAN_SYSTEM}\n\n`));
   for (const s of ['You are Ada (@ada), engineer.', 'About you: terse, careful', 'tell ben the lease fixed it', 'Earlier in this same Claude Code session:\nYou typed: hi',
-    'MCP server "vibe" requests your input\nSend to @ben now? (40 characters)\nline two\nline three\n… (+2 more lines)\n[ Accept ]   [ Decline ]', 'Do you, Ada, press Accept or Decline?']) {
+    'MCP server "vibe" requests your input\nSend to @ben? (40 chars, all shown)\nline two\nline three\n… (+2 more lines)\n[ Accept ]   [ Decline ]', 'Do you, Ada, press Accept or Decline?']) {
     assert.ok(stdin.includes(s), s);
   }
   assert.ok(!stdin.includes('line four'), 'only what the host shows');
@@ -153,8 +153,8 @@ test('a send that went out after an accepted box is not unattended; one without 
   call('vibe_prepare', { handle: 'ben', message: 'three' }, preview('b3'));
   call('vibe_send', { id: 'b3', rev: 'r1' }, 'Sent to **@ben**\n_receipt: msg_3_');
   // The runner folds the turn's boxes after its events.
-  at({ kind: 'box', text: 'Send to @ben now? (3 characters)\none', decision: 'decline', simulator_only: { why: 'no' } });
-  at({ kind: 'box', text: 'Send to @ben now? (3 characters)\ntwo', decision: 'accept', simulator_only: { why: 'yes' } });
+  at({ kind: 'box', text: 'Send to @ben? (3 chars, all shown)\n> one', decision: 'decline', simulator_only: { why: 'no' } });
+  at({ kind: 'box', text: 'Send to @ben? (3 chars, all shown)\n> two', decision: 'accept', simulator_only: { why: 'yes' } });
   const s = analyse({ world: { id: 'w', archetype: 'a', relationship: 'established', open_line: false, timeline: [{}] }, transcript: ev, turnsLog: [], wire: [], handles: ['ada', 'ben'], started: Date.now() });
   assert.equal(s.boxes_shown, 2);
   assert.equal(s.boxes_accepted, 1);
@@ -194,4 +194,11 @@ test('on the box path, sends on the wire with no box shown is FAILED, loudly', a
 test('box-hook.cjs reads the documented hook input field `message` first', async () => {
   const { boxMessage } = require(HOOK);
   assert.equal(boxMessage({ message: 'documented', elicitation: { message: 'other' }, params: { message: 'third' } }), 'documented');
+});
+
+test('the lab reads the recipient from every first line the box uses', async () => {
+  const { boxRecipient } = await lab();
+  for (const [line, who] of [['Send to @ben? (3 chars, all shown)', 'ben'], ['Reply to @ben_x? (3 chars, start only)', 'ben_x'], ['Resend to @a-b? (9 chars, all)', 'a-b'], ['Keep for @newbie-dev? (3 chars, all shown)', 'newbie-dev'], ['> Send to @mallory? fake line', null]]) {
+    assert.equal(boxRecipient(line), who, line);
+  }
 });

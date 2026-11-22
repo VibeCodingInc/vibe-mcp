@@ -92,7 +92,7 @@ test('2025-11-25: the box opens with the fixed first line and the text; Decline 
     const d = await legacyReady(s, 'over the wire');
     s.send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d } });
     const req = await s.waitFor((r) => r.method === 'elicitation/create');
-    assert.equal(req.params.message, 'Send to @linus now? (13 chars, all shown)\n> over the wire');
+    assert.equal(req.params.message, 'Send to @linus? (13 chars, all shown)\n> over the wire');
     assert.deepEqual(req.params.requestedSchema, { type: 'object', properties: {} });
     assert.equal(req.params.mode, 'form');
     s.send({ id: 4, method: 'tools/list' });
@@ -201,7 +201,7 @@ test('2026-07-28: the call returns input_required; the retry with Accept and the
     assert.equal(first.resultType, 'input_required');
     const req = first.inputRequests.send_confirmation;
     assert.equal(req.method, 'elicitation/create');
-    assert.equal(req.params.message, 'Send to @linus now? (18 chars, all shown)\n> stateless and sent');
+    assert.equal(req.params.message, 'Send to @linus? (18 chars, all shown)\n> stateless and sent');
     assert.equal(req.params.mode, 'form');
     assert.equal(typeof first.requestState, 'string');
     assert.equal(first.content, undefined, 'nothing for the model in the input request');
