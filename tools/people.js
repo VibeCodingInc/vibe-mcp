@@ -32,7 +32,9 @@ const definition = {
 
 function age(ts, now) {
   if (!ts) return '';
-  const d = now - ts;
+  // Display only: a lab run may make its days real (labclock.js, loopback only).
+  const labclock = require('../labclock');
+  const d = labclock.now(now) - labclock.at(ts);
   if (d < 60 * 60 * 1000) return 'this hour';
   if (d < DAY) return 'today';
   return `${Math.floor(d / DAY)}d ago`;

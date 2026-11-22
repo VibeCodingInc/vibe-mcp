@@ -983,8 +983,10 @@ async function verifyAuthToken(token) {
 function formatTimeAgo(timestamp) {
   if (timestamp === undefined || timestamp === null || isNaN(timestamp)) return 'unknown';
 
-  const now = Date.now();
-  const seconds = Math.floor((now - timestamp) / 1000);
+  // Display only: a lab run may make its days real (labclock.js, loopback only).
+  const labclock = require('../labclock');
+  const now = labclock.now();
+  const seconds = Math.floor((now - labclock.at(typeof timestamp === 'string' ? Number(timestamp) : timestamp)) / 1000);
 
   if (seconds < 0 || isNaN(seconds)) return 'unknown';
   if (seconds < 60) return 'just now';

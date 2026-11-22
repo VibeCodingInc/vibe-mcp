@@ -391,7 +391,9 @@ function wroteLast(threads, me, { now = Date.now(), isQa = () => false, minAgeMs
       now - t.lastTimestamp >= minAgeMs && now - t.lastTimestamp <= maxAgeMs)
     .sort((a, b) => b.lastTimestamp - a.lastTimestamp)
     .slice(0, limit)
-    .map((t) => ({ handle: t.handle, lastMessageId: t.lastMessageId || null, days: Math.floor((now - t.lastTimestamp) / DAY) }));
+    // `days` is display only, so it alone reads the lab's clock (labclock.js);
+    // which conversations qualify stays on the real clock.
+    .map((t) => ({ handle: t.handle, lastMessageId: t.lastMessageId || null, days: Math.floor((require('./labclock').now(now) - require('./labclock').at(t.lastTimestamp)) / DAY) }));
 }
 
 /**

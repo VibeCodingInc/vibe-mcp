@@ -277,6 +277,9 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 
 /** "earlier today", "yesterday", a weekday within the week, else "Nov 12". Local time. Pure. */
 function sinceWhen(at, now = Date.now()) {
+  // Display only: a lab run may make its days real (labclock.js, loopback only).
+  const labclock = require('./labclock');
+  at = labclock.at(at); now = labclock.now(now);
   const day = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
   const days = Math.round((day(now) - day(at)) / DAY_MS);
   if (days <= 0) return 'earlier today';
