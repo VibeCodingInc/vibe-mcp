@@ -361,6 +361,97 @@ function retireDeadCredential(vibeDir, handle) {
   }
 }
 
+// ── the installer's last lines (notice.js setupReceipt) ─────────────────────
+
+const RECEIPT_HANDLE = /^[a-z0-9][a-z0-9_-]{1,38}$/;
+const RECEIPT_READ_MS = 3000;
+
+/**
+ * Notes waiting for the person who just signed in: ONE read of their
+ * conversation list, bounded, no retry. Returns { total, named, others }, or
+ * null when the read failed, timed out, or answered in a shape it does not
+ * know (then nothing is said about notes). Only the other person's words
+ * count, unread and last in their conversation, as the session-start hook
+ * counts them; never an agent, a muted person or a door card. Handles are
+ * named only for people this machine knows (written to, an open line, the
+ * inviter marked by --from): the same rule as every other surface, so a
+ * stranger's handle is counted ("1 other"), never printed. No message text
+ * is read into anything that is printed.
+ */
+async function readWaiting({ apiUrl, token, handle, fetchImpl = fetch, timeoutMs = RECEIPT_READ_MS, env = process.env } = {}) {
+  const me = String(handle || '').toLowerCase();
+  if (!token || !RECEIPT_HANDLE.test(me)) return null;
+  const reach = require('./reach');
+  const line = require('./line');
+  const door = require('./door');
+  if (reach.isQuiet(env)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let body;
+  try {
+    const base = String(apiUrl || '').replace(/\/+$/, '');
+    const response = await fetchImpl(`${base}/api/messages?user=${encodeURIComponent(me)}`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    });
+    if (!response || !response.ok) return null;
+    body = await response.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!body || body.success === false || !Array.isArray(body.threads)) return null;
+  let total = 0;
+  const named = [];
+  let others = 0;
+  for (const t of body.threads) {
+    const last = t && t.last_message;
+    if (!last || !(Number(t.unread) > 0)) continue;
+    const from = String(last.from || '').toLowerCase();
+    if (!from || from === me) continue;
+    if ((last.actor && last.actor.kind === 'agent') || reach.isMuted(from, env)) continue;
+    if (typeof last.body === 'string' && door.parseCard(last.body)) continue;
+    total += Math.max(1, Math.floor(Number(t.unread)) || 1);
+    let known = false;
+    try { known = RECEIPT_HANDLE.test(from) && (reach.isKnown(from, env) || line.isOpen(from, env)); } catch { known = false; }
+    if (known && !named.includes(from)) named.push(from);
+    else if (!known) others += 1;
+  }
+  return { total, named, others };
+}
+
+/** "1 note waiting from @ben." and the like; null when nothing was found or nothing was read. Pure. */
+function waitingLine(w) {
+  if (!w || !(w.total > 0)) return null;
+  const notes = `${w.total} ${w.total === 1 ? 'note' : 'notes'} waiting`;
+  const named = (Array.isArray(w.named) ? w.named : []).filter((h) => RECEIPT_HANDLE.test(h));
+  const shown = named.slice(0, 2).map((h) => `@${h}`);
+  const rest = named.length - shown.length + (Number.isInteger(w.others) && w.others > 0 ? w.others : 0);
+  if (shown.length === 0) {
+    return rest > 1 ? `${notes}, from ${rest} people you have not written to.` : `${notes}, from someone you have not written to.`;
+  }
+  if (rest === 0 && shown.length === 1) return `${notes} from ${shown[0]}.`;
+  if (rest === 0) return `${notes}, from ${shown[0]} and ${shown[1]}.`;
+  return `${notes}, from ${shown.join(', ')} and ${rest} ${rest === 1 ? 'other' : 'others'}.`;
+}
+
+const FRESH_SESSION = 'Open a fresh Claude Code session to load /vibe. Sessions that are already open will not see it.';
+
+/**
+ * The installer's last lines, in order: notes waiting (only when the read
+ * found some), the fresh-session line, then the lines about who invited them
+ * (invite.accept: only what it confirmed). Pure: [{ text, strong }].
+ */
+function finalLines({ waiting = null, inviteLines = [] } = {}) {
+  const out = [];
+  const w = waitingLine(waiting);
+  if (w) out.push({ text: w, strong: true });
+  out.push({ text: FRESH_SESSION, strong: true });
+  for (const l of Array.isArray(inviteLines) ? inviteLines : []) if (typeof l === 'string' && l) out.push({ text: l, strong: false });
+  return out;
+}
+
 /**
  * Main setup function
  */
@@ -454,14 +545,24 @@ async function setup() {
     printStep(4, 'Opening browser for GitHub auth...', 'done');
     console.log(`${colors.dim}     → Authenticated as @${authResult.handle}${colors.reset}`);
 
+    const receipt = require('./notice').on('setupReceipt');
     console.log('');
-    console.log(`${colors.green}  ✓ Setup complete!${colors.reset}`);
+    // What was observed: Claude Code's config has /vibe, and this sign-in
+    // returned. No exclamation marks, no welcome (docs/VOICE.md).
+    console.log(receipt
+      ? `${colors.green}  ✓ /vibe is set up for Claude Code, signed in as @${authResult.handle}.${colors.reset}`
+      : `${colors.green}  ✓ Setup complete!${colors.reset}`);
     console.log('');
 
-    console.log(`${colors.bold}  Quick start:${colors.reset}`);
-    console.log(`${colors.dim}  1. Restart your Claude Code session${colors.reset}`);
-    console.log(`${colors.dim}  2. Say: "what's waiting on /vibe" to see who has written to you${colors.reset}`);
-    console.log(`${colors.dim}     or: "message @their-handle: ..." to write to someone${colors.reset}`);
+    if (receipt) {
+      console.log(`${colors.dim}  In a new session, say "what's waiting on /vibe" to see who has written to you,${colors.reset}`);
+      console.log(`${colors.dim}  or "message @their-handle: ..." to write to someone.${colors.reset}`);
+    } else {
+      console.log(`${colors.bold}  Quick start:${colors.reset}`);
+      console.log(`${colors.dim}  1. Restart your Claude Code session${colors.reset}`);
+      console.log(`${colors.dim}  2. Say: "what's waiting on /vibe" to see who has written to you${colors.reset}`);
+      console.log(`${colors.dim}     or: "message @their-handle: ..." to write to someone${colors.reset}`);
+    }
     // Receiving is the product: a reply has to reach you while you work, not
     // when you remember to ask. So the hooks are installed here, by default,
     // for Claude Code — stated plainly, with the one command that removes them.
@@ -479,21 +580,28 @@ async function setup() {
         hooksInstalled = false;
       }
     }
+    const step3 = receipt ? '' : '3. ';
     console.log(hooksInstalled
-      ? `${colors.dim}  3. When someone writes back, it reaches you inside Claude Code while you work (hooks added to ~/.claude/settings.json; remove with "npx slashvibe-mcp hook uninstall")${colors.reset}`
-      : `${colors.dim}  3. Claude Code: run "npx slashvibe-mcp hook install" — replies then reach you while you work${colors.reset}`);
+      ? `${colors.dim}  ${step3}When someone writes back, it reaches you inside Claude Code while you work (hooks added to ~/.claude/settings.json; remove with "npx slashvibe-mcp hook uninstall")${colors.reset}`
+      : `${colors.dim}  ${step3}Claude Code: run "npx slashvibe-mcp hook install" — replies then reach you while you work${colors.reset}`);
     console.log('');
-    console.log(`${colors.cyan}  Welcome to /vibe, @${authResult.handle}.${colors.reset}`);
-    console.log('');
+    if (!receipt) {
+      console.log(`${colors.cyan}  Welcome to /vibe, @${authResult.handle}.${colors.reset}`);
+      console.log('');
+    }
 
-    // The inviter is known from the first minute; and the last thing a person
-    // sees is the one line that brings the person they build with.
+    // The inviter is known from the first minute. Marked before the inbox is
+    // read below, so a note from them is named there.
     const invite = require('./invite');
     const from = invite.fromArg();
+    let inviteLines = [];
     if (from) {
       const got = await invite.accept(from, authResult.handle);
-      for (const l of got.lines) console.log(`${colors.dim}  ${l}${colors.reset}`);
-      if (got.lines.length) console.log('');
+      inviteLines = got.lines;
+      if (!receipt) {
+        for (const l of inviteLines) console.log(`${colors.dim}  ${l}${colors.reset}`);
+        if (inviteLines.length) console.log('');
+      }
     }
     // The line carries a code minted on this account, so whoever installs from
     // it is someone this person knows once they sign in (invite.codeFor).
@@ -503,6 +611,20 @@ async function setup() {
       console.log(`${colors.bold}  /vibe takes two. Send this to the person you build with:${colors.reset}`);
       console.log(`${colors.cyan}  ${bring.command}${colors.reset}`);
       console.log(`${colors.dim}  or the page: ${bring.link}${colors.reset}`);
+      console.log('');
+    }
+
+    // The last lines (notice.js setupReceipt): notes already waiting, if one
+    // bounded read just now found any; that /vibe loads only in a session
+    // opened from here on; and who invited them. A person usually runs this
+    // beside a Claude Code session that is already open, goes back to it,
+    // finds no /vibe there and concludes nothing happened.
+    if (receipt) {
+      let waiting = null;
+      try { waiting = await readWaiting({ apiUrl: API_BASE, token: authResult.token, handle: authResult.handle }); } catch { waiting = null; }
+      for (const l of finalLines({ waiting, inviteLines })) {
+        console.log(`${l.strong ? colors.bold : colors.dim}  ${l.text}${colors.reset}`);
+      }
       console.log('');
     }
 
@@ -593,4 +715,8 @@ module.exports = {
   installHostCommands,
   SHIPPED_COMMAND_SHA256: require('./host-command').SHIPPED_COMMAND_SHA256,
   openBrowser,
+  readWaiting,
+  waitingLine,
+  finalLines,
+  FRESH_SESSION,
 };
