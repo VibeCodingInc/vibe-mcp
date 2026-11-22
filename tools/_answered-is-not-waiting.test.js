@@ -72,7 +72,7 @@ for (const [how, answer] of Object.entries(ANSWERS)) {
       const q = await sendAs(stub, 'mira', 'oren', 'does scheduled_at come back as UTC with a Z?', { origin: 'context_move' });
       const vh = homeFor('oren', ['mira']);
       const before = await sitDown(vh, stub.url);
-      assert.match(waiting(before.out), /^\/vibe · 1 message waiting · from @mira: “does scheduled_at come back as UTC with a Z\?”/, 'unanswered: waiting');
+      assert.match(waiting(before.out), /^\/vibe · 1 message waiting · from @mira: does scheduled_at come back as UTC with a Z\?/, 'unanswered: waiting');
 
       await answer(stub, q);
       const after = await sitDown(vh, stub.url);
@@ -95,7 +95,7 @@ test('they write again after the answer: waiting again, with their new words', a
 
     await sendAs(stub, 'mira', 'oren', 'and can the board get more than 50 per page?');
     const again = await sitDown(vh, stub.url);
-    assert.equal(waiting(again.out), '/vibe · 1 message waiting · from @mira: “and can the board get more than 50 per page?”');
+    assert.equal(waiting(again.out), '/vibe · 1 message waiting · from @mira: and can the board get more than 50 per page?');
     assert.ok(!again.raw.includes('is site_tz an IANA name'), 'the answered question is not brought back');
   } finally { await stub.close(); }
 });
@@ -107,6 +107,6 @@ test('an answered conversation sits beside a waiting one: only the waiting one i
     await sendAs(stub, 'oren', 'mira', 'first answer');
     await sendAs(stub, 'ada', 'oren', 'are you on the release today?');
     const { out } = await sitDown(homeFor('oren', ['mira', 'ada']), stub.url);
-    assert.equal(waiting(out), '/vibe · 1 message waiting · from @ada: “are you on the release today?”');
+    assert.equal(waiting(out), '/vibe · 1 message waiting · from @ada: are you on the release today?');
   } finally { await stub.close(); }
 });

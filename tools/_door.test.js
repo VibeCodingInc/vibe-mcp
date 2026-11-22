@@ -215,7 +215,7 @@ test('visiting: opens only what a person you know left, sends nothing, marks not
   assert.match(r.display, /Visiting @sam: "Retry Lab: drag the slider"/);
   assert.match(r.display, /opened in your browser/);
   assert.match(r.display, /Nothing was sent, and @sam was not told/);
-  assert.match(r.display, /@sam is here now, working on: "retry queue for webhooks"/);
+  assert.match(r.display, /@sam is here now, working on: retry queue for webhooks/);
   assert.deepEqual(r.data, { visited: true, url: URL_OK, opened: true });
 
   // A stranger's door is shown, not opened.

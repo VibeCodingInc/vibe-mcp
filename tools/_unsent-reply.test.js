@@ -230,7 +230,7 @@ test('session start: a reminder that throws while rendering drops only itself', 
     said = ssh.hookOutput([{ id: 'msg_1', from: 'mira', text: 'question', seen: false, at: null }], [], [], 0, null, 0, [], [{ id: 'w1a2b3c4d', to: 'mira', at: Date.now() - 3 * HOUR }]);
   } finally { unsent.render = orig; fs.writeSync = origWrite; }
   const out = JSON.parse(written);
-  assert.match(out.systemMessage, /Note from @mira: “question”/);
+  assert.match(out.systemMessage, /Note from @mira: question/);
   assert.ok(!/drafted/.test(written));
   assert.deepEqual(said, [], 'nothing recorded as told');
 });

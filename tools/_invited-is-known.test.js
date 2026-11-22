@@ -89,7 +89,7 @@ test('the round trip: Ada invites, Nell signs in with the code and writes first,
 
   const [row] = spooled().filter((r) => r.from === 'nell');
   assert.ok(row, 'it arrived (spooled for Ada\'s next prompt), not held');
-  assert.equal(row.line, '/vibe · @nell (you invited them) wrote you: "made it in. which backoff did you land on for the retry queue?"');
+  assert.equal(row.line, '/vibe · @nell (you invited them) wrote you: made it in. which backoff did you land on for the retry queue?');
   assert.match(row.context, /someone they invited/);
   assert.equal(reach.isKnown('nell'), true, 'remembered as known, so `mute @nell` undoes it');
 
@@ -104,7 +104,7 @@ test('the round trip: Ada invites, Nell signs in with the code and writes first,
   stub.post('nell', 'ada', 'also: dead-letter after how many tries?');
   await look('ada');
   const second = spooled().find((r) => r.from === 'nell' && /dead-letter/.test(r.text));
-  assert.equal(second.line, '/vibe · @nell wrote you: "also: dead-letter after how many tries?"');
+  assert.equal(second.line, '/vibe · @nell wrote you: also: dead-letter after how many tries?');
   assert.ok(!stub.effects.some((e) => ['SEND', 'READ_CURSOR'].includes(e.effect)), 'looking sent nothing and marked nothing read');
 });
 

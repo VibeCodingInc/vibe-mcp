@@ -49,6 +49,9 @@ const NOTICE = {
   // request into the thank-you, gave an order, invented a number, or reported
   // no change at all; the best were receipts of what changed.
   landedReceipt: true,      // 21. a note back is a one-sentence receipt of what changed (not-live said, no question, no request); vibe_prepare refuses a question mark in one
+  // The people writing to each other build software: a note saying "pattern is
+  // now ^[0-9]{5,8}$" reached the other side as ^❲0-9❳{5,8}$ (2026-11-22).
+  codeFidelity: true,       // 22. a message body reaches the agent in a nonce fence and the person at the end of its line, byte-for-byte for code characters (incoming.js fence, inertLine)
 };
 
 /**

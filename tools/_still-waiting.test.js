@@ -58,10 +58,10 @@ test('seen at one session start, unanswered: the next session lists it as still 
     m.created_at = new Date(Date.now() - 26 * 3600e3).toISOString();
     const vh = homeFor('oren', ['mira']);
     const first = await sitDown(vh, stub.url);
-    assert.equal(waiting(first.out), '/vibe · 1 message waiting · from @mira: “does scheduled_at come back as UTC?”', 'first time: plain waiting');
+    assert.equal(waiting(first.out), '/vibe · 1 message waiting · from @mira: does scheduled_at come back as UTC?', 'first time: plain waiting');
     const next = await sitDown(vh, stub.url);
     const when = sinceWhen(Date.parse(m.created_at));
-    assert.equal(waiting(next.out), `/vibe · 1 message still waiting since ${when} · from @mira: “does scheduled_at come back as UTC?”`);
+    assert.equal(waiting(next.out), `/vibe · 1 message still waiting since ${when} · from @mira: does scheduled_at come back as UTC?`);
     assert.match(next.out.hookSpecificOutput.additionalContext, /@mira's message was already shown to the person before this session and is still unanswered \(written [^)]+\)\. Present it as still waiting, not as new\./);
     assert.ok(!stub.effects.some((e) => e.effect === 'READ_CURSOR'), 'nothing was marked read');
   } finally { await stub.close(); }
@@ -81,9 +81,9 @@ test('announced mid-session by the arrival hook, unanswered: the next session sa
       input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 's1' }),
       env: { ...process.env, VIBE_ARRIVALS_DIR: path.join(vh, 'arrivals'), VIBE_TURNS_DIR: path.join(vh, 'turns') }, encoding: 'utf8',
     });
-    assert.match(JSON.parse(hook.stdout).systemMessage, /^\/vibe · Note from @mira \((just now|\d+m ago)\), waiting at your pause: "second question: page size\?"$/);
+    assert.match(JSON.parse(hook.stdout).systemMessage, /^\/vibe · Note from @mira \((just now|\d+m ago)\), waiting at your pause: second question: page size\?$/);
     const next = await sitDown(vh, stub.url);
-    assert.equal(waiting(next.out), '/vibe · 1 message still waiting since earlier today · from @mira: “second question: page size?”');
+    assert.equal(waiting(next.out), '/vibe · 1 message still waiting since earlier today · from @mira: second question: page size?');
   } finally { await stub.close(); }
 });
 

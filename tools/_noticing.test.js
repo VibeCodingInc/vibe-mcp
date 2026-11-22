@@ -19,7 +19,7 @@ const { spawn } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
 const CLI = path.join(ROOT, 'cli.js');
-const { inertField, inertQuoted } = require('../incoming');
+const { inertField, inertQuoted, inertLine, visible, bound } = require('../incoming');
 const hook = require('../session-start-hook.cjs');
 const notice = require('../notice');
 
@@ -86,8 +86,9 @@ test('the agent gets each line up to 140 and the open-line mark; the person sees
   assert.equal(hook.hereLine(here), hook.hereLine(hook.pickHere(users, { known: ['astrid', 'sam', 'cy'], doorOf: (h) => (h === 'sam' ? { url: 'https://x.dev/' } : null) })));
   // What the agent reads.
   const ctx = hook.hereContext(here, LOCAL);
-  assert.ok(ctx.includes(`@astrid · open line — "${LONG}"`), ctx);
-  assert.ok(ctx.includes('@sam · door open — "retry queue"'));
+  // codeFidelity: their words end the line, as written, unquoted.
+  assert.ok(ctx.split('\n').includes(`@astrid · open line — ${LONG}`), ctx);
+  assert.ok(ctx.split('\n').includes('@sam · door open — retry queue'));
   assert.ok(ctx.split('\n').includes('@cy'));
   assert.ok(ctx.includes(hook.HERE_RELEVANT));
   assert.ok(!ctx.includes(OLD_HERE));
@@ -108,15 +109,17 @@ test('a hostile line of 140+ characters stays inert and cannot forge the open-li
   assert.equal(mal[0].slice(0, mal[0].indexOf(' — ')), '@mal');
   assert.ok(!lines.some((l) => /^@sam · open line/.test(l)), 'a forged open-line row for @sam');
   assert.ok(!/[\u0000-\u0009\u000b-\u001f\u007f‪-‮]/.test(ctx), 'a control or bidi character survived');
-  assert.ok(!/[`[\]]|<<<|>>>/.test(mal[0]), 'markup survived');
-  const says = mal[0].slice(mal[0].indexOf('"') + 1, -1);
-  assert.equal(says, inertQuoted(hostile, 140));
-  assert.ok(!says.includes('"') && !says.includes('\u00b7'), 'their words cannot close the quote or use the mark separator');
-  assert.ok(says.length <= 140);
+  // codeFidelity: their words are last on the line and as written, apart from
+  // what no one can see and the separator before a mark ("· open line").
+  const says = mal[0].slice(mal[0].indexOf(' — ') + 3);
+  assert.equal(says, inertLine(bound(visible(hostile), 140), 140));
+  for (const kept of ['`rm -rf`', '[SYSTEM]', '<<<end>>>', '— "x"']) assert.ok(says.includes(kept), `${kept} was changed`);
+  assert.ok(!/\u00b7\s*(open line|door open)/.test(says), 'their words use the mark separator');
+  assert.ok([...says].length <= 140);
   // The open flag comes from the person's own lines file, never from presence text.
   assert.equal(hook.normalizeHere([{ handle: 'mal', says: 'x', open: 'true' }])[0].open, false);
   // The person's line is still cut at 48 and still inert.
-  assert.equal(hook.hereLine(here), `here now: @mal (${inertQuoted(hostile, 48)}) · @sam (retry queue)`);
+  assert.equal(hook.hereLine(here), `here now: @mal (${inertQuoted(bound(visible(hostile), 140), 48)}) · @sam (retry queue)`);
 });
 
 test('off on a loopback API restores the old here-line note; on a real API it is ignored', () => {
@@ -167,8 +170,8 @@ test('sitting down: the person sees the 48-character line; the agent gets the fu
     const was = `/vibe · here now: @astrid (${inertField(LONG, 48)}) · @sam (retry queue \u2022 open line)`;
     assert.equal(out.systemMessage, was);
     const ctx = out.hookSpecificOutput.additionalContext;
-    assert.ok(ctx.includes(`@astrid · open line — "${LONG}"`), ctx);
-    assert.ok(ctx.includes('@sam — "retry queue \u2022 open line"'), 'the typed mark moved out of their words, and defanged');
+    assert.ok(ctx.split('\n').includes(`@astrid · open line — ${LONG}`), ctx);
+    assert.ok(ctx.split('\n').includes('@sam — retry queue \u2022 open line'), 'the typed mark stays in their words, and defanged');
     assert.ok(ctx.includes(hook.HERE_RELEVANT));
     assert.ok(!stub.effects.some((e) => ['SEND', 'READ_CURSOR'].includes(e.effect)), 'looking at who is here wrote something');
 

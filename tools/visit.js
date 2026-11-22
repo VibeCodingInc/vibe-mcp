@@ -21,7 +21,7 @@ const line = require('../line');
 const reach = require('../reach');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
 const { canonicalHandle } = require('../protocol/handle');
-const { inertQuoted } = require('../incoming');
+const { inertQuoted, inertLine, fidelity } = require('../incoming');
 
 const definition = {
   name: 'vibe_visit',
@@ -111,7 +111,8 @@ async function handler(args, { open = openBrowser } = {}) {
     `\u{1F6AA} Visiting @${them}: ${name}`,
     opened ? `   ${door.shortUrl(found.url)} · opened in your browser` : `   No browser could be opened from here. Open this to step in:\n   ${found.url}`,
   ];
-  if (says) lines.push(`   @${them} is here now, working on: "${inertQuoted(says, 100)}"`);
+  // Their words end the line (codeFidelity: as written; before, quoted and defanged).
+  if (says) lines.push(`   @${them} is here now, working on: ${fidelity() ? inertLine(says, 100) : `"${inertQuoted(says, 100)}"`}`);
   lines.push(
     '',
     `You are a visitor. Nothing was sent, and @${them} was not told.`,
