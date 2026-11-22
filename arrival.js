@@ -38,6 +38,7 @@ const line = require('./line');
 const door = require('./door');
 const rapport = require('./rapport');
 const whoNotes = require('./who');
+const notice = require('./notice');
 
 const SPOOL_TTL_MS = 24 * 60 * 60 * 1000;   // an arrival older than a day is just mail
 const CLAIM_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -156,7 +157,12 @@ function render(item) {
       '',
       'What to do, in this order:',
       '1. Tell them now, in one line: who wrote, and quote what they said.',
-      '2. If the work in this session gives you something true to say back, write a short reply from it '
+      (notice.on('replyFromProject')
+        // Not only this session: the answer often sits in the project's own
+        // files, unread so far (lab 2026-11-21). Never for an open line, whose
+        // unattended answer stays bound to this session's work (above).
+        ? "2. Look in this session's work and in the project's files for something true to say back. If there is, write a short reply from it "
+        : '2. If the work in this session gives you something true to say back, write a short reply from it ')
         + '(1-3 sentences, in their voice; no session summary, file paths, branch names or secrets) and open it with '
         + `vibe_prepare {handle: "${from}", message: "..."${id ? `, reply_to: "${item.id}"` : ''}}. That shows a preview only; nothing is sent until they choose Send. `
         + 'When you show the draft, show their message above it, so the person sees what they are answering. '

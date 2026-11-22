@@ -134,8 +134,8 @@ test('the time is worded the same for their messages and the person\'s', () => {
 test('the guidance says a thread\'s "you" is the person, in the server instructions and the /vibe command', () => {
   const sentence = 'A message marked you in a thread';
   const theirs = 'It is theirs. Never describe it as unexplained, or as not sent by them, because this session did not send it.';
-  const src = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
-  const instructions = src.slice(src.indexOf('const SERVER_INSTRUCTIONS'), src.indexOf('].filter(Boolean)', src.indexOf('const SERVER_INSTRUCTIONS')));
+  // Loading index.js starts nothing (see its last lines).
+  const instructions = require('../index.js').SERVER_INSTRUCTIONS;
   assert.ok(instructions.includes(sentence) && instructions.includes(theirs), 'SERVER_INSTRUCTIONS');
   const cmd = fs.readFileSync(path.join(__dirname, '..', 'hosts', 'vibe-command.md'), 'utf8');
   assert.ok(cmd.includes(sentence) && cmd.includes(theirs), 'hosts/vibe-command.md');
