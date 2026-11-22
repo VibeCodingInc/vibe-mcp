@@ -721,6 +721,27 @@ const snippet = (body) => norm(body).slice(0, 40);
 const aboutLines = (text, others) => { const hs = [].concat(others); return String(text).split('\n').filter((l) => hs.some((o) => l.includes(`@${o}`))); };
 const isPresence = (l) => /\bhere now:/.test(l);
 
+/**
+ * Which arrival header forms (notice.js arrivalHeader, docs/VOICE.md) a shown
+ * line used: 'pause' = "Note from @x (…), waiting at your pause:" from the
+ * arrival hook; 'start' = "Note from @x (…):" at session start. Shown in the
+ * transcript only.
+ */
+export function arrivalHeaders(text) {
+  const out = [];
+  for (const l of String(text || '').split('\n')) {
+    if (/^\/vibe · Note from @[A-Za-z0-9_.-]+(?: \([^)]*\))?, waiting at your pause: /.test(l)) out.push('pause');
+    else if (/^\/vibe · Note from @[A-Za-z0-9_.-]+(?: \([^)]*\))?(?:, still waiting)?: /.test(l)) out.push('start');
+  }
+  return out;
+}
+
+/** Notes back ("landed", tools/drafts.js) per world: drafts opened with kind "landed", and those that went out. */
+export function landedCounts(drafts) {
+  const all = [...drafts.values()].filter((d) => d.landed);
+  return { landed_offered: all.length, landed_sent: all.filter((d) => d.sent_at !== undefined).length };
+}
+
 function analyse({ world, transcript, turnsLog, wire, handles, started, humanPlayer = null, boxPath = null, noBoxVia = null }) {
   const ev = transcript;
   const resultFor = new Map();   // tool_use_id -> returned event
@@ -764,7 +785,7 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
       p.prepare_calls++;
       const d = r && draftOf(r.text);
       if (d) {
-        const cur = drafts.get(d.id) || { id: d.id, who: e.who, to: String(e.input?.handle || '').replace(/^@/, '') || null, revs: [], prepares: [], session_id: e.session_id };
+        const cur = drafts.get(d.id) || { id: d.id, who: e.who, to: String(e.input?.handle || '').replace(/^@/, '') || null, revs: [], prepares: [], session_id: e.session_id, landed: !e.input?.id && e.input?.kind === 'landed' };
         if (!cur.revs.includes(d.rev)) cur.revs.push(d.rev);
         cur.prepares.push(e.i);
         drafts.set(d.id, cur);
@@ -908,6 +929,7 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
     intentions_lapsed: intentions.filter((x) => x.followed === null).length,
     intentions: { list: intentions },
     drafts_offered_unrequested: unrequested,
+    ...landedCounts(drafts),
     wall_clock_seconds: Math.round((Date.now() - started) / 1000),
   };
 }
@@ -963,7 +985,7 @@ function toMarkdown(world, transcript, wire, summary) {
       if (e.kind === 'prompt') L.push(`**@${e.who} typed (from the timeline):**`, '', fence(e.text), '');
       else if (e.kind === 'human_reply') L.push(`**@${e.who} typed (human simulator):**`, '', fence(e.text), '', `_simulator only, never shown: ${e.simulator_only?.why || ''}_`, '');
       else if (e.kind === 'human_null') L.push(`**@${e.who} typed nothing.** _simulator only: ${e.simulator_only?.why ?? `unparsed output: ${String(e.simulator_only?.unparsed_raw || '').slice(0, 300)}`}_`, '');
-      else if (e.kind === 'shown') L.push(`> shown to @${e.who}: ${e.text.replace(/\n/g, '\n> ')}`, '');
+      else if (e.kind === 'shown') { const hv = arrivalHeaders(e.text); L.push(`> shown to @${e.who}${hv.length ? ` [arrival header: ${hv.join(', ')}]` : ''}: ${e.text.replace(/\n/g, '\n> ')}`, ''); }
       else if (e.kind === 'text') L.push(`**Claude:** ${e.text}`, '');
       else if (e.kind === 'tool') L.push(`- tool \`${e.name.replace('mcp__vibe__', '')}\` ${JSON.stringify(e.input).slice(0, 400)}`);
       else if (e.kind === 'returned') L.push('', `/vibe \`${e.name.replace('mcp__vibe__', '')}\` printed${e.is_error ? ' (ERROR)' : ''}:`, '', fence(e.text), '');
@@ -1012,7 +1034,7 @@ function writePopulation(out, results, opts = {}) {
     // A world that errored, or whose summary says it failed (sends with no box on the box path).
     failed: [...results.filter((r) => r.error).map((r) => ({ file: r.file, id: r.id || null, error: r.error })),
       ...results.filter((r) => !r.error && r.summary && r.summary.failed).map((r) => ({ file: r.file, id: r.id || r.summary.id || null, error: r.summary.failed }))],
-    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'sends_after_an_accepted_box', 'boxes_shown', 'boxes_accepted', 'boxes_declined', 'refused_sends', 'sends_unconfirmed', 'send_results_unrecognised', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'intentions_stated', 'intentions_followed', 'intentions_lapsed', 'drafts_offered_unrequested', 'wall_clock_seconds'].map((k) => [k, total(k)])),
+    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'sends_after_an_accepted_box', 'boxes_shown', 'boxes_accepted', 'boxes_declined', 'refused_sends', 'sends_unconfirmed', 'send_results_unrecognised', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'intentions_stated', 'intentions_followed', 'intentions_lapsed', 'drafts_offered_unrequested', 'landed_offered', 'landed_sent', 'wall_clock_seconds'].map((k) => [k, total(k)])),
     drafts_offered_unrequested_outcomes: Object.fromEntries(['sent', 'edited_then_sent', 'declined'].map((o) => [o, done.reduce((a, r) => a + (r.summary.drafts_offered_unrequested?.[o] || 0), 0)])),
     per_world: done.map((r) => r.summary),
   };
