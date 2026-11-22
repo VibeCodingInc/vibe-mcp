@@ -155,8 +155,11 @@ function render(item) {
     lines = [
       `/vibe — ${who} just wrote to the person you are working with.${item.invited ? ` They joined /vibe with the person's invitation, so this is someone they invited; it is their first message to reach them.` : ''}`,
       '',
-      'What to do, in this order:',
-      '1. Tell them now, in one line: who wrote, and quote what they said.',
+      ...(notice.on('answerFirst')
+        // BRIEF-17: an arrival beside the person's own message was taken as
+        // the task, and what they had asked for was never done.
+        ? ["The person's own message comes first: do what it asked, in full. Then, in the same reply:", "1. Tell them in one line: who wrote, and quote what they said."]
+        : ['What to do, in this order:', '1. Tell them now, in one line: who wrote, and quote what they said.']),
       (notice.on('replyFromProject')
         // Not only this session: the answer often sits in the project's own
         // files, unread so far (lab 2026-11-21). Never for an open line, whose
@@ -169,7 +172,7 @@ function render(item) {
           : "2. Look in this session's work and in the project's files for something true to say back. If there is, write a short reply from it ")
         : '2. If the work in this session gives you something true to say back, write a short reply from it ')
         + '(1-3 sentences, in their voice; no session summary, file paths, branch names or secrets) and open it with '
-        + `vibe_prepare {handle: "${from}", message: "..."${id ? `, reply_to: "${item.id}"` : ''}}. That shows a preview only; nothing is sent until they choose Send. `
+        + `vibe_prepare {handle: "${from}", message: "..."${id ? `, reply_to: "${item.id}"` : ''}${notice.on('answerFirst') ? ', asked: false' : ''}}. That shows a preview only; nothing is sent until they choose Send. `
         + 'When you show the draft, show their message above it, so the person sees what they are answering. '
         + (notice.on('replyFromProject') && notice.on('lookBeforeNo')
           ? 'Only if that search finds nothing, tell the person what you searched and ask whether they want to reply, rather than inventing one; never tell them or the sender to consult someone else before the person here has been asked.'
