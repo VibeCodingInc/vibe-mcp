@@ -74,7 +74,9 @@
 // person) / lapsed, and drafts the agent offered unrequested with what became
 // of each, turn_hijacks (a reply that was only an unasked draft) and
 // false_above_claims (pointing "above" at what was never shown), each listed
-// with its session turn number (turnHijacks, falseAboveClaims). Each lab day,
+// with its session turn number (turnHijacks, falseAboveClaims), and notes back
+// offered / replies used (landed_offered, landed_sent, replies_used: see
+// repliesUsed). Each lab day,
 // every person's /vibe is told the day (labclock.js,
 // display only, loopback only) so yesterday reads as yesterday;
 // --no-lab-clock leaves the real clock.
@@ -751,6 +753,35 @@ export function landedCounts(drafts) {
   return { landed_offered: all.length, landed_sent: all.filter((d) => d.sent_at !== undefined).length };
 }
 
+/**
+ * replies_used: replies a person received after which that person's agent
+ * edited a file the same lab day. Heuristic, on purpose simple, read beside
+ * landed_offered (offered / used):
+ *   - a reply is a message on the wire from Q to P after P had sent Q one
+ *     (any earlier message P -> Q on the wire), or one whose reply_to is set;
+ *   - received is when it was first put in front of P (shown_to_recipient,
+ *     worked out in analyse(): an arrival or session-start line naming Q, or a
+ *     /vibe tool's output with the start of the body);
+ *   - used is any Edit, Write, MultiEdit or NotebookEdit call by P's agent at
+ *     or after that event, on the same day (the same turn or a later one).
+ * It does not check that the edit used the reply's values: a judge reads the
+ * listed edits. Each reply counts once.
+ */
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+export function repliesUsed(ev, wire) {
+  const list = [];
+  for (const s of wire || []) {
+    if (!s.shown_to_recipient) continue;
+    const isReply = Boolean(s.reply_to) || (wire || []).some((w) => w.from === s.to && w.to === s.from && w.at !== null && s.at !== null && w.at < s.at);
+    if (!isReply) continue;
+    const shown = ev.find((e) => e.i === s.shown_to_recipient.event);
+    if (!shown) continue;
+    const edit = ev.find((e) => e.i > shown.i && e.who === s.to && e.day === shown.day && e.kind === 'tool' && EDIT_TOOLS.has(e.name));
+    if (edit) list.push({ id: s.id, from: s.from, to: s.to, day: shown.day, shown_event: shown.i, edit_event: edit.i, tool: edit.name, file: edit.input?.file_path || edit.input?.notebook_path || null });
+  }
+  return { count: list.length, list };
+}
+
 function analyse({ world, transcript, turnsLog, wire, handles, started, humanPlayer = null, boxPath = null, noBoxVia = null }) {
   const ev = transcript;
   const resultFor = new Map();   // tool_use_id -> returned event
@@ -945,6 +976,7 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
     intentions: { list: intentions },
     drafts_offered_unrequested: unrequested,
     ...landedCounts(drafts),
+    replies_used: repliesUsed(ev, wire),
     turn_hijacks: { count: hijacks.length, list: hijacks },
     false_above_claims: { count: aboveClaims.length, list: aboveClaims },
     wall_clock_seconds: Math.round((Date.now() - started) / 1000),
@@ -1140,7 +1172,7 @@ function writePopulation(out, results, opts = {}) {
     // A world that errored, or whose summary says it failed (sends with no box on the box path).
     failed: [...results.filter((r) => r.error).map((r) => ({ file: r.file, id: r.id || null, error: r.error })),
       ...results.filter((r) => !r.error && r.summary && r.summary.failed).map((r) => ({ file: r.file, id: r.id || r.summary.id || null, error: r.summary.failed }))],
-    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'sends_after_an_accepted_box', 'boxes_shown', 'boxes_accepted', 'boxes_declined', 'boxes_wrong_text', 'refused_sends', 'sends_unconfirmed', 'send_results_unrecognised', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'intentions_stated', 'intentions_followed', 'intentions_lapsed', 'drafts_offered_unrequested', 'turn_hijacks', 'false_above_claims', 'landed_offered', 'landed_sent', 'wall_clock_seconds'].map((k) => [k, total(k)])),
+    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'sends_after_an_accepted_box', 'boxes_shown', 'boxes_accepted', 'boxes_declined', 'boxes_wrong_text', 'refused_sends', 'sends_unconfirmed', 'send_results_unrecognised', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'intentions_stated', 'intentions_followed', 'intentions_lapsed', 'drafts_offered_unrequested', 'turn_hijacks', 'false_above_claims', 'landed_offered', 'landed_sent', 'replies_used', 'wall_clock_seconds'].map((k) => [k, total(k)])),
     drafts_offered_unrequested_outcomes: Object.fromEntries(['sent', 'edited_then_sent', 'declined'].map((o) => [o, done.reduce((a, r) => a + (r.summary.drafts_offered_unrequested?.[o] || 0), 0)])),
     per_world: done.map((r) => r.summary),
   };
@@ -1187,6 +1219,7 @@ async function main() {
   await Promise.all(Array.from({ length: Math.min(opts.concurrency, files.length) }, worker));
   const agg = writePopulation(opts.out, results.filter(Boolean), opts);
   console.log(`\n${agg.completed}/${agg.worlds} worlds · turns ${agg.totals.turns} · sends ${agg.totals.sends_on_wire} · unattended sends ${agg.totals.sends_without_human_reply_between_prepare_and_send} · boxes ${agg.totals.boxes_shown} (accepted ${agg.totals.boxes_accepted}, declined ${agg.totals.boxes_declined}, of which wrong text ${agg.totals.boxes_wrong_text}) · refused sends ${agg.totals.refused_sends} · never shown ${agg.totals.wire_messages_never_shown_to_recipient}`);
+  console.log(`notes back offered ${agg.totals.landed_offered} (sent ${agg.totals.landed_sent}) · replies used ${agg.totals.replies_used}`);
   console.log(`wrote ${path.join(opts.out, 'population-summary.md')}`);
   if (stop) { console.error(`\nSTOPPED: ${stop}`); process.exit(1); }
   process.exit(agg.failed.length ? 1 : 0);

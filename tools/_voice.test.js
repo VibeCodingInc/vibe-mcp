@@ -594,6 +594,34 @@ test('lab: arrival header forms are named in the transcript; notes back are coun
   const s = lab.analyse({ world, transcript: ev, turnsLog: [], wire: [], handles: ['ada', 'ben'], started: Date.now() });
   assert.equal(s.landed_offered, 2);
   assert.equal(s.landed_sent, 1);
+  assert.equal(s.replies_used.count, 0, 'no reply on the wire in this record');
+});
+
+test('lab: replies_used counts a reply shown to its receiver and followed by a file edit the same day', async () => {
+  const lab = await import(path.join(ROOT, 'lab', 'population.mjs'));
+  const ev = [];
+  const at = (e) => { const x = { i: ev.length, day: 1, entry: 0, session_id: 's1', ...e }; ev.push(x); return x; };
+  at({ who: 'ada', kind: 'prompt', text: 'ask ben about tool_choice', session: 'new' });   // 0
+  at({ who: 'ben', kind: 'prompt', text: 'work', session: 'new' });                        // 1
+  const shownR1 = at({ who: 'ada', kind: 'shown', text: '/vibe · Note from @ben (1m ago), waiting at your pause: "auto"' });   // 2
+  at({ who: 'ada', kind: 'tool', name: 'Edit', id: 't1', input: { file_path: '/w/agent.ts' } });   // 3: used, same turn
+  const shownR2 = at({ who: 'ada', kind: 'shown', text: '/vibe · Note from @ben: "also"', day: 1 });   // 4: shown, nothing edited after it that day
+  at({ who: 'ada', kind: 'tool', name: 'Read', id: 't2', input: { file_path: '/w/agent.ts' } });   // 5
+  at({ who: 'ada', kind: 'tool', name: 'Write', id: 't3', input: { file_path: '/w/x.ts' }, day: 2 });   // 6: another day
+  const shownR3 = at({ who: 'ben', kind: 'shown', text: '/vibe · Note from @ada: "auto or any?"' });   // 7: first contact to ben, then he edits
+  at({ who: 'ben', kind: 'tool', name: 'Edit', id: 't4', input: { file_path: '/w/b.ts' } });   // 8
+  const wire = [
+    { id: 'm0', from: 'ada', to: 'ben', body: 'auto or any?', at: 0, shown_to_recipient: { how: 'line', event: shownR3.i } },
+    { id: 'r1', from: 'ben', to: 'ada', body: 'auto', at: 1, shown_to_recipient: { how: 'line', event: shownR1.i } },
+    { id: 'r2', from: 'ben', to: 'ada', body: 'also', at: 1, shown_to_recipient: { how: 'line', event: shownR2.i } },
+    { id: 'r3', from: 'ben', to: 'ada', body: 'never shown', at: 1, shown_to_recipient: null },
+  ];
+  const u = lab.repliesUsed(ev, wire);
+  assert.equal(u.count, 1, JSON.stringify(u.list));
+  assert.deepEqual(u.list[0], { id: 'r1', from: 'ben', to: 'ada', day: 1, shown_event: 2, edit_event: 3, tool: 'Edit', file: '/w/agent.ts' });
+  // A message with reply_to set is a reply even without an earlier one on the wire.
+  const linked = lab.repliesUsed(ev, [{ id: 'r4', from: 'ada', to: 'ben', body: 'x', at: 0, reply_to: 'm_old', shown_to_recipient: { how: 'line', event: shownR3.i } }]);
+  assert.equal(linked.count, 1);
 });
 
 // ── every person-visible string touched here ────────────────────────────────
