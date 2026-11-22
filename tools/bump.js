@@ -35,6 +35,9 @@ const MAX_CALLS = 3;
 // One session is one server process.
 let calls = 0;
 let named = false;
+// A bump is looking (awaiting presence) right now: a parallel call waits its
+// turn by being refused, so two calls cannot each name people.
+let looking = false;
 
 const definition = {
   name: 'vibe_bump',
@@ -58,14 +61,15 @@ async function handler(args) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
 
-  if (named) return nobody('The one bump for this session has been used.', { used: true });
+  if (named || looking) return nobody('The one bump for this session has been used.', { used: true });
   if (calls >= MAX_CALLS) return nobody('Nobody to bump into this session.', { used: true });
   calls += 1;
   if (reach.isQuiet()) return nobody('Quiet is on, so nothing surfaces.');
 
   const me = normalizeHandle(config.getHandle() || '');
   let presence;
-  try { presence = await store.getActiveUsersResult(); } catch { presence = null; }
+  looking = true;
+  try { presence = await store.getActiveUsersResult(); } catch { presence = null; } finally { looking = false; }
   if (!presence || presence.ok !== true) return nobody("Couldn't see who is here right now.");
 
   const near = pickHere(presence.users, {
@@ -76,6 +80,7 @@ async function handler(args) {
     maxSays: 120,   // their whole line: the match is judged from it
   }).filter((p) => p.says).slice(0, MAX_NAMES);   // someone who has said nothing cannot be matched to anything
 
+  if (named) return nobody('The one bump for this session has been used.', { used: true });
   if (near.length === 0) return nobody('Nobody the person knows is in a session right now saying what they are working on.');
   named = true;
 
@@ -120,4 +125,4 @@ async function handler(args) {
   };
 }
 
-module.exports = { definition, handler, _resetForTest: () => { calls = 0; named = false; } };
+module.exports = { definition, handler, _resetForTest: () => { calls = 0; named = false; looking = false; } };
