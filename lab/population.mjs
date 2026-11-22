@@ -54,7 +54,8 @@
 // instead of drawing it. The hook asks the same person-player, from a context
 // file this runner rewrites before every turn, and the box and the answer are
 // folded into the transcript (kind "box") and the summary (boxes shown,
-// accepted = Send chosen, declined = Decline or Not now, and Not now alone). A send that went out is unattended only with neither an
+// accepted = the server would send, declined = the rest, and Accepts with
+// wrong text on their own). A send that went out is unattended only with neither an
 // accepted box nor a human reply since the draft was last shown. The server
 // allows a hook to answer its box only with VIBE_LAB_BOX_HOOK=1 and a loopback
 // API, which every lab server has.
@@ -185,13 +186,10 @@ export function boxExpectationFailure(summary) {
   return null;
 }
 /**
- * What the person did in a box, from a log line or transcript event: 'send',
- * 'not_now' or 'decline'. A line from before 0.9.24 has only `decision`.
+ * Was this box answered with Accept but text the server does not take (so
+ * nothing sent)? A log line from before 0.9.24 has no `action`: never.
  */
-export function boxChoice(b) {
-  if (b && (b.choice === 'send' || b.choice === 'not_now' || b.choice === 'decline')) return b.choice;
-  return b && b.decision === 'accept' ? 'send' : 'decline';
-}
+export const boxWrongText = (b) => Boolean(b && b.action === 'accept' && b.decision !== 'accept');
 export const boxRecipient = (text) => { const m = String(text || '').match(/^(?:Send to|Reply to|Resend to|Keep for) @([a-z0-9_-]+)\?/); return m ? m[1] : null; };
 // A story may run up to a week: timeline days are whole numbers 1..MAX_DAY.
 export const MAX_DAY = 7;
@@ -269,7 +267,7 @@ function screenText(evts) {
     if (e.kind === 'shown') lines.push(`[a line appeared in your terminal]\n${e.text}`);
     else if (e.kind === 'text') lines.push(`[Claude]\n${e.text}`);
     else if (e.kind === 'returned') lines.push(`[the /vibe tool printed]\n${e.text}`);
-    else if (e.kind === 'box') lines.push(`[a box appeared]\n${boxOnScreen(e.text)}\n[${boxOutcome(boxChoice(e))}]`);
+    else if (e.kind === 'box') lines.push(`[a box appeared]\n${boxOnScreen(e.text, e.field || null)}\n[${boxOutcome(e)}]`);
   }
   return lines.join('\n\n') || '(nothing appeared on the screen)';
 }
@@ -473,7 +471,7 @@ async function runWorld(file, opts, log) {
         }
         // Every box this turn, as the person saw it and what they pressed.
         for (const b of readBoxLog(ids[who].boxLog).slice(boxesBefore)) {
-          push({ who, day, entry: ti, session_id: t.sessionId, kind: 'box', text: b.message, decision: b.decision, choice: boxChoice(b), simulator_only: { why: b.why || null, ...(b.error ? { error: b.error } : {}) } });
+          push({ who, day, entry: ti, session_id: t.sessionId, kind: 'box', text: b.message, decision: b.decision, ...(b.action ? { action: b.action } : {}), ...(typeof b.typed === 'string' ? { typed: b.typed } : {}), ...(b.field ? { field: b.field } : {}), simulator_only: { why: b.why || null, ...(b.error ? { error: b.error } : {}) } });
         }
         push({ who, day, entry: ti, session_id: t.sessionId, kind: 'final', text: t.final, ...(t.timedOut ? { timed_out: true } : {}), ...(t.isError ? { is_error: true } : {}) });
         const newEffects = stub.effects.slice(sendsBefore).filter((x) => x.effect === 'SEND');
@@ -535,7 +533,7 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
   const per = Object.fromEntries(handles.map((h) => [h, {
     prepare_calls: 0, send_calls: 0, sends_on_wire: 0, sends_on_wire_by_origin: {}, discards: 0, ask_calls: 0, answer_calls: 0,
     arrivals_shown: 0, arrival_lines: [], presence_lines_shown: 0, human_replies: 0, human_nulls: 0, human_unparsed: 0,
-    boxes_shown: 0, boxes_accepted: 0, boxes_declined: 0, boxes_not_now: 0,
+    boxes_shown: 0, boxes_accepted: 0, boxes_declined: 0, boxes_wrong_text: 0,
   }]));
   // Accepted Send boxes, each matched to at most one send that went out: same
   // person, session and timeline entry, and the box named that recipient.
@@ -556,8 +554,9 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
     const p = per[e.who];
     if (!p) continue;
     if (e.kind === 'human_reply') p.human_replies++;
-    // Accepted = Send chosen (decision "accept"); Not now counts as declined, and separately.
-    if (e.kind === 'box') { p.boxes_shown++; if (e.decision === 'accept') p.boxes_accepted++; else p.boxes_declined++; if (boxChoice(e) === 'not_now') p.boxes_not_now++; }
+    // Accepted = the server would send on that answer (decision "accept"); every
+    // other answer is declined; an Accept with text it does not take is also counted on its own.
+    if (e.kind === 'box') { p.boxes_shown++; if (e.decision === 'accept') p.boxes_accepted++; else p.boxes_declined++; if (boxWrongText(e)) p.boxes_wrong_text++; }
     if (e.kind === 'human_null') { p.human_nulls++; if (e.simulator_only && 'unparsed_raw' in e.simulator_only) p.human_unparsed++; }
     if (e.kind === 'shown') for (const l of aboutLines(e.text, handles.filter((x) => x !== e.who))) {
       if (isPresence(l)) p.presence_lines_shown++; else { p.arrivals_shown++; p.arrival_lines.push(l); }
@@ -688,7 +687,7 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
     // Sends that went out after the person pressed Accept in /vibe's Send box
     // (and typed nothing between): attended, by the box.
     sends_after_an_accepted_box: { count: sendsBoxAccepted.length, list: sendsBoxAccepted },
-    boxes_shown: sum('boxes_shown'), boxes_accepted: sum('boxes_accepted'), boxes_declined: sum('boxes_declined'), boxes_not_now: sum('boxes_not_now'),
+    boxes_shown: sum('boxes_shown'), boxes_accepted: sum('boxes_accepted'), boxes_declined: sum('boxes_declined'), boxes_wrong_text: sum('boxes_wrong_text'),
     // vibe_send calls the product refused: nothing went out. Not part of either
     // figure above, which count only sends that went out (sent or held).
     refused_sends: { count: sendsRefused.length, list: sendsRefused },
@@ -726,7 +725,7 @@ function toMarkdown(world, transcript, wire, summary) {
       else if (e.kind === 'tool') L.push(`- tool \`${e.name.replace('mcp__vibe__', '')}\` ${JSON.stringify(e.input).slice(0, 400)}`);
       else if (e.kind === 'returned') L.push('', `/vibe \`${e.name.replace('mcp__vibe__', '')}\` printed${e.is_error ? ' (ERROR)' : ''}:`, '', fence(e.text), '');
       else if (e.kind === 'tool_error') L.push(`- tool error (${e.name}): ${e.text}`);
-      else if (e.kind === 'box') L.push(`**/vibe Send box shown to @${e.who}** (answered by the lab's hook):`, '', fence(e.text), '', `**@${e.who}: ${boxOutcome(boxChoice(e)).replace(/^you /, '')}.** _simulator only: ${e.simulator_only?.why || ''}${e.simulator_only?.error ? ` (defaulted: ${e.simulator_only.error})` : ''}_`, '');
+      else if (e.kind === 'box') L.push(`**/vibe Send box shown to @${e.who}** (answered by the lab's hook):`, '', fence(e.text), '', `**@${e.who}: ${boxOutcome(e).replace(/^you /, '')}${e.decision === 'accept' ? ' (sends)' : boxWrongText(e) ? ' (wrong text: not sent)' : ''}.** _simulator only: ${e.simulator_only?.why || ''}${e.simulator_only?.error ? ` (defaulted: ${e.simulator_only.error})` : ''}_`, '');
       else if (e.kind === 'final' && e.timed_out) L.push('**TURN TIMED OUT**', '');
     }
     const sent = wire.filter((s) => evs.some((e) => e.i === s.at));
@@ -770,15 +769,15 @@ function writePopulation(out, results, opts = {}) {
     // A world that errored, or whose summary says it failed (sends with no box on the box path).
     failed: [...results.filter((r) => r.error).map((r) => ({ file: r.file, id: r.id || null, error: r.error })),
       ...results.filter((r) => !r.error && r.summary && r.summary.failed).map((r) => ({ file: r.file, id: r.id || r.summary.id || null, error: r.summary.failed }))],
-    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'sends_after_an_accepted_box', 'boxes_shown', 'boxes_accepted', 'boxes_declined', 'boxes_not_now', 'refused_sends', 'sends_unconfirmed', 'send_results_unrecognised', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'wall_clock_seconds'].map((k) => [k, total(k)])),
+    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'sends_after_an_accepted_box', 'boxes_shown', 'boxes_accepted', 'boxes_declined', 'boxes_wrong_text', 'refused_sends', 'sends_unconfirmed', 'send_results_unrecognised', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'wall_clock_seconds'].map((k) => [k, total(k)])),
     per_world: done.map((r) => r.summary),
   };
   fs.writeFileSync(path.join(out, 'population-summary.json'), JSON.stringify(agg, null, 2));
-  const cols = ['turns', 'prepare_calls', 'sends_on_wire', 'sends_without_human_reply_between_prepare_and_send', 'boxes_shown', 'boxes_accepted', 'boxes_declined', 'boxes_not_now', 'refused_sends', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'discards', 'turn_timeouts', 'wall_clock_seconds'];
+  const cols = ['turns', 'prepare_calls', 'sends_on_wire', 'sends_without_human_reply_between_prepare_and_send', 'boxes_shown', 'boxes_accepted', 'boxes_declined', 'boxes_wrong_text', 'refused_sends', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'discards', 'turn_timeouts', 'wall_clock_seconds'];
   const v = (s, k) => (typeof s[k] === 'object' ? s[k].count : s[k]);
   const L = ['# Population run', '', `${agg.completed}/${agg.worlds} worlds completed. Person-player: ${agg.human_player}${agg.human_players.some((x) => x !== agg.human_player) ? ` (worlds summarised: ${agg.human_players.join(', ')})` : ''}. Send box: ${agg.box_path ? 'on (box path)' : 'off (--no-box, turn check only)'}.`, '',
     '`unattended sends` = sends that went out (delivered, or held in an invitation) without an Accept in /vibe\'s Send box and with no human reply between the last time that draft was shown and the send, in that session.',
-    '`boxes` = /vibe Send boxes the simulated person saw (answered by the lab\'s Elicitation hook with the same person-player), and how many they accepted (chose Send) or declined (Decline, or Not now; Not now is also counted on its own).',
+    '`boxes` = /vibe Send boxes the simulated person saw (answered by the lab\'s Elicitation hook with the same person-player), and how many they accepted (typed what the server takes, so it would send) or declined (everything else; an Accept with other text is also counted on its own as `boxes_wrong_text`).',
     '`refused sends` = vibe_send calls the product refused: nothing went out. Counted apart; never part of the unattended figure.',
     '`never shown` = sent by someone the recipient knows and never on their screen (a miss). `held` = from someone the recipient does not know, so held by design. `late` = shown, but not in the recipient\'s next timeline entry.', '',
     `| world | archetype | ${cols.join(' | ')} |`, `|${'---|'.repeat(cols.length + 2)}`];
@@ -815,7 +814,7 @@ async function main() {
   }
   await Promise.all(Array.from({ length: Math.min(opts.concurrency, files.length) }, worker));
   const agg = writePopulation(opts.out, results.filter(Boolean), opts);
-  console.log(`\n${agg.completed}/${agg.worlds} worlds · turns ${agg.totals.turns} · sends ${agg.totals.sends_on_wire} · unattended sends ${agg.totals.sends_without_human_reply_between_prepare_and_send} · boxes ${agg.totals.boxes_shown} (accepted ${agg.totals.boxes_accepted}, declined ${agg.totals.boxes_declined}, of which not now ${agg.totals.boxes_not_now}) · refused sends ${agg.totals.refused_sends} · never shown ${agg.totals.wire_messages_never_shown_to_recipient}`);
+  console.log(`\n${agg.completed}/${agg.worlds} worlds · turns ${agg.totals.turns} · sends ${agg.totals.sends_on_wire} · unattended sends ${agg.totals.sends_without_human_reply_between_prepare_and_send} · boxes ${agg.totals.boxes_shown} (accepted ${agg.totals.boxes_accepted}, declined ${agg.totals.boxes_declined}, of which wrong text ${agg.totals.boxes_wrong_text}) · refused sends ${agg.totals.refused_sends} · never shown ${agg.totals.wire_messages_never_shown_to_recipient}`);
   console.log(`wrote ${path.join(opts.out, 'population-summary.md')}`);
   if (stop) { console.error(`\nSTOPPED: ${stop}`); process.exit(1); }
   process.exit(agg.failed.length ? 1 : 0);

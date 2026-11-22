@@ -6,17 +6,18 @@
 // elicitation), Claude Code runs this as an Elicitation hook instead of
 // showing it. It asks the same person-player the population runner uses
 // (lab/player.mjs: `claude -p`, or --human-cmd) what this simulated person
-// does with the box as the host draws it (a required choice, nothing chosen):
-// choose Send and Accept, choose Not now and Accept, or Decline. It decides
-// from the context the runner wrote before the turn (persona, what they last
-// typed, what was on their screen earlier), and prints the hook's answer:
-//   Send     {action: "accept", content: {choice: "send"}}
-//   Not now  {action: "accept", content: {choice: "not_now"}}
-//   Decline  {action: "decline", content: {}}
-// Any error, unreadable answer or timeout is a Decline. Each box and its
-// answer is appended to the person's box log (`choice`, the `action` sent,
-// and `decision`: "accept" only for Send, else "decline"), which the runner
-// folds into the transcript and summary.
+// does with the box as the host draws it (one empty text field, its title and
+// description): type something and Accept, or Decline. It decides from the
+// context the runner wrote before the turn (persona, what they last typed,
+// what was on their screen earlier), and prints the hook's answer:
+//   typed + Accept  {action: "accept", content: {to: "<what they typed>"}}
+//   Decline         {action: "decline", content: {}}
+// The server decides whether what they typed sends. Any error, unreadable
+// answer or timeout is a Decline. Each box and its answer is appended to the
+// person's box log (`typed`, the `action` sent, the `field` shown, and
+// `decision`: "accept" only when the server's own rule, confirm-box.js
+// typedOk, would send to the recipient on line 1), which the runner folds
+// into the transcript and summary.
 //
 // The /vibe server refuses to open a box while a hook like this is configured,
 // unless VIBE_LAB_BOX_HOOK=1 AND its API is on this machine (confirm-box.js).
@@ -32,26 +33,48 @@ const { pathToFileURL } = require('url');
 
 const DEADLINE_MS = Number(process.env.VIBE_LAB_BOX_DEADLINE_MS) || 220000;
 
+/** The field key the box asks for (the schema's first property), default "to". */
+function fieldKey(schema) {
+  const props = schema && typeof schema === 'object' ? schema.properties : null;
+  const k = props && typeof props === 'object' ? Object.keys(props)[0] : null;
+  return k || 'to';
+}
+
 /**
- * The hook's answer for what the person did: Send and Not now are both an
- * Accept carrying the choice; anything else is a Decline. Defined here, not
- * in player.mjs, so the hook still answers when that import fails.
+ * The hook's answer: what the person typed, with Accept, or a Decline.
+ * Defined here, not in player.mjs, so the hook still answers when that
+ * import fails.
  */
-function answerFor(choice) {
-  if (choice === 'send') return { action: 'accept', content: { choice: 'send' } };
-  if (choice === 'not_now') return { action: 'accept', content: { choice: 'not_now' } };
+function answerFor(typed, key = 'to') {
+  if (typeof typed === 'string' && typed.trim() !== '') return { action: 'accept', content: { [key]: typed } };
   return { action: 'decline', content: {} };
 }
 
+/** Who the box is for, from its fixed first line ("Send to @x? …", "Reply to", "Resend to", "Keep for"). */
+function recipientOf(message) {
+  const m = String(message || '').match(/^(?:Send to|Reply to|Resend to|Keep for) @([a-z0-9_-]+)\?/);
+  return m ? m[1] : null;
+}
+
+/** Would the server send on this answer? Its own rule, on the recipient named on line 1. */
+function wouldSend(message, answer, key = 'to') {
+  if (!answer || answer.action !== 'accept') return false;
+  const to = recipientOf(message);
+  if (!to) return false;
+  try { return require('../confirm-box').typedOk(to, answer.content[key]); } catch { return false; }
+}
+
 let finished = false;
-function finish({ message = null, choice = 'decline', why = null, error = null }) {
+function finish({ message = null, schema = null, typed = null, why = null, error = null }) {
   if (finished) return;
   finished = true;
-  const c = choice === 'send' || choice === 'not_now' ? choice : 'decline';
-  const answer = answerFor(c);
+  const key = fieldKey(schema);
+  const answer = error ? answerFor(null) : answerFor(typed, key);
   const log = process.env.VIBE_LAB_BOX_LOG;
   if (log) {
-    const entry = { at: Date.now(), message, choice: c, action: answer.action, decision: c === 'send' ? 'accept' : 'decline', why, ...(error ? { error } : {}) };
+    let field = null;
+    try { const p = schema && schema.properties && schema.properties[key]; if (p) field = { title: p.title || key, description: p.description || '' }; } catch {}
+    const entry = { at: Date.now(), message, field, action: answer.action, ...(answer.action === 'accept' ? { typed: answer.content[key] } : {}), decision: wouldSend(message, answer, key) ? 'accept' : 'decline', why, ...(error ? { error } : {}) };
     try { fs.appendFileSync(log, JSON.stringify(entry) + '\n', { mode: 0o600 }); } catch {}
   }
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'Elicitation', ...answer } }) + '\n');
@@ -67,6 +90,15 @@ function boxMessage(input) {
   return null;
 }
 
+/** The requested schema from the hook input (Claude Code: `requested_schema`; the others are tolerated). */
+function boxSchema(input) {
+  if (!input || typeof input !== 'object') return null;
+  for (const v of [input.requested_schema, input.requestedSchema, input.elicitation && input.elicitation.requestedSchema, input.params && input.params.requestedSchema]) {
+    if (v && typeof v === 'object') return v;
+  }
+  return null;
+}
+
 function readStdin() {
   return new Promise((resolve) => {
     let s = '';
@@ -78,29 +110,30 @@ function readStdin() {
 }
 
 async function main() {
-  let message = null;
-  const timer = setTimeout(() => finish({ message, error: 'timeout' }), DEADLINE_MS);
+  let message = null; let schema = null;
+  const timer = setTimeout(() => finish({ message, schema, error: 'timeout' }), DEADLINE_MS);
   timer.unref();
   try {
     let input = null;
     try { input = JSON.parse(await readStdin()); } catch { return finish({ error: 'hook input is not JSON' }); }
     message = boxMessage(input);
     if (message === null) return finish({ error: 'no box message in the hook input' });
+    schema = boxSchema(input);
     const file = process.env.VIBE_LAB_BOX_CONTEXT;
-    if (!file) return finish({ message, error: 'VIBE_LAB_BOX_CONTEXT is not set' });
+    if (!file) return finish({ message, schema, error: 'VIBE_LAB_BOX_CONTEXT is not set' });
     let ctx;
-    try { ctx = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return finish({ message, error: 'context file unreadable' }); }
+    try { ctx = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return finish({ message, schema, error: 'context file unreadable' }); }
     const player = await import(pathToFileURL(path.join(__dirname, 'player.mjs')).href);
-    const r = await player.askPlayer({ prompt: player.boxPrompt(ctx, message), player: ctx.player || {}, emptyDir: ctx.emptyDir || process.cwd(), timeoutMs: Number(ctx.timeoutMs) || 180000 });
-    if (r.isError) return finish({ message, error: r.timedOut ? 'player timed out' : 'player failed' });
+    const r = await player.askPlayer({ prompt: player.boxPrompt(ctx, message, player.boxField(schema)), player: ctx.player || {}, emptyDir: ctx.emptyDir || process.cwd(), timeoutMs: Number(ctx.timeoutMs) || 180000 });
+    if (r.isError) return finish({ message, schema, error: r.timedOut ? 'player timed out' : 'player failed' });
     const got = player.parseBox(r.raw);
-    if (!got) return finish({ message, error: 'player answer unreadable' });
-    return finish({ message, choice: got.choice, why: got.why });
+    if (!got) return finish({ message, schema, error: 'player answer unreadable' });
+    return finish({ message, schema, typed: got.press === 'accept' ? got.typed : null, why: got.why });
   } catch (e) {
-    return finish({ message, error: `hook error: ${e && e.message ? e.message : e}`.slice(0, 300) });
+    return finish({ message, schema, error: `hook error: ${e && e.message ? e.message : e}`.slice(0, 300) });
   }
 }
 
 if (require.main === module) main();
 
-module.exports = { boxMessage, answerFor };
+module.exports = { boxMessage, boxSchema, answerFor, recipientOf, wouldSend };

@@ -1,7 +1,7 @@
 // The person-player: the model (or command) that plays a simulated person at
 // the keyboard. Shared by the population runner (population.mjs), which asks
 // "what do you type next?", and the Send box hook (box-hook.cjs), which asks
-// "this box appeared; Send, Not now or Decline?". Importing this file starts nothing.
+// "this box appeared; what do you type, or Decline?". Importing this file starts nothing.
 //
 // The built-in player is `claude -p` with no tools, no MCP, no hooks and no
 // CLAUDE.md, from an empty directory. A --human-cmd player is any shell
@@ -97,25 +97,42 @@ export function askPlayer({ prompt, player = {}, emptyDir, timeoutMs = 180000 })
 /** How many lines of a box message the host shows (Claude Code 2.1.330), then "… (+N more lines)". */
 export const BOX_VISIBLE_LINES = 3;
 
-/** The box as the host draws it: its title, the first lines of the message, the required choice (nothing chosen), Accept / Decline. */
-export function boxOnScreen(message, server = 'vibe') {
+/**
+ * The box's one text field, { title, description }, from an elicitation
+ * requestedSchema (the first property), or null.
+ */
+export function boxField(schema) {
+  const props = schema && typeof schema === 'object' ? schema.properties : null;
+  if (!props || typeof props !== 'object') return null;
+  const k = Object.keys(props)[0];
+  const f = k ? props[k] : null;
+  if (!f || typeof f !== 'object') return null;
+  return { title: typeof f.title === 'string' ? f.title : k, description: typeof f.description === 'string' ? f.description : '' };
+}
+
+/**
+ * The box as the host draws it (Claude Code 2.1.330): its title, the first
+ * lines of the message, the empty text field with its title and description,
+ * Accept / Decline.
+ */
+export function boxOnScreen(message, field = null, server = 'vibe') {
   const lines = String(message || '').split('\n');
   const shown = lines.slice(0, BOX_VISIBLE_LINES);
   if (lines.length > BOX_VISIBLE_LINES) shown.push(`… (+${lines.length - BOX_VISIBLE_LINES} more lines)`);
+  const f = field || { title: 'Type to send', description: '' };
   return [
     `MCP server "${server}" requests your input`,
     ...shown,
     '',
-    '* Your choice: ▸ not set',
-    '    ( ) Not now',
-    '    ( ) Send',
+    `* ${f.title}: Type something…`,
+    ...(f.description ? [`  ${f.description}`] : []),
     '',
     '[ Accept ]   [ Decline ]',
   ].join('\n');
 }
 
 /** The question the box puts to the simulated person, from the runner's context for this turn. */
-export function boxPrompt(ctx, message) {
+export function boxPrompt(ctx, message, field = null) {
   const c = ctx || {};
   return [
     `You are ${c.name} (@${c.handle}), ${c.role}.`,
@@ -126,34 +143,35 @@ export function boxPrompt(ctx, message) {
     c.earlier ? `\nEarlier in this same Claude Code session:\n${c.earlier}\n` : '',
     `You just typed:\n"""\n${c.typed || ''}\n"""`,
     '',
-    `While Claude was working on that, this box appeared in your terminal:\n"""\n${boxOnScreen(message)}\n"""`,
+    `While Claude was working on that, this box appeared in your terminal:\n"""\n${boxOnScreen(message, field)}\n"""`,
     '',
-    `What do you, ${c.name}, do? The box will not accept until "Your choice" is set.`,
-    '- "send": you choose Send, then press Accept. That sends that message, in your name, to that person now.',
-    '- "not_now": you choose Not now, then press Accept. Nothing is sent.',
-    '- "decline": you press Decline (or Esc). Nothing is sent.',
+    `What do you, ${c.name}, do? Anything you type goes into the box's field; Enter then Accept submits it.`,
+    '- To accept: say exactly what you type into the field, and press Accept.',
+    '- To decline: press Decline (or Esc). Nothing is sent.',
     '- Stay in character. You only know what is on your screen and what you yourself know.',
     '- Do not be agreeable for its own sake.',
     '',
-    'Answer with strict JSON and nothing else: {"choice": "send" or "not_now" or "decline", "why": string}. "why" is one short sentence on your reasoning.',
+    'Answer with strict JSON and nothing else: {"press": "accept", "typed": string, "why": string} or {"press": "decline", "why": string}. "why" is one short sentence on your reasoning.',
   ].join('\n');
 }
 
-/** What the person did in the box. */
-export const BOX_CHOICES = Object.freeze(['send', 'not_now', 'decline']);
-
-/** The player's answer to a box: { choice: 'send' | 'not_now' | 'decline', why }, or null when it cannot be read. */
+/**
+ * The player's answer to a box: { press: 'accept', typed, why } (typed is a
+ * non-empty string: the host refuses an empty field) or { press: 'decline',
+ * why }, or null when it cannot be read.
+ */
 export function parseBox(raw) {
   const o = jsonObject(raw);
-  if (!o || typeof o.choice !== 'string') return null;
-  const choice = o.choice.trim().toLowerCase();
-  if (!BOX_CHOICES.includes(choice)) return null;
-  return { choice, why: typeof o.why === 'string' ? o.why : '' };
+  if (!o || typeof o.press !== 'string') return null;
+  const press = o.press.trim().toLowerCase();
+  const why = typeof o.why === 'string' ? o.why : '';
+  if (press === 'decline') return { press, why };
+  if (press !== 'accept' || typeof o.typed !== 'string' || o.typed.trim() === '') return null;
+  return { press, typed: o.typed.slice(0, 200), why };
 }
 
-/** How a box line reads in the transcript the simulated person sees afterwards. */
-export function boxOutcome(choice) {
-  if (choice === 'send') return 'you chose Send and pressed Accept';
-  if (choice === 'not_now') return 'you chose Not now and pressed Accept';
+/** How a box reads in the transcript the simulated person sees afterwards. */
+export function boxOutcome(b) {
+  if (b && b.action === 'accept' && typeof b.typed === 'string') return `you typed ${JSON.stringify(b.typed)} and pressed Accept`;
   return 'you pressed Decline';
 }

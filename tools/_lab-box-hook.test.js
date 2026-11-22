@@ -36,56 +36,72 @@ function runHook({ cmd, message = 'Send to @ben? (18 chars, all shown)\nthe leas
       try { log = fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch {}
       resolve({ code, out, o, action: o && o.hookSpecificOutput && o.hookSpecificOutput.action, log });
     });
-    child.stdin.end(input !== undefined ? input : JSON.stringify({ hook_event_name: 'Elicitation', mcp_server_name: 'vibe', message, requested_schema: { type: 'object', properties: {} } }));
+    child.stdin.end(input !== undefined ? input : JSON.stringify({ hook_event_name: 'Elicitation', mcp_server_name: 'vibe', message, requested_schema: require('../confirm-box').schemaFor('ben') }));
   });
 }
 
-test('the player chooses Send: the hook answers accept with choice "send", in the hook output shape, and logs the box', async () => {
-  const r = await runHook({ cmd: 'cat > /dev/null; echo \'{"choice":"send","why":"that is what I asked for"}\'' });
+test('the player types "be" and accepts: the hook answers accept with to "be"; the log says the server would send', async () => {
+  const r = await runHook({ cmd: 'cat > /dev/null; echo \'{"press":"accept","typed":"be","why":"that is what I asked for"}\'' });
   assert.equal(r.code, 0);
-  assert.deepEqual(r.o, { hookSpecificOutput: { hookEventName: 'Elicitation', action: 'accept', content: { choice: 'send' } } });
+  assert.deepEqual(r.o, { hookSpecificOutput: { hookEventName: 'Elicitation', action: 'accept', content: { to: 'be' } } });
   assert.equal(r.log.length, 1);
   assert.equal(r.log[0].message, 'Send to @ben? (18 chars, all shown)\nthe lease fixed it');
-  assert.equal(r.log[0].choice, 'send');
+  assert.equal(r.log[0].typed, 'be');
   assert.equal(r.log[0].action, 'accept');
   assert.equal(r.log[0].decision, 'accept');
+  assert.deepEqual(r.log[0].field, { title: 'Type "be" to send to @ben', description: 'The first two letters of who it is going to. Enter alone will not send; Esc cancels.' });
   assert.equal(r.log[0].why, 'that is what I asked for');
 });
 
-test('the player chooses Not now: the hook answers accept with choice "not_now"; the log records it as declined, choice not_now', async () => {
-  const r = await runHook({ cmd: 'cat > /dev/null; echo \'{"choice":"Not_Now","why":"later"}\'' });
-  assert.deepEqual(r.o, { hookSpecificOutput: { hookEventName: 'Elicitation', action: 'accept', content: { choice: 'not_now' } } });
-  assert.equal(r.log[0].choice, 'not_now');
+test('the player types "send" and accepts: the hook passes it on; the server decides, and the log says it would not send', async () => {
+  const r = await runHook({ cmd: 'cat > /dev/null; echo \'{"press":"accept","typed":"send","why":"habit"}\'' });
+  assert.deepEqual(r.o, { hookSpecificOutput: { hookEventName: 'Elicitation', action: 'accept', content: { to: 'send' } } });
+  assert.equal(r.log[0].typed, 'send');
   assert.equal(r.log[0].action, 'accept');
   assert.equal(r.log[0].decision, 'decline');
   assert.equal(r.log[0].error, undefined);
 });
 
 test('the player presses Decline: decline', async () => {
-  const r = await runHook({ cmd: 'cat > /dev/null; echo \'```json\n{"choice":"Decline","why":"not now"}\n```\'' });
+  const r = await runHook({ cmd: 'cat > /dev/null; echo \'```json\n{"press":"Decline","why":"not now"}\n```\'' });
   assert.deepEqual(r.o, { hookSpecificOutput: { hookEventName: 'Elicitation', action: 'decline', content: {} } });
-  assert.equal(r.log[0].choice, 'decline');
+  assert.equal(r.log[0].action, 'decline');
+  assert.equal(r.log[0].typed, undefined);
   assert.equal(r.log[0].decision, 'decline');
   assert.equal(r.log[0].error, undefined);
 });
 
-test('answerFor: Send and Not now are an accept carrying the choice; anything else a decline', () => {
-  const { answerFor } = require('../lab/box-hook.cjs');
-  assert.deepEqual(answerFor('send'), { action: 'accept', content: { choice: 'send' } });
-  assert.deepEqual(answerFor('not_now'), { action: 'accept', content: { choice: 'not_now' } });
-  for (const x of ['decline', 'accept', 'SEND', '', undefined]) assert.deepEqual(answerFor(x), { action: 'decline', content: {} }, String(x));
+test('answerFor, recipientOf, wouldSend: the hook passes on what was typed; the server rule decides', () => {
+  const { answerFor, recipientOf, wouldSend } = require('../lab/box-hook.cjs');
+  assert.deepEqual(answerFor('be'), { action: 'accept', content: { to: 'be' } });
+  assert.deepEqual(answerFor('Be', 'to'), { action: 'accept', content: { to: 'Be' } });
+  for (const x of ['', '   ', null, undefined, 5]) assert.deepEqual(answerFor(x), { action: 'decline', content: {} }, String(x));
+  assert.equal(recipientOf('Send to @ben? (3 chars, all shown)\n> hey'), 'ben');
+  assert.equal(recipientOf('Keep for @newbie-dev? (3 chars, all shown)'), 'newbie-dev');
+  assert.equal(recipientOf('Reply to @ben? (3 chars, all shown)'), 'ben');
+  assert.equal(recipientOf('Resend to @ben? (3 chars, all shown)'), 'ben');
+  assert.equal(recipientOf('> Send to @ben?'), null);
+  const m = 'Send to @ben? (3 chars, all shown)\n> hey';
+  assert.equal(wouldSend(m, answerFor('be')), true);
+  assert.equal(wouldSend(m, answerFor('@BEN')), true);
+  assert.equal(wouldSend(m, answerFor('send')), false);
+  assert.equal(wouldSend(m, answerFor('b')), false);
+  assert.equal(wouldSend(m, answerFor(null)), false);
+  assert.equal(wouldSend('no first line', answerFor('be')), false);
 });
 
 for (const [name, opts, error] of [
-  ['the player exits non-zero', { cmd: 'cat > /dev/null; echo \'{"choice":"send","why":"x"}\'; exit 2' }, 'player failed'],
-  ['the player answers something else', { cmd: 'cat > /dev/null; echo \'{"choice":"maybe","why":"x"}\'' }, 'player answer unreadable'],
-  ['the player answers the old shape (press accept)', { cmd: 'cat > /dev/null; echo \'{"press":"accept","why":"x"}\'' }, 'player answer unreadable'],
+  ['the player exits non-zero', { cmd: 'cat > /dev/null; echo \'{"press":"accept","typed":"be","why":"x"}\'; exit 2' }, 'player failed'],
+  ['the player answers something else', { cmd: 'cat > /dev/null; echo \'{"press":"maybe","why":"x"}\'' }, 'player answer unreadable'],
+  ['the player accepts with nothing typed', { cmd: 'cat > /dev/null; echo \'{"press":"accept","typed":"  ","why":"x"}\'' }, 'player answer unreadable'],
+  ['the player accepts with no typed field', { cmd: 'cat > /dev/null; echo \'{"press":"accept","why":"x"}\'' }, 'player answer unreadable'],
+  ['the player answers the old choice shape', { cmd: 'cat > /dev/null; echo \'{"choice":"send","why":"x"}\'' }, 'player answer unreadable'],
   ['the player answers no JSON', { cmd: 'cat > /dev/null; echo yes' }, 'player answer unreadable'],
-  ['the player times out', { cmd: 'cat > /dev/null; sleep 5; echo \'{"choice":"send"}\'', ctx: { timeoutMs: 200 } }, 'player timed out'],
-  ['the hook deadline passes', { cmd: 'cat > /dev/null; sleep 5; echo \'{"choice":"send"}\'', env: { VIBE_LAB_BOX_DEADLINE_MS: '300' } }, 'timeout'],
-  ['the hook input is not JSON', { cmd: 'echo \'{"choice":"send"}\'', input: 'not json' }, 'hook input is not JSON'],
-  ['the hook input has no message', { cmd: 'echo \'{"choice":"send"}\'', input: JSON.stringify({ hook_event_name: 'Elicitation' }) }, 'no box message in the hook input'],
-  ['there is no context file', { cmd: 'echo \'{"choice":"send"}\'', env: { VIBE_LAB_BOX_CONTEXT: path.join(DIR, 'missing.json') } }, 'context file unreadable'],
+  ['the player times out', { cmd: 'cat > /dev/null; sleep 5; echo \'{"press":"accept","typed":"be"}\'', ctx: { timeoutMs: 200 } }, 'player timed out'],
+  ['the hook deadline passes', { cmd: 'cat > /dev/null; sleep 5; echo \'{"press":"accept","typed":"be"}\'', env: { VIBE_LAB_BOX_DEADLINE_MS: '300' } }, 'timeout'],
+  ['the hook input is not JSON', { cmd: 'echo \'{"press":"accept","typed":"be"}\'', input: 'not json' }, 'hook input is not JSON'],
+  ['the hook input has no message', { cmd: 'echo \'{"press":"accept","typed":"be"}\'', input: JSON.stringify({ hook_event_name: 'Elicitation' }) }, 'no box message in the hook input'],
+  ['there is no context file', { cmd: 'echo \'{"press":"accept","typed":"be"}\'', env: { VIBE_LAB_BOX_CONTEXT: path.join(DIR, 'missing.json') } }, 'context file unreadable'],
 ]) {
   test(`${name}: decline`, async () => {
     const r = await runHook(opts);
@@ -94,7 +110,7 @@ for (const [name, opts, error] of [
     assert.deepEqual(r.o.hookSpecificOutput.content, {});
     assert.equal(r.log.length, 1);
     assert.equal(r.log[0].decision, 'decline');
-    assert.equal(r.log[0].choice, 'decline');
+    assert.equal(r.log[0].action, 'decline');
     assert.equal(r.log[0].error, error);
   });
 }
@@ -103,16 +119,16 @@ test('the player is asked with the persona, what they typed, and the box as the 
   const rec = path.join(DIR, 'rec');
   fs.mkdirSync(rec, { recursive: true });
   const message = 'Send to @ben? (40 chars, all shown)\nline two\nline three\nline four\nline five';
-  const cmd = `cat > ${JSON.stringify(path.join(rec, 'stdin.txt'))}; env > ${JSON.stringify(path.join(rec, 'env.txt'))}; echo '{"choice":"decline","why":"t"}'`;
+  const cmd = `cat > ${JSON.stringify(path.join(rec, 'stdin.txt'))}; env > ${JSON.stringify(path.join(rec, 'env.txt'))}; echo '{"press":"decline","why":"t"}'`;
   const r = await runHook({ cmd, message, env: { VIBE_HOME: '/nope/.vibe', SLASHVIBE_X: 'y' } });
   assert.equal(r.action, 'decline');
   const stdin = fs.readFileSync(path.join(rec, 'stdin.txt'), 'utf8');
   const { HUMAN_SYSTEM } = await player();
   assert.ok(stdin.startsWith(`${HUMAN_SYSTEM}\n\n`));
   for (const s of ['You are Ada (@ada), engineer.', 'About you: terse, careful', 'tell ben the lease fixed it', 'Earlier in this same Claude Code session:\nYou typed: hi',
-    'MCP server "vibe" requests your input\nSend to @ben? (40 chars, all shown)\nline two\nline three\n… (+2 more lines)\n\n* Your choice: ▸ not set\n    ( ) Not now\n    ( ) Send\n\n[ Accept ]   [ Decline ]',
-    'What do you, Ada, do? The box will not accept until "Your choice" is set.', '"send": you choose Send, then press Accept', '"not_now": you choose Not now, then press Accept', '"decline": you press Decline',
-    '{"choice": "send" or "not_now" or "decline", "why": string}']) {
+    'MCP server "vibe" requests your input\nSend to @ben? (40 chars, all shown)\nline two\nline three\n… (+2 more lines)\n\n* Type "be" to send to @ben: Type something…\n  The first two letters of who it is going to. Enter alone will not send; Esc cancels.\n\n[ Accept ]   [ Decline ]',
+    'Anything you type goes into the box\'s field; Enter then Accept submits it.', 'To accept: say exactly what you type into the field, and press Accept.', 'To decline: press Decline (or Esc).',
+    '{"press": "accept", "typed": string, "why": string} or {"press": "decline", "why": string}']) {
     assert.ok(stdin.includes(s), s);
   }
   assert.ok(!stdin.includes('line four'), 'only what the host shows');
@@ -120,13 +136,14 @@ test('the player is asked with the persona, what they typed, and the box as the 
   assert.doesNotMatch(env, /^(VIBE_|SLASHVIBE_)/m);
 });
 
-test('parseBox reads only send, not_now or decline', async () => {
+test('parseBox: accept with non-empty typed text, or decline', async () => {
   const { parseBox } = await player();
-  assert.deepEqual(parseBox('{"choice":"send","why":"w"}'), { choice: 'send', why: 'w' });
-  assert.deepEqual(parseBox('{"choice":"not_now"}'), { choice: 'not_now', why: '' });
-  assert.deepEqual(parseBox('sure: {"choice":" DECLINE "}'), { choice: 'decline', why: '' });
-  for (const bad of ['', 'send', '{"choice":"yes"}', '{"choice":"accept"}', '{"press":"accept"}', '{"reply":"send"}', '{"choice":1}', '{"choice":"not now"}']) assert.equal(parseBox(bad), null, bad);
+  assert.deepEqual(parseBox('{"press":"accept","typed":"be","why":"w"}'), { press: 'accept', typed: 'be', why: 'w' });
+  assert.deepEqual(parseBox('{"press":" ACCEPT ","typed":" send "}'), { press: 'accept', typed: ' send ', why: '' }, 'typed text kept as typed: the server decides');
+  assert.deepEqual(parseBox('sure: {"press":" DECLINE "}'), { press: 'decline', why: '' });
+  for (const bad of ['', 'accept', '{"press":"yes"}', '{"press":"accept"}', '{"press":"accept","typed":""}', '{"press":"accept","typed":5}', '{"choice":"send"}', '{"press":1}']) assert.equal(parseBox(bad), null, bad);
 });
+
 
 // ── the runner ───────────────────────────────────────────────────────────────
 
@@ -228,13 +245,12 @@ test('the lab reads the recipient from every first line the box uses', async () 
   }
 });
 
-test('summaries: Send counts as accepted, Not now as declined and on its own; a Not now box covers no send', async () => {
-  const { analyse, boxChoice, writePopulation } = await lab();
-  assert.equal(boxChoice({ choice: 'send', decision: 'accept' }), 'send');
-  assert.equal(boxChoice({ choice: 'not_now', decision: 'decline' }), 'not_now');
-  assert.equal(boxChoice({ choice: 'decline', decision: 'decline' }), 'decline');
-  assert.equal(boxChoice({ decision: 'accept' }), 'send', 'a log line from before 0.9.24');
-  assert.equal(boxChoice({ decision: 'decline' }), 'decline');
+test('summaries: accepted = the server would send; wrong text is declined and counted on its own', async () => {
+  const { analyse, boxWrongText, writePopulation } = await lab();
+  assert.equal(boxWrongText({ action: 'accept', typed: 'send', decision: 'decline' }), true);
+  assert.equal(boxWrongText({ action: 'accept', typed: 'be', decision: 'accept' }), false);
+  assert.equal(boxWrongText({ action: 'decline', decision: 'decline' }), false);
+  assert.equal(boxWrongText({ decision: 'accept' }), false, 'a log line from before 0.9.24');
   const ev = [];
   const at = (e) => { const x = { i: ev.length, who: 'ada', day: 1, entry: 0, session_id: 's1', ...e }; ev.push(x); return x; };
   let k = 0;
@@ -247,25 +263,27 @@ test('summaries: Send counts as accepted, Not now as declined and on its own; a 
   call('vibe_send', { id: 'c2', rev: 'r1' }, 'Sent to **@ben**\n_receipt: msg_2_');
   call('vibe_prepare', { handle: 'ben', message: 'three' }, preview('c3'));
   call('vibe_send', { id: 'c3', rev: 'r1' }, 'Not sent. It is still a draft for @ben. Only if they ask again: show it with vibe_prepare and wait for them to say send.');
-  at({ kind: 'box', text: 'Send to @ben? (3 chars, all shown)\n> one', decision: 'decline', choice: 'not_now', simulator_only: { why: 'later' } });
-  at({ kind: 'box', text: 'Send to @ben? (3 chars, all shown)\n> two', decision: 'accept', choice: 'send', simulator_only: { why: 'yes' } });
-  at({ kind: 'box', text: 'Send to @ben? (5 chars, all shown)\n> three', decision: 'decline', choice: 'decline', simulator_only: { why: 'no' } });
+  at({ kind: 'box', text: 'Send to @ben? (3 chars, all shown)\n> one', decision: 'decline', action: 'accept', typed: 'send', simulator_only: { why: 'habit' } });
+  at({ kind: 'box', text: 'Send to @ben? (3 chars, all shown)\n> two', decision: 'accept', action: 'accept', typed: 'be', simulator_only: { why: 'yes' } });
+  at({ kind: 'box', text: 'Send to @ben? (5 chars, all shown)\n> three', decision: 'decline', action: 'decline', simulator_only: { why: 'no' } });
   const s = analyse({ world: { id: 'w', archetype: 'a', relationship: 'established', open_line: false, timeline: [{}] }, transcript: ev, turnsLog: [], wire: [], handles: ['ada', 'ben'], started: Date.now() });
   assert.equal(s.boxes_shown, 3);
   assert.equal(s.boxes_accepted, 1);
   assert.equal(s.boxes_declined, 2);
-  assert.equal(s.boxes_not_now, 1);
+  assert.equal(s.boxes_wrong_text, 1);
   assert.equal(s.sends_after_an_accepted_box.count, 1);
   assert.equal(s.sends_after_an_accepted_box.list[0].draft, 'c2');
   const out = fs.mkdtempSync(path.join(DIR, 'pop-'));
   const agg = writePopulation(out, [{ file: 'w.json', id: 'w', summary: { ...s, box_path: true } }], {});
-  assert.equal(agg.totals.boxes_not_now, 1);
-  assert.match(fs.readFileSync(path.join(out, 'population-summary.md'), 'utf8'), /boxes_not_now/);
+  assert.equal(agg.totals.boxes_wrong_text, 1);
+  assert.match(fs.readFileSync(path.join(out, 'population-summary.md'), 'utf8'), /boxes_wrong_text/);
 });
 
 test('boxOutcome: what the person sees they did', async () => {
   const { boxOutcome } = await player();
-  assert.equal(boxOutcome('send'), 'you chose Send and pressed Accept');
-  assert.equal(boxOutcome('not_now'), 'you chose Not now and pressed Accept');
-  assert.equal(boxOutcome('decline'), 'you pressed Decline');
+  assert.equal(boxOutcome({ action: 'accept', typed: 'be' }), 'you typed "be" and pressed Accept');
+  assert.equal(boxOutcome({ action: 'accept', typed: 'send' }), 'you typed "send" and pressed Accept');
+  assert.equal(boxOutcome({ action: 'decline' }), 'you pressed Decline');
+  assert.equal(boxOutcome({ decision: 'accept' }), 'you pressed Decline', 'an old line with no typed text');
 });
+
