@@ -44,8 +44,8 @@ depends on the host:
 
 | Host | Required before a send |
 |------|------------------------|
-| Shows /vibe's box, and records person turns (Claude Code with the arrival hook) | A message the person typed after the preview (the turn check) AND Accept in the box, for every draft, whatever its length |
-| Shows the box, but turns are not recorded (another host, or no hook) | Accept in the box |
+| Shows /vibe's box, and records person turns (Claude Code with the arrival hook) | A message the person typed after the preview (the turn check) AND Send chosen in the box, for every draft, whatever its length |
+| Shows the box, but turns are not recorded (another host, or no hook) | Send chosen in the box |
 | No box, turns recorded | The turn check |
 | No box, turns not recorded | Nothing beyond the agent's call: the preview says so |
 
@@ -53,7 +53,10 @@ What the box shows. The box is opened by /vibe, not by the agent. Its first
 line is fixed /vibe text: the recipient, the length, and whether all of the
 text is below ("Send to @handle? (N chars, all shown)" or "(N chars, start
 only)"; also "Reply to", "Resend to" and "Keep for"). Under it, the start of
-the text, each line starting with "> ". The box does not show which message a
+the text, each line starting with "> ". Then one required field, "Your
+choice", with two options, "Not now" and "Send", and nothing chosen; then
+Accept / Decline. The host will not take Accept until a choice is made, so
+pressing Enter alone cannot send. The box does not show which message a
 reply answers, exact spacing (runs of spaces and blank characters show as one
 space, line breaks as "↵") or stacked combining marks; Claude Code shows three
 lines in all. So the box confirms the choice; the preview carries the
@@ -61,9 +64,11 @@ message.
 
 What the box does:
 
-- Only Accept sends, and only if the draft, its rev, its exact text and the
-  signed-in account are what they were when the box opened, and the call was
-  not withdrawn. Decline, Esc (cancel), five minutes unanswered, a session with
+- Only choosing Send and accepting sends (the answer must be accept with the
+  choice exactly "send"), and only if the draft, its rev, its exact text and
+  the signed-in account are what they were when the box opened, and the call
+  was not withdrawn. Not now, an accept with no choice or any other value,
+  Decline, Esc (cancel), five minutes unanswered, a session with
   no keyboard (`claude -p`), an error, or a draft edited or cancelled while
   the box was open: nothing is sent, the draft is kept, and the agent gets the
   same result for all of them, so it cannot learn what the person pressed.
@@ -74,7 +79,7 @@ What the box does:
   the same as any other message not sent. Unattended sending is what an agent
   account (below) is for.
 - A draft whose box was not accepted needs showing again with `vibe_prepare`
-  and a typed message before another box. After any answer but Accept, no box
+  and a typed message before another box. After any answer but Send, no box
   opens for any draft until the person types again (five minutes where turns
   are not recorded). The record of a box not accepted lives with its draft and
   lapses when the draft expires, 24 hours after it was opened.
@@ -87,12 +92,16 @@ What the box does:
   box can open for the same draft without a new typed message: it is the same
   showing, and the retry delivers at most once.
 - The agent learns only whether it was sent, with two exceptions that can
-  only follow an Accept: the signed-in account changed while the box was
-  open, and (on 2026-07-28) a hook found when the Accept came back.
+  only follow a Send: the signed-in account changed while the box was
+  open, and (on 2026-07-28) a hook found when the Send came back.
+
+What was wrong in 0.9.23: its box had no field, so Accept was already
+selected and a stray or queued Enter (for example, right after the person
+typed "send") accepted it before they had seen it.
 
 The hook tripwire. Claude Code lets a hook answer a box with no dialog
 (`Elicitation` and `ElicitationResult` hooks). Before a box opens, and again
-when an Accept comes back on 2026-07-28, `vibe_send` reads exactly these four
+when a Send comes back on 2026-07-28, `vibe_send` reads exactly these four
 files as JSON and refuses to send if one has an `Elicitation` or
 `ElicitationResult` key under `hooks`, or exists and cannot be read as JSON
 (it names the file):
@@ -115,7 +124,7 @@ Known limits:
   own Send for Buddy and the terminal), and the sign-in token in
   `~/.vibe/config.json` (or `auth.json`) can call the API directly.
 - A prompt the agent scheduled for itself (a wake-up, a `/loop`) still counts
-  as a turn for the turn check, but cannot press Accept.
+  as a turn for the turn check, but cannot choose Send in the box.
 - The open line's hourly cap (six unattended messages to one person) is
   enforced per server process for messages in flight; receipts are shared.
 - /vibe's state lives in `VIBE_HOME` (default `~/.vibe`), with turn records

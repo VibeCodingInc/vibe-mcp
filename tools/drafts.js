@@ -773,7 +773,7 @@ function turnsTracked() {
   try { return require('../turns').judge(0).check !== 'unavailable'; } catch { return false; }
 }
 /**
- * The latest answer but Accept, for any draft, blocks every box until a
+ * The latest answer but accept-with-Send, for any draft, blocks every box until a
  * person's turn recorded after it; where turns are not recorded, for
  * NON_ACCEPT_COOLDOWN_MS.
  */
