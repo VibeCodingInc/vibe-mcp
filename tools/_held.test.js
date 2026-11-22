@@ -120,7 +120,11 @@ test('an existing handle previews byte-for-byte as before (same display, same re
     identityDown = true; // the pre-feature path: no identity answer at all
     const before = await moves.vibe_prepare.handler({ handle: 'linus', message: 'cloud owns placement', reply_to: 'msg_q1' });
     assert.equal(found.data.draft.rev, before.data.draft.rev);
-    assert.equal(found.display.split(found.data.draft.id).join('ID'), before.display.split(before.data.draft.id).join('ID'));
+    // The second draft to @linus also carries the agent's "already offered"
+    // note (notice.js answerFirst); this test is about the identity lookup only.
+    assert.match(before.display, /Note for you, the agent: you already offered @linus a message here/);
+    const noNote = (x) => x.replace(/Note for you, the agent: [^\n]*\n\n/, '');
+    assert.equal(found.display.split(found.data.draft.id).join('ID'), noNote(before.display).split(before.data.draft.id).join('ID'));
     assert.ok(!('held' in found.data.draft));
   } finally { wire.restore(); }
 });

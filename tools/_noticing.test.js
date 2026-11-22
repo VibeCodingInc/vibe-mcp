@@ -190,10 +190,10 @@ test('SERVER_INSTRUCTIONS: the three triggers, the offer is the draft, a reply f
     'Before you propose a guess, a workaround or cutting scope for something whose answer lives with someone the person knows (their note, what they say they are working on, their role), offer to ask that person first.',
     'call vibe_bump once, before writing another speculative fix',
     'A result someone would want includes a change or finding here that contradicts or unblocks what someone they know is working on, and a concrete win on work that person helped with.',
-    'The offer is the draft: when a message to a specific person is clearly useful, or the person names someone as the one to check with, call vibe_prepare straight away',
+    'The offer is the draft: when a message to a specific person is clearly useful, or the person names someone as the one to check with, call vibe_prepare so they see the exact text',
     'instead of asking in prose whether they want a draft; vibe_prepare sends nothing.',
-    'At most one draft they did not ask for per message of theirs, and none right after they declined one.',
-    "look in this session and in the project's files for something true to say back",
+    'At most one draft they did not ask for per message of theirs.',
+    "look for something true to say back in this session and in the project's files",
   ]) assert.ok(now.includes(s), s);
   for (const s of [OLD_ARRIVAL_REPLY, OLD_BUMP]) assert.ok(!now.includes(s), s);
   // Not weakened.
@@ -223,8 +223,12 @@ test('an arrival: look in the project too, unless off; the open line stays bound
   process.env.VIBE_API_URL = LOCAL.VIBE_API_URL;
   delete process.env.VIBE_NOTICE_VARIANT;
   const now = arrival.render(item).context;
-  assert.ok(now.includes("2. Look in this session's work and in the project's files for something true to say back."), now);
+  assert.ok(now.includes("2. Look in this session's work and search the project's files, names and contents, for the specific terms in the message (names, numbers, ids)."), now);
   assert.ok(now.includes('rather than inventing one'));
+  // lookBeforeNo off by name: the earlier project-files text.
+  process.env.VIBE_NOTICE_OFF = 'lookBeforeNo';
+  assert.ok(arrival.render(item).context.includes("2. Look in this session's work and in the project's files for something true to say back."));
+  delete process.env.VIBE_NOTICE_OFF;
   process.env.VIBE_NOTICE_VARIANT = 'off';
   assert.ok(arrival.render(item).context.includes('2. If the work in this session gives you something true to say back, write a short reply from it'));
   process.env.VIBE_API_URL = PROD.VIBE_API_URL;

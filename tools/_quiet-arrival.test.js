@@ -83,7 +83,7 @@ test('VIBE_NOTICE_OFF=quietArrival removes the line, on a loopback API only; the
   process.env.VIBE_NOTICE_OFF = 'quietArrival';
   const off = await prepare('linus');
   assert.ok(!off.includes('How it reaches them'), off);
-  const strip = (s) => s.replace(`${HERE}\n`, '').replace(/_\(draft [^)]*\)_/, '');
+  const strip = (s) => s.replace(`${HERE}\n`, '').replace(/_\(draft [^)]*\)_/, '').replace(/\(draft w[0-9a-f]+\)/g, '');
   assert.equal(strip(off), strip(on));
   process.env.VIBE_NOTICE_OFF = 'showYourWork';
   assert.ok((await prepare('linus')).includes(HERE), 'another name turned this one off');
