@@ -97,7 +97,8 @@ function requestOnce(method, path, data = null, options = {}) {
         // Handle non-2xx responses
         if (res.statusCode >= 400) {
           // 401 REFRESH: If unauthorized and haven't retried, try to recover
-          if (res.statusCode === 401 && !options._retried && options.auth !== false) {
+          // A bounded read (noRefresh) never refreshes or retries: a 401 is its answer.
+          if (res.statusCode === 401 && !options._retried && !options.noRefresh && options.auth !== false) {
             console.error('[api] 401 received, attempting token refresh...');
 
             // First, reload config from disk (in case token was saved but not pushed to store)
@@ -873,7 +874,7 @@ async function getThreadBounded(myHandle, theirHandle, { timeoutMs = 1500 } = {}
   let timer;
   const late = new Promise((resolve) => { timer = setTimeout(() => resolve(failedThread()), timeoutMs + 250); timer.unref?.(); });
   try {
-    return await Promise.race([getThreadWithRequest((m, p, d) => requestOnce(m, p, d, { timeout: timeoutMs }), myHandle, theirHandle), late]);
+    return await Promise.race([getThreadWithRequest((m, p, d) => requestOnce(m, p, d, { timeout: timeoutMs, noRefresh: true }), myHandle, theirHandle), late]);
   } catch (e) {
     return failedThread();
   } finally { clearTimeout(timer); }

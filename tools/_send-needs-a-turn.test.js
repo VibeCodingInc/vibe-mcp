@@ -28,6 +28,8 @@ fs.writeFileSync(path.join(HOME, 'config.json'), JSON.stringify({ username: 'ada
 // This server is inside Claude Code, as the host says in its handshake.
 require('../host').setClientInfo({ name: 'claude-code', version: 'test' });
 const store = require('../store');
+// The conversation read behind "Already said" (tools/drafts.js) is served here, never by the network (review SF-4).
+store.getThreadBounded = async () => [];
 const drafts = require('./drafts');
 const turns = require('../turns');
 
