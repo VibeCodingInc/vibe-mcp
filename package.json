@@ -92,6 +92,7 @@
     "showable.js",
     "host-command.js",
     "confirm-box.js",
-    "notice.js"
+    "notice.js",
+    "labclock.js"
   ]
 }
