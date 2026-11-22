@@ -15,6 +15,8 @@ The person wants to reach someone on /vibe from the work in this session. They s
    - **Edit** → ask what to change, call `vibe_prepare` again with the `id` and the new `message`, show the new preview, offer the choices again.
    - **Cancel** → `vibe_discard`. Nothing is sent.
 
+If the same message also asked you to do something else, do that first and report it; the draft comes after, never instead of it. If they have already declined or ignored a draft to this person on this matter in this conversation, do not prepare another unless they ask. Before a follow-up, read the lines `vibe_prepare` shows as already said in the conversation (or `vibe_thread`) and say only what is new. Address only someone `vibe_people` lists or the person names by handle; never guess a handle from a name or an email address.
+
 If the person has no line saying what they are working on (`vibe_start` says so), offer once to set one from this session's work, in their words, and set it only if they agree.
 
 If they dictate exact words ("message @sam: ship it"), skip steps 1-3: call `vibe_prepare` with their words exactly as they said them, show the preview, and offer the same three choices. Nothing sends without a preview the person chose to send.
