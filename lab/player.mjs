@@ -122,7 +122,7 @@ export function boxOnScreen(message, field = null, server = 'vibe') {
   const lines = String(message || '').split('\n');
   const shown = lines.slice(0, BOX_VISIBLE_LINES);
   if (lines.length > BOX_VISIBLE_LINES) shown.push(`… (+${lines.length - BOX_VISIBLE_LINES} more lines)`);
-  const f = field || { title: 'Type to send', description: '' };
+  const f = field || { title: 'Type to confirm send', description: '' };
   return [
     `MCP server "${server}" requests your input`,
     ...shown,

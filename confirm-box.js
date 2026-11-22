@@ -122,12 +122,23 @@ function typedOk(to, value) {
 }
 
 /** The field's title and description for a box to `to` (`held`: a kept-for-later box), within TITLE_MAX. */
-function fieldText(to, { held = false } = {}) {
+function fieldText(to, { held = false, env = process.env } = {}) {
   const h = fold(to);
   const r = rule(h);
-  const verb = held ? 'keep it' : 'send';
-  const long = `Type "${r.need}" to ${verb} ${held ? 'for' : 'to'} @${h}`;
-  const short = `Type "${r.need}" to ${verb}`;
+  let long;
+  let short;
+  if (require('./notice').on('confirmTitle', env)) {
+    // A person who has just said "send" in chat reads this box as the
+    // confirmation of that send, not a second request (BRIEF-20, minute 3-4).
+    // Wording only: what counts as a yes is typedOk, unchanged.
+    const verb = held ? 'keep' : 'send';
+    long = `Type "${r.need}" to confirm: ${verb} ${held ? 'for' : 'to'} @${h}`;
+    short = `Type "${r.need}" to confirm ${verb}`;
+  } else {
+    const verb = held ? 'keep it' : 'send';
+    long = `Type "${r.need}" to ${verb} ${held ? 'for' : 'to'} @${h}`;
+    short = `Type "${r.need}" to ${verb}`;
+  }
   const fits = (t) => t.length <= TITLE_MAX;
   const title = fits(long) ? long : fits(short) ? short : 'Type @ and the whole handle';
   const what = r.at

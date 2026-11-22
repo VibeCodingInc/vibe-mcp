@@ -49,7 +49,7 @@ test('the player types "be" and accepts: the hook answers accept with to "be"; t
   assert.equal(r.log[0].typed, 'be');
   assert.equal(r.log[0].action, 'accept');
   assert.equal(r.log[0].decision, 'accept');
-  assert.deepEqual(r.log[0].field, { title: 'Type "be" to send to @ben', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.' });
+  assert.deepEqual(r.log[0].field, { title: 'Type "be" to confirm: send to @ben', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.' });
   assert.equal(r.log[0].why, 'that is what I asked for');
 });
 
@@ -126,7 +126,7 @@ test('the player is asked with the persona, what they typed, and the box as the 
   const { HUMAN_SYSTEM } = await player();
   assert.ok(stdin.startsWith(`${HUMAN_SYSTEM}\n\n`));
   for (const s of ['You are Ada (@ada), engineer.', 'About you: terse, careful', 'tell ben the lease fixed it', 'Earlier in this same Claude Code session:\nYou typed: hi',
-    'MCP server "vibe" requests your input\nSend to @ben? (40 chars, all shown)\nline two\nline three\n… (+2 more lines)\n\n* Type "be" to send to @ben: Type something…\n  The first letters of who it is going to. Enter alone will not send; Esc cancels.\n\n[ Accept ]   [ Decline ]',
+    'MCP server "vibe" requests your input\nSend to @ben? (40 chars, all shown)\nline two\nline three\n… (+2 more lines)\n\n* Type "be" to confirm: send to @ben: Type something…\n  The first letters of who it is going to. Enter alone will not send; Esc cancels.\n\n[ Accept ]   [ Decline ]',
     'Anything you type goes into the box\'s field; Enter then Accept submits it.', 'To accept: say exactly what you type into the field, and press Accept.', 'To decline: press Decline (or Esc).',
     '{"press": "accept", "typed": string, "why": string} or {"press": "decline", "why": string}']) {
     assert.ok(stdin.includes(s), s);
@@ -299,7 +299,7 @@ test('the hook scores with the server\'s rule: "no" typed for @noah would not se
   const r = await runHook({ cmd: 'cat > /dev/null; echo \'{"press":"accept","typed":"no","why":"reflex"}\'', message: 'Keep for @noah? (3 chars, all shown)\n> hey', input: JSON.stringify({ hook_event_name: 'Elicitation', mcp_server_name: 'vibe', message: 'Keep for @noah? (3 chars, all shown)\n> hey', requested_schema: schema }) });
   assert.deepEqual(r.o.hookSpecificOutput, { hookEventName: 'Elicitation', action: 'accept', content: { to: 'no' } });
   assert.equal(r.log[0].decision, 'decline');
-  assert.deepEqual(r.log[0].field, { title: 'Type "noa" to keep it for @noah', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.' });
+  assert.deepEqual(r.log[0].field, { title: 'Type "noa" to confirm: keep for @noah', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.' });
 });
 
 test('with no schema in the hook input, the hook draws the field the server would send', async () => {
@@ -310,5 +310,5 @@ test('with no schema in the hook input, the hook draws the field the server woul
   assert.equal(serverSchema('nothing'), null);
   const r = await runHook({ cmd: 'cat > /dev/null; echo \'{"press":"accept","typed":"noa"}\'', input: JSON.stringify({ hook_event_name: 'Elicitation', message: 'Send to @noah? (3 chars, all shown)\n> hey' }) });
   assert.equal(r.log[0].decision, 'accept');
-  assert.equal(r.log[0].field.title, 'Type "noa" to send to @noah');
+  assert.equal(r.log[0].field.title, 'Type "noa" to confirm: send to @noah');
 });

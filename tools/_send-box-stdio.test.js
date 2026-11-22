@@ -93,7 +93,7 @@ test('2025-11-25: the box opens with the fixed first line and the text; Decline 
     s.send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d } });
     const req = await s.waitFor((r) => r.method === 'elicitation/create');
     assert.equal(req.params.message, 'Send to @linus? (13 chars, all shown)\n> over the wire');
-    assert.deepEqual(req.params.requestedSchema, { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to send to @linus', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] });
+    assert.deepEqual(req.params.requestedSchema, { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to confirm: send to @linus', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] });
     assert.equal(req.params.mode, 'form');
     s.send({ id: 4, method: 'tools/list' });
     await s.waitFor((r) => r.id === 4);   // answered while the box is open
@@ -269,7 +269,7 @@ test('2026-07-28: the host is read from each request\'s _meta clientInfo (no dis
 
 // ── type the recipient's letters (0.9.24) ───────────────────────────────────
 
-const SCHEMA_LINUS = { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to send to @linus', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] };
+const SCHEMA_LINUS = { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to confirm: send to @linus', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] };
 const NOT_SENDS = [
   ['"send" typed (the habit)', { action: 'accept', content: { to: 'send' } }],
   ['accept with empty content (0.9.23\'s answer)', { action: 'accept', content: {} }],
