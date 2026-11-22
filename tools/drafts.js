@@ -481,6 +481,9 @@ async function draftHandler(args) {
     // a new agent, unsent.js) must be seen there before it can go, so
     // reopening it and sending it inside one turn is refused.
     stampRev(d);
+    // Declined in a Send box: showing it again here is what lets it be
+    // offered in a box again (confirm-box.js).
+    delete d.declinedRev; delete d.declinedAt;
     return { draft: { ...d } };
   });
   if (out.display) return out;
@@ -574,8 +577,13 @@ const sendDefinition = {
     },
   },
 };
-/** The MCP tool: an agent's call. Sends only a rev the person has had a turn to see. */
-async function sendHandler(args) { return send(args, { byPerson: false }); }
+/**
+ * The MCP tool: an agent's call. Where the host can show a box (index.js
+ * passes `box` when the client declared elicitation), the person confirms
+ * there; otherwise it sends only a rev the person has had a turn to see.
+ * `box` comes from the server, never from the call's arguments.
+ */
+async function sendHandler(args, ctx = {}) { return send(args, { byPerson: false, box: (ctx && ctx.box) || null }); }
 /**
  * The person's own Send from a surface they act in directly (draft-cli: Buddy,
  * or a terminal command they type). Their act IS the turn, so the turn check
@@ -583,7 +591,141 @@ async function sendHandler(args) { return send(args, { byPerson: false }); }
  */
 async function sendByPerson(args) { return send(args, { byPerson: true }); }
 
-async function send(args, { byPerson }) {
+/**
+ * Why a draft cannot be sent with this rev, whatever confirms it: the checks
+ * every send path makes under the lock, in order. null when none applies.
+ * May reconcile an abandoned 'sending' claim (the caller writes it back).
+ */
+function cannotSend(d, rev, me) {
+  // The approval was given as one account; it is not transferable to
+  // whoever is signed in now (codex P1).
+  if (d.from && d.from !== me) return `Draft ${d.id} was prepared as @${d.from}; you are signed in as @${me}. Nothing sent — open a new draft as yourself.`;
+  if (d.status === 'held') return heldAlready(d);
+  if (d.status === 'sent') return `Draft ${d.id} was already sent to @${d.to} — not sending it twice.`;
+  if (d.status === 'cancelled') return `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.`;
+  if (!rev) return `Send needs the rev shown in the preview of draft ${d.id} — open it with vibe_prepare and send with that rev. Nothing sent.`;
+  // The current rev is not named here, but that is not what protects the
+  // person: a rev is a hash of the text, so an agent can compute it. The
+  // control is the shown-time stamp plus the turn check (or the box): a rev
+  // goes only after the person's own act that came after its last showing
+  // (review 2026-11-21: probe a wrong rev, read the right one, send).
+  if (rev !== revOf(d)) return `Draft ${d.id} is not the version that rev names. Show it again with vibe_prepare {id: "${d.id}"}, and send only what the person approves after seeing it. Nothing sent.`;
+  if (d.status === 'sending') {
+    // The claiming process died mid-send: the SAME text under the SAME key
+    // is what a retry would send. Uncertainty is recorded BEFORE the retry
+    // so a later definite refusal cannot erase it.
+    if (!reconcileAbandoned(d)) return `Draft ${d.id} is already being sent — not sending it twice.`;
+  }
+  // POST /api/invites has no idempotency key: an unconfirmed Keep is never
+  // retried, because a retry could create a second invitation.
+  if (d.held && d.status === 'unknown') return heldUnknown(d);
+  if (d.status === 'unknown' && !transportDedupes()) {
+    // Without server-side deduplication a retry could deliver twice; the
+    // honest options are to cancel (with the warning) or write anew.
+    return `Draft ${d.id}: the earlier Send to @${d.to} did not confirm, and this transport cannot deduplicate a retry. Cancel it (the earlier attempt may have reached them) and open a new draft if you still want to say it. Nothing sent.`;
+  }
+  return null;
+}
+
+/** Mark the draft 'sending' under the lock and take the snapshot that is delivered. */
+function claimDraft(d, rev) {
+  d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
+  d.idempotencyKey = sendKey(d);
+  const message = compose(d).trim();
+  d.approvedSha256 = d.held ? heldDigest(message) : approvedDigest(d.to, message);
+  // Sent exactly as first previewed? Unknown (null) for a draft with no first rev on record.
+  const unchanged = typeof d.firstRev === 'string' ? d.firstRev === rev : null;
+  return { id: d.id, to: d.to, body: d.body, refs: d.refs, context: d.context, replyTo: d.replyTo || null, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, held: Boolean(d.held), unchanged };
+}
+
+// ── the Send box (confirm-box.js) ─────────────────────────────────────────────
+// Tool results on this path are short and plain: they name the recipient and
+// never repeat the box, its answer, or the rev.
+
+const sha256 = (t) => crypto.createHash('sha256').update(String(t), 'utf8').digest('hex');
+const BOX_DECLINED = (to) => `Not sent: they chose not to send this to @${to}. Do not offer it again unless they ask.`;
+const BOX_DECLINED_BEFORE = (to) => `Not sent: they already chose not to send this to @${to}. If they ask for it again, show it to them with vibe_prepare first.`;
+const BOX_UNANSWERED = (to) => `Not sent: the confirmation box for @${to} was not answered. It is still a draft.`;
+const BOX_BUSY = 'Not sent: another /vibe confirmation box is open. Wait until it is answered.';
+const BOX_CHANGED = (to) => `Not sent: the draft to @${to} changed while the confirmation box was open. Show it again with vibe_prepare.`;
+const BOX_HOOK = (file) => `Not sent: a hook on this machine is set to answer /vibe's confirmation box (${file}). Remove it to send.`;
+const BOX_TOO_LONG = (to, n) => `Not sent: the message to @${to} is too long to confirm in a box (${n} characters; the most is ${require('../confirm-box').MAX_CHARS}). Shorten it with vibe_prepare and show it again.`;
+
+/**
+ * One short line on what a reply answers. The sender is named only when this
+ * machine recorded that message's arrival (arrival.js spool) with a plain
+ * handle; otherwise it says only where the message is.
+ */
+function replyLine(d) {
+  if (!d.replyTo) return null;
+  let from = null;
+  try {
+    const safe = /^[A-Za-z0-9_-]{4,80}$/.test(d.replyTo) ? d.replyTo : null;
+    if (safe) {
+      const row = readJson(path.join(config.VIBE_DIR, 'arrivals', `${safe}.json`), null);
+      const f = row && typeof row.from === 'string' ? row.from.trim().replace(/^@/, '').toLowerCase() : '';
+      if (f && isCanonicalHandle(f)) from = f;
+    }
+  } catch { from = null; }
+  return from ? `It answers @${from}'s message.` : `It answers a message in your conversation with @${d.to}.`;
+}
+
+async function sendWithBox(id, rev, me, box) {
+  const confirmBox = require('../confirm-box');
+  const { firstHidden } = require('../showable');
+  const first = transact(drafts => {
+    const d = drafts.find(x => x.id === id);
+    if (!d) return { display: `No draft ${id} — nothing sent. Open it with vibe_prepare first.` };
+    const no = cannotSend(d, rev, me);
+    if (no) return { display: no };
+    const message = compose(d).trim();
+    const hidden = firstHidden(message);
+    if (hidden) return { display: storedHidden(d.id, hidden) };
+    // Declined in a box: not offered in another until it is shown again.
+    if (d.declinedRev === rev) return { display: BOX_DECLINED_BEFORE(d.to) };
+    const n = Array.from(message).length;
+    if (n > confirmBox.MAX_CHARS) return { display: BOX_TOO_LONG(d.to, n) };
+    return { boxed: { id: d.id, to: d.to, held: Boolean(d.held), retry: d.status === 'unknown', reply: replyLine(d), message, sha: sha256(message) } };
+  });
+  if (first.display) return { display: first.display, data: { sent: false, definite: true } };
+  const b = first.boxed;
+  const refuse = (display, reason) => ({ display, data: { sent: false, definite: true, reason, turn_check: 'box' } });
+
+  // A hook that could answer the box would answer it without the person.
+  if (!confirmBox.labAllowsHook()) {
+    const file = confirmBox.answeringHook();
+    if (file) return refuse(BOX_HOOK(file), 'box_hook');
+  }
+  if (confirmBox.isOpen()) return refuse(BOX_BUSY, 'box_busy');
+
+  const text = confirmBox.message({ to: b.to, held: b.held, retry: b.retry, replyLine: b.reply, text: b.message });
+  const answer = await confirmBox.ask(box, text, box.timeoutMs ? { timeoutMs: box.timeoutMs } : {});
+  if (answer === 'busy') return refuse(BOX_BUSY, 'box_busy');
+
+  if (answer === 'decline') {
+    transact(drafts => {
+      const d = drafts.find(x => x.id === b.id);
+      if (d && revOf(d) === rev) { d.declinedRev = rev; d.declinedAt = Date.now(); }
+    });
+    return refuse(BOX_DECLINED(b.to), 'declined');
+  }
+  if (answer !== 'accept') return refuse(BOX_UNANSWERED(b.to), 'box_unanswered');
+
+  // Accepted: send exactly the text that was in the box, or nothing.
+  const claim = transact(drafts => {
+    const d = drafts.find(x => x.id === b.id);
+    if (!d) return { display: `No draft ${b.id} — nothing sent. Open it with vibe_prepare first.` };
+    const message = compose(d).trim();
+    if (revOf(d) !== rev || message !== b.message || sha256(message) !== b.sha || Boolean(d.held) !== b.held) return { display: BOX_CHANGED(b.to), reason: 'changed_while_open' };
+    const no = cannotSend(d, rev, me);
+    if (no) return { display: no };
+    return { snapshot: claimDraft(d, rev) };
+  });
+  if (claim.display) return refuse(claim.display, claim.reason || 'not_sendable');
+  return deliverClaimed(claim.snapshot, me, { check: 'box' });
+}
+
+async function send(args, { byPerson, box = null }) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
   const id = args && args.id;
@@ -605,6 +747,11 @@ async function send(args, { byPerson }) {
     return { ...p, display: `${lead}\n\n${p.display}`, data: { ...(p.data || {}), sent: false, definite: true } };
   }
 
+  // The host shows a box the person answers: that is their choice, so the
+  // turn check does not apply. An agent signed in as itself has no person to
+  // ask and keeps its own rule (turnCheck: agent_identity).
+  if (!byPerson && box && !isAgentIdentity()) return sendWithBox(id, rev, me, box);
+
   // 1. Claim under the lock: nothing leaves the machine until this draft is
   //    marked 'sending' with a key derived from the exact text — and the
   //    text is the one the person SAW (rev), not one edited since (codex P1).
@@ -612,33 +759,8 @@ async function send(args, { byPerson }) {
   const claim = transact(drafts => {
     const d = drafts.find(x => x.id === id);
     if (!d) return { display: `No draft ${id} — nothing sent. Open it with vibe_prepare first.` };
-    // The approval was given as one account; it is not transferable to
-    // whoever is signed in now (codex P1).
-    if (d.from && d.from !== me) return { display: `Draft ${d.id} was prepared as @${d.from}; you are signed in as @${me}. Nothing sent — open a new draft as yourself.` };
-    if (d.status === 'held') return { display: heldAlready(d) };
-    if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — not sending it twice.` };
-    if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.` };
-    if (!rev) return { display: `Send needs the rev shown in the preview of draft ${d.id} — open it with vibe_prepare and send with that rev. Nothing sent.` };
-    // The current rev is not named here, but that is not what protects the
-    // person: a rev is a hash of the text, so an agent can compute it. The
-    // control is the shown-time stamp plus the turn check below: a rev goes
-    // only after a typed turn that came after its last showing (review
-    // 2026-11-21: probe a wrong rev, read the right one, send).
-    if (rev !== revOf(d)) return { display: `Draft ${d.id} is not the version that rev names. Show it again with vibe_prepare {id: "${d.id}"}, and send only what the person approves after seeing it. Nothing sent.` };
-    if (d.status === 'sending') {
-      // The claiming process died mid-send: the SAME text under the SAME key
-      // is what a retry would send. Uncertainty is recorded BEFORE the retry
-      // so a later definite refusal cannot erase it.
-      if (!reconcileAbandoned(d)) return { display: `Draft ${d.id} is already being sent — not sending it twice.` };
-    }
-    // POST /api/invites has no idempotency key: an unconfirmed Keep is never
-    // retried, because a retry could create a second invitation.
-    if (d.held && d.status === 'unknown') return { display: heldUnknown(d) };
-    if (d.status === 'unknown' && !transportDedupes()) {
-      // Without server-side deduplication a retry could deliver twice; the
-      // honest options are to cancel (with the warning) or write anew.
-      return { display: `Draft ${d.id}: the earlier Send to @${d.to} did not confirm, and this transport cannot deduplicate a retry. Cancel it (the earlier attempt may have reached them) and open a new draft if you still want to say it. Nothing sent.` };
-    }
+    const no = cannotSend(d, rev, me);
+    if (no) return { display: no };
     // The person must have had a turn since THIS text was last shown
     // (turns.js): an agent cannot show a new rev and send it inside one turn.
     turn = turnCheck(d, byPerson);
@@ -650,17 +772,15 @@ async function send(args, { byPerson }) {
       stampRev(d);
       return { unseen: { ...d, reshown }, why };
     }
-    d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
-    d.idempotencyKey = sendKey(d);
-    const message = compose(d).trim();
-    d.approvedSha256 = d.held ? heldDigest(message) : approvedDigest(d.to, message);
-    // Sent exactly as first previewed? Unknown (null) for a draft with no first rev on record.
-    const unchanged = typeof d.firstRev === 'string' ? d.firstRev === rev : null;
-    return { snapshot: { id: d.id, to: d.to, body: d.body, refs: d.refs, context: d.context, replyTo: d.replyTo || null, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, held: Boolean(d.held), unchanged } };
+    return { snapshot: claimDraft(d, rev) };
   });
   if (claim.display) return claim;
   if (claim.unseen) return unseenRefusal(claim.unseen, claim.why);
-  const s = claim.snapshot;
+  return deliverClaimed(claim.snapshot, me, turn);
+}
+
+/** Deliver a claimed snapshot (outside the lock) and finalize it against the latest stored state. */
+async function deliverClaimed(s, me, turn) {
   if (s.held) return withTurn(await keepHeld(s, me), turn);
 
   // 2. Deliver, outside the lock.
@@ -715,8 +835,11 @@ async function send(args, { byPerson }) {
  */
 function turnCheck(d, byPerson) {
   if (byPerson) return { check: 'by_person' };
-  try { if (require('../agent-auth').isAgent()) return { check: 'agent_identity' }; } catch {}
+  if (isAgentIdentity()) return { check: 'agent_identity' };
   return require('../turns').judge(revPreparedAt(d));
+}
+function isAgentIdentity() {
+  try { return Boolean(require('../agent-auth').isAgent()); } catch { return false; }
 }
 function withTurn(result, turn) {
   if (!result || !turn) return result;
