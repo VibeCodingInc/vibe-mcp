@@ -69,30 +69,44 @@ What the box does:
   same result for all of them, so it cannot learn what the person pressed.
   When the host withdraws the call itself, its box is withdrawn and the call
   gets no result.
+- A session with no keyboard (`claude -p`) on a host that offers the box can
+  never send as a person: the box is cancelled at once, and the result looks
+  the same as any other message not sent. Unattended sending is what an agent
+  account (below) is for.
 - A draft whose box was not accepted needs showing again with `vibe_prepare`
   and a typed message before another box. After any answer but Accept, no box
   opens for any draft until the person types again (five minutes where turns
-  are not recorded). One box is open at a time, a stateless request still
-  waiting for its answer included.
-- The agent learns only whether it was sent.
+  are not recorded). The record of a box not accepted lives with its draft and
+  lapses when the draft expires, 24 hours after it was opened.
+- One box is open at a time in a project folder, a stateless request still
+  waiting for its answer included; another project is not held up by it. A
+  box nobody will answer (past its five minutes, or left by a server that
+  exited) is closed the next time a box would open, and counts as not
+  accepted.
+- After an accepted box whose delivery could not be confirmed, a "Resend"
+  box can open for the same draft without a new typed message: it is the same
+  showing, and the retry delivers at most once.
+- The agent learns only whether it was sent, with two exceptions that can
+  only follow an Accept: the signed-in account changed while the box was
+  open, and (on 2026-07-28) a hook found when the Accept came back.
 
 The hook tripwire. Claude Code lets a hook answer a box with no dialog
 (`Elicitation` and `ElicitationResult` hooks). Before a box opens, and again
-when an Accept comes back on 2026-07-28, `vibe_send` reads these files as JSON
-and refuses to send if one has an `Elicitation` or `ElicitationResult` key
-under `hooks`, or exists and cannot be read as JSON (it names the file):
+when an Accept comes back on 2026-07-28, `vibe_send` reads exactly these four
+files as JSON and refuses to send if one has an `Elicitation` or
+`ElicitationResult` key under `hooks`, or exists and cannot be read as JSON
+(it names the file):
 
 - the project's `.claude/settings.json` and `.claude/settings.local.json`;
 - the user's `settings.json` (in `CLAUDE_CONFIG_DIR`, or `~/.claude`);
 - the managed settings file (`/Library/Application Support/ClaudeCode/managed-settings.json`
-  on macOS, `/etc/claude-code/managed-settings.json` on Linux);
-- `hooks/hooks.json` under the config folder's `plugins/` (four levels, 200
-  folders, links and `node_modules` not followed).
+  on macOS, `/etc/claude-code/managed-settings.json` on Linux).
 
-It is a tripwire for these documented locations, not a guarantee. Not
-covered: a file passed with `claude --settings`, hooks declared in skill,
-agent or command frontmatter or in plugin manifests if the host honours them,
-and anything the host adds later.
+It is a tripwire for these documented locations, not a guarantee. It reads
+the files as they are on disk now, not what the host loaded when it started.
+Not covered: a file passed with `claude --settings`, plugin hooks, hooks
+declared in skill, agent or command frontmatter if the host honours them, and
+anything the host adds later.
 
 Known limits:
 
@@ -104,9 +118,15 @@ Known limits:
   as a turn for the turn check, but cannot press Accept.
 - The open line's hourly cap (six unattended messages to one person) is
   enforced per server process for messages in flight; receipts are shared.
-- `VIBE_HOME` set to a relative path that resolves inside the project folder
-  puts the drafts, the turn records and the sign-in token where the agent's
-  own file tools can reach them. That is not checked.
+- /vibe's state lives in `VIBE_HOME` (default `~/.vibe`), with turn records
+  in `VIBE_TURNS_DIR` when set (default `<VIBE_HOME>/turns`). The agent's own
+  file tools (Read, Write, Edit) can reach it when `VIBE_HOME` is any path
+  inside the project folder (absolute or relative), when the project folder
+  is the home folder or a parent of it, or when `VIBE_TURNS_DIR` is inside the
+  project. That exposes the drafts and the open box record, the turn records,
+  the sign-in token, and the copy of the arrival hook script
+  (`<VIBE_HOME>/hooks/arrival-hook.cjs`) that runs on every prompt. None of
+  this is checked.
 - An agent signed in to /vibe as itself (its own credential, a session minted
   for it as an agent, and it is the identity that sends) sends in its own name
   with no box and no turn check. Setting `VIBE_AGENT_HANDLE` alone is not
