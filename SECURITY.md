@@ -36,14 +36,55 @@ This policy covers the `slashvibe-mcp` npm package and the [VibeCodingInc/vibe-m
   server necessarily observes is your API traffic itself (auth, presence
   heartbeats, messages you send); nothing else is emitted.
 
+## What the Send box covers, and what it does not
+
+`vibe_send` sends a draft only after the person chose to send that exact text.
+How that choice is taken depends on the host.
+
+**Where the host can show a box** (it declares MCP elicitation when it connects,
+as Claude Code does), `vibe_send` opens one itself after all its other checks:
+"Send this to @handle?" and the whole text, with Accept and Decline. Only Accept
+sends, and only if the draft is still the one in the box. A decline, a box left
+unanswered for five minutes, a session with no keyboard (`claude -p`) or any
+error sends nothing and keeps the draft. A declined draft is not offered in a
+box again until it has been shown again with `vibe_prepare`. One box is open at
+a time. The agent never sees the box or the answer, only "sent" or "not sent".
+
+On those hosts the box closes the gaps of the turn check below: an unrelated
+prompt, or "no, don't send", no longer counts as a yes; one prompt no longer
+unlocks every draft that was shown; a draft swapped after it was shown is
+refused; and a wake-up the agent scheduled for itself cannot answer a box.
+
+What remains:
+
+- An agent that can run shell commands as the person can still send without
+  asking: `vibe-draft send <id> <rev>` sends as the person (it is the person's
+  own Send for Buddy and the terminal), and the sign-in token in
+  `~/.vibe/config.json` (or `auth.json`) can call the API directly.
+- Claude Code lets a hook answer a box (`Elicitation` and `ElicitationResult`
+  hooks). Before it opens a box, `vibe_send` reads the project's
+  `.claude/settings.json` and `.claude/settings.local.json` and the user's
+  `settings.json`, and refuses to send while any of them has such a hook that
+  could catch /vibe's box. Claude Code asks the person before an agent may
+  change those files; a person who grants that write lets the agent add a hook
+  between one check and the next box. Hooks configured anywhere else (managed
+  policy settings, plugins) are not read.
+- The box shows the exact text, wrapped for display at 72 columns. Spacing and
+  word choice can still carry information the person will not notice, and a
+  line break added for display looks like one in the text.
+- Hosts without the box fall back to the turn check, with every gap listed
+  below.
+
 ## What the turn check does not cover
 
-`vibe_send` sends a draft only after the person has had a turn since it was last
-shown in this session: a prompt they wrote, recorded by the arrival hook. A pick
-in the host's question menu (AskUserQuestion) does not count as the person's
-choice. That check binds the agent's tool calls. It does not bind anything else
-running as the person:
+Where no box can be shown, `vibe_send` sends a draft only after the person has
+had a turn since it was last shown in this session: a prompt they wrote,
+recorded by the arrival hook. A pick in the host's question menu
+(AskUserQuestion) does not count as the person's choice. That check binds the
+agent's tool calls. It does not bind anything else running as the person:
 
+- Any prompt counts, including "no, don't send", and one prompt unlocks every
+  draft that was shown before it.
 - An agent that can run shell commands as the person can send without it:
   `vibe-draft send <id> <rev>` sends as the person with no turn check (it is the
   person's own Send for Buddy and the terminal), the sign-in token in
