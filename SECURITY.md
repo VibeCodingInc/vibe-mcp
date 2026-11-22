@@ -39,46 +39,66 @@ This policy covers the `slashvibe-mcp` npm package and the [VibeCodingInc/vibe-m
 ## What the Send box covers, and what it does not
 
 `vibe_send` sends a draft only after the person chose to send that exact text.
-How that choice is checked depends on the host.
+The rule: the person must have had the chance to see every word that will be
+sent, either in /vibe's confirmation box itself, or in the preview followed by
+a message they typed.
 
-**Everywhere a tool call sends**, the turn check below applies first: the
-person must have typed a message after the draft was last shown, in this
-session.
+**Where the host can show a box** (it declares MCP form elicitation: at
+`initialize` on protocol 2025-06-18 or 2025-11-25, or in the request itself on
+2026-07-28), `vibe_send` opens one, and sends only if the person presses
+Accept:
 
-**Where the host can also show a box** (it declares MCP form elicitation:
-at `initialize` on protocol 2025-06-18 or 2025-11-25, or in the request itself
-on 2026-07-28), `vibe_send` then opens one, and sends only if the person
-presses Accept. Both are required: the typed message and the Accept.
+- If the whole message fits in the box, Accept alone sends it. "Tell oren the
+  TTL is 7 min" is one gesture: the box shows all of it.
+- If it does not fit, the person must also have typed a message after the
+  preview was shown, in this session (the turn check below), before the box
+  opens.
+- Where the turn check is unavailable (a host that is not Claude Code, or
+  Claude Code where no turn was ever recorded because the arrival hook is not
+  installed), the box alone decides, whatever the length.
+
+What the box shows and does:
 
 - The box is opened by /vibe, not by the agent. Its first line is fixed text
-  from /vibe naming the recipient and the length ("Send to @handle now? (N
-  characters)", or "Send this reply to …", or "Keep this for @handle until
-  they join /vibe?"). The lines under it show the opening of the exact text,
-  wrapped for display, with each line break shown as "↵"; all of it when the
-  text is short (Claude Code shows three lines in all, about 140 characters of
-  text). For a longer message the rest is only in the preview, which the agent
-  relays, and the preview says the box shows only the first lines.
+  from /vibe naming the recipient, the length, and whether all of the message
+  is shown ("Send to @handle now? (N chars, all shown)" or "(N chars, only
+  start shown)"; "Reply to", "again" and "Keep for @handle till they join?"
+  variants). The lines under it are the text, each starting with "> ", so the
+  text cannot pass for /vibe's or the host's own words. Runs of spaces and
+  blank characters show as one space and each line break as "↵", for display
+  only. Claude Code shows three lines in all, so about 140 characters of text
+  fit.
 - Accept sends only if the draft, its rev, its exact text and the signed-in
-  account are all what they were when the box opened, and the call was not
-  cancelled. Decline, Esc (cancel), a box left unanswered for five minutes, a
-  session with no keyboard (`claude -p`, where the box is cancelled at once),
-  the host withdrawing the call, or any error: nothing is sent and the draft
-  is kept. All of these give the agent the same result.
-- One box per showing: once a box has been opened for a draft, whatever the
-  answer, another box for it needs the draft shown again with `vibe_prepare`
-  and a message typed by the person after that. An agent cannot open box after
-  box, or re-show the draft by itself and try again. One box is open at a time.
+  account are what they were when the box opened, and the call was not
+  withdrawn. Decline, Esc (cancel), a box left unanswered for five minutes, a
+  session with no keyboard (`claude -p`, where the box is cancelled at once)
+  or an error sends nothing and keeps the draft, and the agent gets the same
+  result for all of them. When the host withdraws the call itself, its box is
+  withdrawn, nothing is sent, and the call gets no result at all.
+- No nagging: once a box has been opened for a draft and not accepted, that
+  draft needs showing again with `vibe_prepare` and a message typed by the
+  person before another box. After any answer but Accept, no box opens for any
+  draft until the person types again (where no turn is ever recorded, for five
+  minutes). At most three boxes open per person turn (where no turn is ever
+  recorded, three per server process). One box is open at a time.
 - The agent learns only whether it was sent. The box, its wording and the
   answer are not in the tool result.
 
 The box guarantees that a person at the keyboard chose to send this draft to
-this person. It does not by itself prove they read every word of a long
-message: past the opening, they rely on the preview the agent showed them.
+this person. When the whole message is in the box, they saw every word there.
+When only the start is, they rely on the preview the agent showed them, and the
+box says so. In particular, an edit the person asked for that the agent did not
+make can be noticed in the box only when the whole message is shown there;
+otherwise only in the preview.
 
 On hosts that show it, the box closes these gaps of the turn check: an
-unrelated prompt, or "no, don't send", is not a yes; one prompt does not
-unlock every draft that was shown; a wake-up the agent scheduled for itself
-cannot press Accept.
+unrelated prompt, or "no, don't send", is not a yes; one prompt does not unlock
+every draft that was shown; a wake-up the agent scheduled for itself cannot
+press Accept.
+
+**Where the host cannot show a box**, the turn check alone applies, with every
+gap listed below, and the preview says: "This app cannot show /vibe's
+confirmation box, so sending relies on your typed reply."
 
 What remains:
 
@@ -87,32 +107,44 @@ What remains:
   own Send for Buddy and the terminal), and the sign-in token in
   `~/.vibe/config.json` (or `auth.json`) can call the API directly.
 - Claude Code lets a hook answer a box with no dialog (`Elicitation` and
-  `ElicitationResult` hooks). Before it opens a box, `vibe_send` reads the
-  project's `.claude/settings.json` and `.claude/settings.local.json` and the
-  user's `settings.json` (in `CLAUDE_CONFIG_DIR`, or `~/.claude`), and refuses
-  to send while any of them has any Elicitation or ElicitationResult hook,
-  whatever it matches, or cannot be parsed and mentions elicitation. The scan
-  cannot see hooks configured anywhere else: managed (enterprise) policy
-  settings, plugins, or a file passed with `claude --settings`. Claude Code
-  asks the person before an agent may change its settings files; a person who
-  grants that write lets the agent add a hook between one check and the next
-  box.
+  `ElicitationResult` hooks). Before it opens a box, and again when an Accept
+  comes back on 2026-07-28, `vibe_send` reads:
+  - `.claude/settings.json` and `.claude/settings.local.json` in the project
+    folder and in every parent folder up to the home folder (or the root);
+  - the user's `settings.json` (in `CLAUDE_CONFIG_DIR`, or `~/.claude`);
+  - the managed settings file (`/Library/Application Support/ClaudeCode/managed-settings.json`
+    on macOS, `/etc/claude-code/managed-settings.json` on Linux);
+  - `hooks/hooks.json` under the config folder's `plugins/` (four levels, 200
+    folders, links not followed);
+  - the frontmatter of `.claude/skills/*/SKILL.md`, `.claude/agents/*.md` and
+    `.claude/commands/*.md` in the project and the config folder (200 files,
+    64 KB each, real paths inside the folder only).
+
+  It refuses to send while any of them has any Elicitation or
+  ElicitationResult hook, whatever it matches, or cannot be parsed and
+  mentions elicitation. A file that exists but cannot be read is skipped. This
+  list may not match every place the host loads hooks from: whether the host
+  honours a hook in skill, agent or command frontmatter, and whether it
+  protects those files from an agent's writes, is not verified, and a file
+  passed with `claude --settings` is not read. Claude Code asks the person
+  before an agent may change its settings files; a person who grants that
+  write lets the agent add a hook between one check and the next box.
 - Spacing and word choice can still carry information the person will not
   notice.
-- Hosts without the box have the turn check alone, with every gap listed
-  below.
 - An agent signed in to /vibe as itself (its own credential, a session minted
   for it as an agent, and it is the identity that sends) sends in its own name
   with no box and no turn check: there is no person whose words these are.
   Setting `VIBE_AGENT_HANDLE` is not enough: without that session, the
   session is treated as the person's, with every check above.
+- `VIBE_HOME` set to a relative path that resolves inside the project folder
+  puts the drafts, the turn records and the sign-in token where the agent's
+  own file tools can reach them. That is not checked.
 
 ## What the turn check does not cover
 
-On every host, `vibe_send` sends a draft only after the person has had a turn
-since it was last shown in this session (and, where a box can be shown, an
-Accept in it as well): a prompt they wrote,
-recorded by the arrival hook. A pick in the host's question menu
+Where a box cannot be shown, and where the box cannot show the whole message,
+`vibe_send` sends a draft only after the person has had a turn since it was
+last shown in this session: a prompt they wrote, recorded by the arrival hook. A pick in the host's question menu
 (AskUserQuestion) does not count as the person's choice. That check binds the
 agent's tool calls. It does not bind anything else running as the person:
 

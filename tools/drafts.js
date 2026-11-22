@@ -648,8 +648,10 @@ function claimDraft(d, rev) {
 }
 
 // ── the Send box (confirm-box.js) ─────────────────────────────────────────────
-// On top of the turn check, never instead of it: a rev goes only after the
-// person typed after its last showing AND accepted it in a box /vibe opened.
+// The person must be able to see every word that is sent: when the whole text
+// fits in the box, Accept is enough; otherwise the turn check (a typed message
+// after the preview) AND Accept. Where the turn check is unavailable (another
+// host, or no turn ever recorded), the box alone decides.
 // One box per draft per showing: once a box has been opened for a draft,
 // another needs the draft shown again with vibe_prepare and a person's turn
 // after that (the turn check). Tool results on this path are short and plain:
@@ -916,8 +918,9 @@ async function send(args, { byPerson, ctx = {} }) {
     return { ...p, display: `${lead}\n\n${p.display}`, data: { ...(p.data || {}), sent: false, definite: true } };
   }
 
-  // Where the host can show a box, the person also accepts in one, on top of
-  // the turn check. An agent really signed in as itself has no person to ask
+  // Where the host can show a box, the person accepts in one (with the turn
+  // check too when the box cannot show the whole text; openBox). An agent
+  // really signed in as itself has no person to ask
   // and keeps its own rule (turnCheck: agent_identity).
   if (!byPerson && !isAgentIdentity()) {
     if (ctx && ctx.retry && typeof ctx.retry.requestState === 'string') return sendStateless(id, rev, me, ctx);

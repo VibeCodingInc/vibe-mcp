@@ -7,10 +7,17 @@
  * saw the exact text and chose to send it. The turn check (turns.js) can only
  * tell that the person typed something after the draft was shown; any prompt
  * counts, even "no, don't send". Where the host can show a box itself (MCP
- * elicitation), vibe_send also asks the person directly, after the turn
- * check: a box with fixed wording naming the recipient and the length, then
- * the opening of the exact text, and Accept / Decline. Both are required. The
- * model never sees the box or the answer, only the tool result.
+ * elicitation), vibe_send also asks the person directly: a box whose first
+ * line is fixed /vibe wording (recipient, length, whether all of it is
+ * shown), then the text, each line quoted with "> ", and Accept / Decline.
+ * The rule: the person must be able to see every word that will be sent.
+ *   - The whole text fits in the box: Accept is enough.
+ *   - It does not fit: the turn check (a typed message after the preview)
+ *     AND Accept.
+ *   - Where the turn check is unavailable (a host that is not Claude Code, or
+ *     Claude Code with no turn ever recorded because the hook is not
+ *     installed), the box alone decides, whatever the length.
+ * The model never sees the box or the answer, only the tool result.
  *
  * Two ways a box is opened, by protocol era (index.js decides which applies):
  *   2025-06-18 / 2025-11-25   the server sends `elicitation/create` to the
