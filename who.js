@@ -22,7 +22,7 @@
 const fs = require('fs');
 const path = require('path');
 const { vibeHome } = require('./vibe-home');
-const { inertField } = require('./incoming');
+const { inertQuoted } = require('./incoming');
 
 const MAX_LINE = 160;
 const MAX_PEOPLE = 200;
@@ -139,7 +139,7 @@ function all(env = process.env) {
  * pass of inertField), with any `"` in it turned into `”`, so the note can
  * never close its own quote and continue as something else.
  */
-const quoted = (line) => inertField(line, MAX_LINE).replaceAll('"', '\u201d');
+const quoted = (line) => inertQuoted(line, MAX_LINE);
 
 /** For the model: `to them: "…"`. The caller puts the handle in front. */
 const toThem = (line) => `to them: "${quoted(line)}"`;

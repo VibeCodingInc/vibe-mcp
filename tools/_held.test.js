@@ -88,7 +88,8 @@ const NEVER_SENT = /\b(sent to|delivered)\b/i;
 test('a definite 404 makes a held preview: the exact message, not on /vibe yet, kept for that GitHub account, nothing sent', async () => {
   const wire = stubWire();
   try {
-    const d = await moves.vibe_prepare.handler({ handle: '@Newbie', message: 'the scheduler patch is in — want to try it?', reply_to: 'msg_x' });
+    // asked: the person asked for it, so the preview is laid out as ever (notice.js answerFirst).
+    const d = await moves.vibe_prepare.handler({ handle: '@Newbie', message: 'the scheduler patch is in — want to try it?', reply_to: 'msg_x', asked: true });
     assert.equal(d.data.draft.held, true);
     assert.equal(d.data.draft.for_github, 'newbie');
     assert.match(d.display, /^\*\*To:\*\* @newbie \(not on \/vibe yet\)\n\*\*Message \(exact\):\*\*\nthe scheduler patch is in — want to try it\?\n/);
@@ -120,7 +121,11 @@ test('an existing handle previews byte-for-byte as before (same display, same re
     identityDown = true; // the pre-feature path: no identity answer at all
     const before = await moves.vibe_prepare.handler({ handle: 'linus', message: 'cloud owns placement', reply_to: 'msg_q1' });
     assert.equal(found.data.draft.rev, before.data.draft.rev);
-    assert.equal(found.display.split(found.data.draft.id).join('ID'), before.display.split(before.data.draft.id).join('ID'));
+    // The second draft to @linus also carries the agent's "already offered"
+    // note (notice.js answerFirst); this test is about the identity lookup only.
+    assert.match(before.display, /Note for you, the agent: you already offered @linus a message here/);
+    const noNote = (x) => x.replace(/Note for you, the agent: [^\n]*\n\n/, '');
+    assert.equal(found.display.split(found.data.draft.id).join('ID'), noNote(before.display).split(before.data.draft.id).join('ID'));
     assert.ok(!('held' in found.data.draft));
   } finally { wire.restore(); }
 });

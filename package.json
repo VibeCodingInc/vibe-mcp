@@ -11,7 +11,7 @@
   },
   "scripts": {
     "start": "node index.js",
-    "test": "VIBE_SETUP_NO_AUTORUN=1 VIBE_HOME=\"$(mktemp -d)\" node --test tools/*.test.js",
+    "test": "VIBE_SETUP_NO_AUTORUN=1 VIBE_HOME=\"$(mktemp -d)\" NODE_OPTIONS=\"${NODE_OPTIONS:-} --require $(pwd)/test/loopback-only.cjs\" node --test tools/*.test.js",
     "pack:check": "node scripts/check-pack-closure.js",
     "prepack": "node scripts/sync-versions.js && node scripts/check-pack-closure.js",
     "version": "node scripts/sync-versions.js && git add server.json",
@@ -91,6 +91,8 @@
     "unsent.js",
     "showable.js",
     "host-command.js",
-    "confirm-box.js"
+    "confirm-box.js",
+    "notice.js",
+    "labclock.js"
   ]
 }

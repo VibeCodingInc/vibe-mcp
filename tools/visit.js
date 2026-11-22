@@ -21,7 +21,7 @@ const line = require('../line');
 const reach = require('../reach');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
 const { canonicalHandle } = require('../protocol/handle');
-const { inertField } = require('../incoming');
+const { inertQuoted } = require('../incoming');
 
 const definition = {
   name: 'vibe_visit',
@@ -83,7 +83,7 @@ async function handler(args, { open = openBrowser } = {}) {
     };
   }
 
-  const name = found.name ? `"${inertField(found.name, door.MAX_NAME)}"` : door.shortUrl(found.url);
+  const name = found.name ? `"${inertQuoted(found.name, door.MAX_NAME)}"` : door.shortUrl(found.url);
   const known = reach.isKnown(them) || line.isOpen(them);
   if (!known) {
     // A link from someone this person has never written to is not opened for
@@ -111,7 +111,7 @@ async function handler(args, { open = openBrowser } = {}) {
     `\u{1F6AA} Visiting @${them}: ${name}`,
     opened ? `   ${door.shortUrl(found.url)} · opened in your browser` : `   No browser could be opened from here. Open this to step in:\n   ${found.url}`,
   ];
-  if (says) lines.push(`   @${them} is here now, working on: "${inertField(says, 100)}"`);
+  if (says) lines.push(`   @${them} is here now, working on: "${inertQuoted(says, 100)}"`);
   lines.push(
     '',
     `You are a visitor. Nothing was sent, and @${them} was not told.`,

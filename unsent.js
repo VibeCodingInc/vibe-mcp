@@ -95,6 +95,8 @@ function openReplies(drafts, threads, me, { now = Date.now(), minAgeMs = MIN_AGE
   const out = [];
   for (const d of drafts || []) {
     if (!d || d.status !== 'previewed' || d.held || !safeDraftId(d.id)) continue;
+    // A note back ("landed", tools/drafts.js) is optional: left unsent, it is declined, never a reply owed.
+    if (d.kind === 'landed') continue;
     if (lower(d.from) !== mine) continue;
     const to = lower(d.to);
     if (!to || !waitingOn.has(to) || isMuted(to)) continue;
@@ -114,7 +116,9 @@ function openReplies(drafts, threads, me, { now = Date.now(), minAgeMs = MIN_AGE
 }
 
 function ago(at, now = Date.now()) {
-  const mins = Math.max(1, Math.floor((now - at) / 60000));
+  // Display only: a lab run may make its days real (labclock.js, loopback only).
+  const labclock = require('./labclock');
+  const mins = Math.max(1, Math.floor((labclock.now(now) - labclock.at(at)) / 60000));
   if (mins < 60) return mins === 1 ? '1 minute ago' : `${mins} minutes ago`;
   const hours = Math.floor(mins / 60);
   return hours === 1 ? '1 hour ago' : `${hours} hours ago`;

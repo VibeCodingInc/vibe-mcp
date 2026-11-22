@@ -27,7 +27,7 @@ const path = require('path');
 const arrival = require('./arrival');
 const reach = require('./reach');
 const line = require('./line');
-const { inertField } = require('./incoming');
+const { inertQuoted } = require('./incoming');
 
 const WAIT_MS = Number(process.env.VIBE_NEAR_WAIT_MS) || 45 * 1000;
 const STALE_MS = 30 * 60 * 1000;   // a "stuck" from half an hour ago is not now
@@ -52,7 +52,7 @@ function due(dir, now = Date.now()) {
 }
 
 function render(people) {
-  const shown = people.map((p) => `@${p.handle}${p.says ? ` (${inertField(p.says, 60)})` : ''}${p.door ? ' \u{1F6AA}' : ''}`);
+  const shown = people.map((p) => `@${p.handle}${p.says ? ` (${inertQuoted(p.says, 60)})` : ''}${p.door ? ' \u{1F6AA}' : ''}`);
   const first = people[0].handle;
   const verbs = people.some((p) => p.door) ? `say "ask @${first}" or "visit @${first}"` : `say "ask @${first}"`;
   return {

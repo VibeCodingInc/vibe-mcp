@@ -97,7 +97,8 @@ function requestOnce(method, path, data = null, options = {}) {
         // Handle non-2xx responses
         if (res.statusCode >= 400) {
           // 401 REFRESH: If unauthorized and haven't retried, try to recover
-          if (res.statusCode === 401 && !options._retried && options.auth !== false) {
+          // A bounded read (noRefresh) never refreshes or retries: a 401 is its answer.
+          if (res.statusCode === 401 && !options._retried && !options.noRefresh && options.auth !== false) {
             console.error('[api] 401 received, attempting token refresh...');
 
             // First, reload config from disk (in case token was saved but not pushed to store)
@@ -864,6 +865,21 @@ async function getThread(myHandle, theirHandle) {
   }
 }
 
+/**
+ * The conversation, read once with a short timeout and no retry, for a
+ * caller that must not be slowed by it (vibe_prepare's "already said"). A
+ * read only: nothing is marked read. Failure is a readFailed empty list.
+ */
+async function getThreadBounded(myHandle, theirHandle, { timeoutMs = 1500 } = {}) {
+  let timer;
+  const late = new Promise((resolve) => { timer = setTimeout(() => resolve(failedThread()), timeoutMs + 250); timer.unref?.(); });
+  try {
+    return await Promise.race([getThreadWithRequest((m, p, d) => requestOnce(m, p, d, { timeout: timeoutMs, noRefresh: true }), myHandle, theirHandle), late]);
+  } catch (e) {
+    return failedThread();
+  } finally { clearTimeout(timer); }
+}
+
 async function markThreadReadWithRequest(
   makeRequest,
   myHandle,
@@ -983,8 +999,10 @@ async function verifyAuthToken(token) {
 function formatTimeAgo(timestamp) {
   if (timestamp === undefined || timestamp === null || isNaN(timestamp)) return 'unknown';
 
-  const now = Date.now();
-  const seconds = Math.floor((now - timestamp) / 1000);
+  // Display only: a lab run may make its days real (labclock.js, loopback only).
+  const labclock = require('../labclock');
+  const now = labclock.now();
+  const seconds = Math.floor((now - labclock.at(typeof timestamp === 'string' ? Number(timestamp) : timestamp)) / 1000);
 
   if (seconds < 0 || isNaN(seconds)) return 'unknown';
   if (seconds < 60) return 'just now';
@@ -1046,6 +1064,7 @@ module.exports = {
   getRawInbox,
   getUnreadCount,
   getThread,
+  getThreadBounded,
   markThreadRead,
   formatTimeAgo,
 

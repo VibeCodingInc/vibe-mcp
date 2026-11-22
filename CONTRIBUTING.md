@@ -38,6 +38,7 @@ intelligence/     — AI-assisted features
 - Keep changes focused — one feature or fix per PR
 - Test your changes locally by running the server with an MCP client
 - Follow the existing code style
+- Any line the product prints, or tells the agent to say, follows [docs/VOICE.md](docs/VOICE.md)
 
 ## Pull Requests
 

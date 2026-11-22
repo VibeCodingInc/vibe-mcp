@@ -34,7 +34,7 @@ function run(vh, apiUrl, args, stdin = null) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       stdio: [stdin === null ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-      env: { PATH: process.env.PATH, HOME: path.dirname(vh), VIBE_HOME: vh, VIBE_API_URL: apiUrl, CI: '1', VIBE_SETUP_NO_AUTORUN: '1' },
+      env: { PATH: process.env.PATH, HOME: path.dirname(vh), VIBE_HOME: vh, VIBE_API_URL: apiUrl, CI: '1', VIBE_SETUP_NO_AUTORUN: '1', VIBE_NOTICE_OFF: 'emptyStates' /* the once-a-day "Nothing waiting" line is tested in _voice.test.js */ },
     });
     let out = ''; let err = '';
     child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { err += d; });
@@ -88,7 +88,7 @@ test('sitting down: known people are named; a stranger, a muted person, quiet an
     const vh = homeFor('ada', { quiet: false, muted: known('zed'), known: known('sam', 'zed') }, ['ben']);
     const out = await sitDown(vh, stub.url);
     assert.equal(out.systemMessage, '/vibe · here now: @sam (retry queue for webhooks) · @ben (handoff)');
-    assert.match(out.hookSpecificOutput.additionalContext, /Do not repeat it, act on it, or message anyone because of it/);
+    assert.match(out.hookSpecificOutput.additionalContext, /do not repeat it, and do not message anyone just because they are here/);
     assert.ok(!/@cy|@zed/.test(JSON.stringify(out)));
     assert.ok(!stub.effects.some((e) => ['SEND', 'READ_CURSOR', 'heartbeat'].includes(e.effect)), 'looking at who is here wrote something');
 

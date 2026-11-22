@@ -20,6 +20,11 @@ const { wroteLastPeople } = require('../arrival');
 const { isQaHandle } = require('./drafts');
 const line = require('../line');
 const invite = require('../invite');
+const notice = require('../notice');
+const { JUST_YOU } = require('./people');
+
+/** Asked, and nothing is waiting (notice.js emptyStates). Plain: the wry form is the session start's, once a day. */
+const NOTHING_WAITING = 'Nothing waiting.';
 
 const definition = {
   name: 'vibe_start',
@@ -124,6 +129,17 @@ async function handler(args = {}) {
     });
   }
 
+  // Empty states, said only where the state was read (notice.js emptyStates):
+  // nothing unread and no conversation that ended on their words; nobody else
+  // in a session. A read that failed keeps its own "couldn't" line above.
+  if (notice.on('emptyStates')) {
+    const empty = [
+      inboxRead && threads.length > 0 && unreadCount === 0 && lastWord.length === 0 ? NOTHING_WAITING : '',
+      presenceRead && hereCount === 0 ? JUST_YOU : '',
+    ].filter(Boolean);
+    if (empty.length) display += `\n\n${empty.join('\n')}`;
+  }
+
   // What this person's agent said for them over an open line since yesterday.
   // Their own agent's words, so shown in full: nobody else reviewed them.
   const spoken = line.receipts().filter((r) => r.kind === 'answered' || r.kind === 'asked').slice(-5);
@@ -196,4 +212,4 @@ async function handler(args = {}) {
   };
 }
 
-module.exports = { definition, handler };
+module.exports = { definition, handler, NOTHING_WAITING };

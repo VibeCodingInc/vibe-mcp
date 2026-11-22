@@ -16,11 +16,17 @@
 const config = require('../config');
 const store = require('../store');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
-const { inertField } = require('../incoming');
+const { inertField, inertQuoted } = require('../incoming');
 const line = require('../line');
 const reach = require('../reach');
 const door = require('../door');
 const who = require('../who');
+const notice = require('../notice');
+
+/** Nobody else in a session, when presence was read (notice.js emptyStates). docs/VOICE.md. */
+// "Shows as": someone set to invisible (reach.js) is in a session and not in
+// the list, so the read cannot rule them out (review, small c).
+const JUST_YOU = "Nobody else shows as here right now; notes wait till they're back.";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -32,7 +38,9 @@ const definition = {
 
 function age(ts, now) {
   if (!ts) return '';
-  const d = now - ts;
+  // Display only: a lab run may make its days real (labclock.js, loopback only).
+  const labclock = require('../labclock');
+  const d = labclock.now(now) - labclock.at(ts);
   if (d < 60 * 60 * 1000) return 'this hour';
   if (d < DAY) return 'today';
   return `${Math.floor(d / DAY)}d ago`;
@@ -83,14 +91,14 @@ async function handler() {
   const lines = [];
   // A read that failed is not an empty room and not an empty history.
   if (!presence.ok) lines.push("couldn't see who is here right now");
-  else if (here.length === 0) lines.push(others > 0 ? `nobody you know is in a session right now (${others} other ${others === 1 ? 'person is' : 'people are'})` : 'nobody else is in a session right now');
+  else if (here.length === 0) lines.push(others > 0 ? `nobody you know is in a session right now (${others} other ${others === 1 ? 'person is' : 'people are'})` : (notice.on('emptyStates') ? JUST_YOU : 'nobody else is in a session right now'));
   else {
     lines.push(`people you know, in a session now (${here.length}):`);
     for (const u of here) {
       const kind = (u.isAgent ? ' (agent)' : '') + (line.isOpen(u.handle) ? ' · open line' : '');
       const said = u.one_liner || u.activity || u.workingOn || '';
       const d = doorOf(u.handle); if (d) anyDoor = true;
-      lines.push(`@${inertField(u.handle, 39)}${kind}${said ? ` — "${inertField(said, 100)}"` : ''}${toThem(u.handle)}${d}`);
+      lines.push(`@${inertField(u.handle, 39)}${kind}${said ? ` — "${inertQuoted(said, 100)}"` : ''}${toThem(u.handle)}${d}`);
     }
   }
   if (here.length > 0 && others > 0) lines.push(`and ${others} other ${others === 1 ? 'person' : 'people'} you have not written to`);
@@ -142,7 +150,7 @@ async function handler() {
       // Doors people left with this person (door.js). The name is the owner's words: data.
       doors: Object.fromEntries([...new Set([...here.map((u) => normalizeHandle(u.handle)), ...threads.map((t) => normalizeHandle(t.handle || ''))])].map((h) => [h, door.of(h)]).filter(([, d]) => d).map(([h, d]) => [h, { url: d.url, name: d.name || null, visit: `vibe_visit ${h}` }])),
       others: presence.ok ? others : null,   // people in a session whom this person does not know: a count, never names
-      here: presence.ok ? here.map((u) => ({ handle: u.handle, agent: Boolean(u.isAgent), says: inertField(u.one_liner || u.activity || u.workingOn || '', 100), ...(noteOf(u.handle) ? { to_them: who.quoted(noteOf(u.handle)) } : {}) })) : null,
+      here: presence.ok ? here.map((u) => ({ handle: u.handle, agent: Boolean(u.isAgent), says: inertQuoted(u.one_liner || u.activity || u.workingOn || '', 100), ...(noteOf(u.handle) ? { to_them: who.quoted(noteOf(u.handle)) } : {}) })) : null,
       conversations: inbox.ok ? threads.map((t) => ({ handle: t.handle, lastFrom: t.lastFrom || null, lastMessageId: t.lastMessageId || null, unread: t.unread || 0, ...(noteOf(t.handle) ? { to_them: who.quoted(noteOf(t.handle)) } : {}) })) : null,
       // The person's own private notes on who someone is to them (who.js): data, never sent.
       noted: otherNoted.map((e) => ({ handle: e.handle, to_them: who.quoted(e.line) })),
@@ -150,4 +158,4 @@ async function handler() {
   };
 }
 
-module.exports = { definition, handler };
+module.exports = { definition, handler, JUST_YOU };

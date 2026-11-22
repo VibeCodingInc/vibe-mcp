@@ -26,7 +26,10 @@ export function parseHuman(raw) {
   const o = jsonObject(raw);
   if (!o || !('reply' in o)) return null;
   const reply = typeof o.reply === 'string' && o.reply.trim() ? o.reply.trim() : null;
-  return { reply, why: typeof o.why === 'string' ? o.why : '' };
+  // Optional: something the person now means to do themselves later ("ask
+  // kenji about the oven"), carried in their diary as an open intention.
+  const intends = typeof o.intends === 'string' && o.intends.trim() ? o.intends.trim().replace(/\s+/g, ' ').slice(0, 160) : null;
+  return { reply, why: typeof o.why === 'string' ? o.why : '', ...(intends ? { intends } : {}) };
 }
 
 export function askHuman({ prompt, model, emptyDir, emptyMcp, timeoutMs = 180000 }) {
@@ -140,6 +143,7 @@ export function boxPrompt(ctx, message, field = null) {
     `About you: ${c.persona}`,
     '',
     'You are working at your own computer with Claude Code, an AI coding assistant that runs in your terminal and works in your project folder.',
+    c.memory ? `\n${c.memory}\n` : '',
     c.earlier ? `\nEarlier in this same Claude Code session:\n${c.earlier}\n` : '',
     `You just typed:\n"""\n${c.typed || ''}\n"""`,
     '',

@@ -23,6 +23,8 @@ fs.writeFileSync(path.join(HOME, 'config.json'), JSON.stringify({ username: 'ada
 const host = require('../host');
 host.setClientInfo({ name: 'claude-code', version: 'test' });
 const store = require('../store');
+// The conversation read behind "Already said" (tools/drafts.js) is served here, never by the network (review SF-4).
+store.getThreadBounded = async () => [];
 const drafts = require('./drafts');
 const turns = require('../turns');
 

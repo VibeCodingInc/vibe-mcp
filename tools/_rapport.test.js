@@ -17,6 +17,8 @@ const jwt = (h) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Mat
 fs.writeFileSync(path.join(HOME, 'config.json'), JSON.stringify({ username: 'ada', authMethod: 'github', authToken: jwt('ada') }));
 
 const store = require('../store');
+// The conversation read behind "Already said" (tools/drafts.js) is served here, never by the network (review SF-4).
+store.getThreadBounded = async () => [];
 const drafts = require('./drafts');
 const rapport = require('../rapport');
 const arrival = require('../arrival');

@@ -96,7 +96,7 @@ function renderIncoming(items, { replyTo, threadHint } = {}) {
  */
 function inertField(text, maxLen = 80) {
   const flat = String(text || '')
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')   // control chars, incl. newlines
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')   // control chars (C0, DEL, C1), incl. newlines
     // Bidi overrides and invisible formatting characters: a status can otherwise
     // render as one thing to the human reading the terminal and another to the model
     // reading the same bytes, or hide text inside an apparently short field.
@@ -150,4 +150,24 @@ function inertIdentity(text, maxLen = 40) {
     .replace(/^[\s\u2022•\-+#]+/, '') + '`';
 }
 
-module.exports = { renderIncoming, neutralize, scrub, inertField, inertMarkup, inertIdentity, MSG_OPEN, MSG_CLOSE, MAX_BODY };
+/**
+ * Someone else's words shown inside quotes or beside the product's own marks
+ * (review SF-2): inertField, and nothing in them can close the quote or read
+ * as product structure. A straight `"` becomes `”`, `*` becomes `∗` (no
+ * bold, so no forged "**Check:**"), the middle dot the product separates marks
+ * with becomes a bullet (no forged "· open line", "· door open" or
+ * "- you · just now"), and the product's own headings are broken visibly:
+ * "For you (the agent)", "Already said (in this conversation)". Every word
+ * stays visible: defanged, never censored. One helper for every such place.
+ */
+function inertQuoted(text, maxLen = 80) {
+  const flat = inertField(text, Number.MAX_SAFE_INTEGER)
+    .replaceAll('"', '\u201d')
+    .replaceAll('*', '\u2217')
+    .replaceAll('\u00b7', '\u2022')
+    .replace(/(for you), (the agent)/gi, '$1 ($2)')
+    .replace(/(already said) (in this conversation)/gi, '$1 ($2)');
+  return flat.length > maxLen ? flat.slice(0, maxLen - 1) + '\u2026' : flat;
+}
+
+module.exports = { renderIncoming, neutralize, scrub, inertField, inertMarkup, inertIdentity, inertQuoted, MSG_OPEN, MSG_CLOSE, MAX_BODY };

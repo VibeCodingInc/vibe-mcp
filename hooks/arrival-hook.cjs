@@ -120,7 +120,8 @@ function main() {
 
   const context = rows.map((r) => r.context);
   if (nudge) context.push(nudge);
-  const shown = rows.map((r) => r.line).filter(Boolean).join('\n');
+  const now = Date.now();
+  const shown = rows.map((r) => shownLine(r, now)).filter(Boolean).join('\n');
   process.stdout.write(JSON.stringify({
     suppressOutput: true,
     ...(shown ? { systemMessage: shown } : {}),
@@ -129,6 +130,35 @@ function main() {
       additionalContext: context.join('\n\n'),
     },
   }));
+}
+
+// ── the line the person sees ────────────────────────────────────────────────
+// A row may carry a header (arrival.js, notice.js arrivalHeader): the person's
+// own words, said as a note that waited for this pause, with its age worked
+// out now, when it is printed. This hook runs only at a pause (a prompt, or
+// after a tool step), so "waiting at your pause" is what happened. Anything
+// malformed falls back to the row's plain line. ago() and headerLine() must
+// match arrival.js (a test pins them).
+const CTRL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+function ago(ms) {
+  if (!Number.isFinite(ms)) return '';
+  const m = Math.floor(Math.max(0, ms) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+function headerLine(h, now = Date.now()) {
+  const bits = [Number.isFinite(h.at) ? ago(now + (Number.isFinite(h.shift) ? h.shift : 0) - h.at) : '', h.invited ? 'you invited them' : ''].filter(Boolean).join('; ');
+  return `/vibe · Note from @${h.from}${bits ? ` (${bits})` : ''}, waiting at your pause: "${h.said}"`;
+}
+function shownLine(row, now = Date.now()) {
+  const h = row && row.header;
+  const ok = h && typeof h === 'object' && typeof h.from === 'string' && /^[A-Za-z0-9_.-]{1,40}$/.test(h.from) &&
+    typeof h.said === 'string' && h.said.length <= 160 && !CTRL.test(h.said);
+  // The fallback is the server's own line; C1 controls are stripped all the same.
+  return ok ? headerLine(h, now) : (row && typeof row.line === 'string' ? row.line.replace(/[\u0080-\u009f]/g, ' ') : row && row.line);
 }
 
 // ── who wrote this prompt ───────────────────────────────────────────────────
@@ -241,4 +271,4 @@ function stuckNudge(input, dir) {
 }
 
 if (require.main === module) { try { main(); } catch { quiet(); } }
-module.exports = { personWrote };
+module.exports = { personWrote, shownLine, headerLine, ago };

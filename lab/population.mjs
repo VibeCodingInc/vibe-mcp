@@ -10,7 +10,7 @@
 //   node lab/population.mjs <world.json|dir> [more ...] --out <dir>
 //        [--model sonnet] [--human-model sonnet | --human-cmd "<command>"] [--concurrency 3]
 //        [--turn-timeout 300] [--max-human-replies 3] [--limit N]
-//        [--force] [--keep] [--no-box]
+//        [--force] [--keep] [--no-box] [--no-lab-clock]
 //
 // In plain words: each world file describes two or three fictional people (who they
 // are, how they talk, the files in their project folder), whether they already
@@ -66,6 +66,21 @@
 // alone; no Elicitation hook is installed. Summaries record box_path: false and
 // no_box_via: "proxy", and a world that still gets a Send box result FAILS.
 //
+// Memory and time: every decision of the person-player carries a short diary
+// of that person's earlier days, built from the record (diaryFor: what they
+// sent, drafts they did not send, messages they saw, what they said they would
+// do), and an intention still open from an earlier day is put to them plainly.
+// Summaries count intentions stated / followed (any later message to that
+// person) / lapsed, and drafts the agent offered unrequested with what became
+// of each, turn_hijacks (a reply that was only an unasked draft) and
+// false_above_claims (pointing "above" at what was never shown), each listed
+// with its session turn number (turnHijacks, falseAboveClaims), and notes back
+// offered / replies used (landed_offered, landed_sent, replies_used: see
+// repliesUsed). Each lab day,
+// every person's /vibe is told the day (labclock.js,
+// display only, loopback only) so yesterday reads as yesterday;
+// --no-lab-clock leaves the real clock.
+//
 // Same safety as rehearse.mjs: every world gets its own in-process stub on
 // 127.0.0.1, every person their own VIBE_HOME, MCP config and scratch settings
 // file. Nothing reaches production or ~/.claude/settings.json. The world's
@@ -94,7 +109,7 @@ const TOOLS = [...BUILTINS, 'mcp__vibe__vibe_people', 'mcp__vibe__vibe_thread', 
 
 // ---------------------------------------------------------------- arguments
 function parseArgs(argv) {
-  const o = { files: [], out: null, model: null, humanModel: 'sonnet', humanCmd: null, concurrency: 3, turnTimeout: 300, maxHumanReplies: 3, limit: 0, force: false, keep: false, noBox: false };
+  const o = { files: [], out: null, model: null, humanModel: 'sonnet', humanCmd: null, concurrency: 3, turnTimeout: 300, maxHumanReplies: 3, limit: 0, force: false, keep: false, noBox: false, labClock: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]; const next = () => { const v = argv[++i]; if (v === undefined) throw new Error(`${a} needs a value`); return v; };
     if (a === '--out') o.out = next();
@@ -108,6 +123,7 @@ function parseArgs(argv) {
     else if (a === '--force') o.force = true;
     else if (a === '--keep') o.keep = true;
     else if (a === '--no-box') o.noBox = true;
+    else if (a === '--no-lab-clock') o.labClock = false;
     else if (a.startsWith('--')) throw new Error(`unknown option ${a}`);
     else o.files.push(a);
   }
@@ -154,9 +170,38 @@ export function useNoBoxProxy(id) {
   return proxied;
 }
 
+// ---------------------------------------------------------------- the lab's clock
+// Lab days are minutes apart, so the product said "4m ago" about yesterday.
+// Each day the runner tells every person's /vibe (server and SessionStart
+// hook) what day it is: VIBE_LAB_CLOCK_OFFSET_HOURS = 24*(day-1), and when
+// each day began (VIBE_LAB_DAY_STARTS), read by labclock.js for DISPLAY only
+// and only against a loopback API. --no-lab-clock leaves the real clock.
+export function labClockEnv(day, dayStarts) {
+  return {
+    VIBE_LAB_CLOCK_OFFSET_HOURS: String(24 * (day - 1)),
+    VIBE_LAB_DAY_STARTS: Object.entries(dayStarts).map(([d, t]) => `${Number(d)}:${Math.floor(t)}`).sort((a, b) => Number(a.split(':')[1]) - Number(b.split(':')[1])).join(','),
+  };
+}
+const CLOCK_PREFIX = /^VIBE_LAB_CLOCK_OFFSET_HOURS='[^']*' VIBE_LAB_DAY_STARTS='[^']*' /;
+/** Write the day's clock into this person's server config(s) and SessionStart hook command. */
+export function setLabClock(id, clock) {
+  for (const f of [id.mcp, id.directMcp].filter(Boolean)) {
+    const cfg = JSON.parse(fs.readFileSync(f, 'utf8'));
+    cfg.mcpServers.vibe.env = { ...(cfg.mcpServers.vibe.env || {}), ...clock };
+    fs.writeFileSync(f, JSON.stringify(cfg));
+  }
+  for (const f of [id.settings, id.resumeSettings].filter(Boolean)) {
+    const st = JSON.parse(fs.readFileSync(f, 'utf8'));
+    for (const group of st.hooks?.SessionStart || []) for (const h of group.hooks || []) {
+      if (typeof h.command === 'string') h.command = `VIBE_LAB_CLOCK_OFFSET_HOURS=${q(clock.VIBE_LAB_CLOCK_OFFSET_HOURS)} VIBE_LAB_DAY_STARTS=${q(clock.VIBE_LAB_DAY_STARTS)} ${h.command.replace(CLOCK_PREFIX, '')}`;
+    }
+    fs.writeFileSync(f, JSON.stringify(st, null, 2));
+  }
+}
+
 /** What the box hook needs to ask the person-player, rewritten before every turn. */
-export function writeBoxContext(id, { person, handle, typed, earlier, opts, emptyDir, emptyMcp }) {
-  const ctx = { name: person.name, role: person.role, persona: person.persona, handle, typed, earlier, emptyDir, timeoutMs: 180000,
+export function writeBoxContext(id, { person, handle, typed, earlier, memory = '', opts, emptyDir, emptyMcp }) {
+  const ctx = { name: person.name, role: person.role, persona: person.persona, handle, typed, earlier, ...(memory ? { memory } : {}), emptyDir, timeoutMs: 180000,
     player: opts.humanCmd ? { cmd: opts.humanCmd } : { model: opts.humanModel || null, emptyMcp } };
   fs.writeFileSync(id.boxContext, JSON.stringify(ctx), { mode: 0o600 });
   return ctx;
@@ -260,6 +305,153 @@ export function seedKnowsAs(home, knowsAs) {
 }
 export { validateWorld, parseArgs, parseHuman, humanPrompt, HUMAN_SYSTEM, writePopulation, analyse };
 
+// ---------------------------------------------------------------- the person's memory
+// The model playing a person sees only their persona, what they typed and the
+// screen; on day 2 it had "forgotten" day 1 (two recorded cases of a simulated
+// person disowning their own message, BRIEF-1 section 7). So every decision
+// gets a short diary the runner builds from the record: per earlier day, what
+// this person sent, drafts they did not send, messages they saw, and what they
+// said they would do. Built from the record only, never from `truth`.
+export const DIARY_MAX = 1200;
+const clip160 = (t) => { const x = String(t || '').replace(/\s+/g, ' ').trim(); return x.length > 160 ? `${x.slice(0, 159)}…` : x; };
+const typedKinds = new Set(['prompt', 'human_reply']);
+
+// "I'll ask them myself", "I'll ping her later", "will text him tonight",
+// "let me check with kenji": something the person says they will do, to
+// someone, themselves. The clause starts at the verb.
+const INTENT_VERBS = 'ask|ping|text|message|msg|dm|email|e-mail|call|slack|tell|nudge|reach out to|check with|follow up with|get back to|loop in|run it by|run this by|bug';
+const INTENT = new RegExp(`(?:^|[^a-z'])(?:i'?ll|i will|i'?m going to|i'?m gonna|gonna|let me|will)\\s+(?:just\\s+|probably\\s+|go\\s+|then\\s+|also\\s+)?((?:${INTENT_VERBS})\\b[^.!?\\n;]{0,100})`, 'gi');
+const NOT_A_PERSON = /^(?:\S+\s+){0,2}?(?:you|claude|the agent|it|this|that|us|myself)\b/i;
+
+/** Who a clause is about: a handle, a first name, or a pronoun when there is only one other person. */
+function intentTarget(clause, self, world) {
+  const lower = String(clause).toLowerCase();
+  const others = Object.keys(world.people || {}).filter((h) => h !== self);
+  for (const h of others) {
+    const first = String(world.people[h].name || '').split(/\s+/)[0].toLowerCase();
+    const words = [h, first].filter((w) => w && w.length > 1).map((w) => w.normalize('NFD').replace(/[̀-ͯ]/g, ''));
+    const plain = lower.normalize('NFD').replace(/[̀-ͯ]/g, '');
+    if (words.some((w) => new RegExp(`(^|[^a-z0-9_])@?${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9_]|$)`).test(plain))) return { to: h };
+  }
+  if (/\b(him|her|them|they)\b/.test(lower)) return { to: others.length === 1 ? others[0] : null };
+  return null;
+}
+
+/** What a person said they would do, in one thing they typed. Pure. */
+export function intentionsIn(text, self, world) {
+  const out = [];
+  for (const m of String(text || '').matchAll(INTENT)) {
+    const clause = m[1].trim().replace(/\s+/g, ' ');
+    const verb = (clause.match(new RegExp(`^(?:${INTENT_VERBS})\\b`, 'i')) || [''])[0];
+    const rest = clause.slice(verb.length).trim();
+    if (NOT_A_PERSON.test(rest) && !intentTarget(rest.split(/\s+/).slice(0, 3).join(' '), self, world)) continue;
+    const target = intentTarget(clause, self, world);
+    if (!target) continue;
+    out.push({ text: clause.slice(0, 120), to: target.to });
+  }
+  return out;
+}
+
+/** The wire as recorded so far: [{ from, to, body, at }] (at = the transcript index of the turn that sent it). */
+export const wireSoFar = (effects) => (effects || []).filter((e) => e.effect === 'SEND' && Number.isInteger(e._at)).map((e) => ({ from: e.me, to: e.to, body: e.body, at: e._at }));
+
+/**
+ * Every intention any person stated, once each: from what they typed (the
+ * pattern list) and from the player's own `intends` field. A restatement of
+ * one still open to the same person is the same intention. `followed` is the
+ * first message they then sent that person (any message), or null.
+ */
+export function collectIntentions(transcript, wire, world) {
+  const out = [];
+  for (const e of transcript) {
+    if (!typedKinds.has(e.kind) && e.kind !== 'human_null') continue;
+    const found = typedKinds.has(e.kind) ? intentionsIn(e.text, e.who, world).map((x) => ({ ...x, source: 'typed' })) : [];
+    const said = e.simulator_only && typeof e.simulator_only.intends === 'string' ? e.simulator_only.intends : null;
+    if (said) {
+      const t = intentTarget(said, e.who, world);
+      // The player's own words for it win over the pattern's, for the same person.
+      const same = found.findIndex((x) => x.to === (t ? t.to : null));
+      const rec = { text: said.slice(0, 120), to: t ? t.to : null, source: 'player' };
+      if (same >= 0) found[same] = rec; else found.push(rec);
+    }
+    for (const x of found) {
+      const open = out.find((o) => o.who === e.who && o.to === x.to && (o.followed === null || o.followed > e.i));
+      if (open) continue;
+      const sent = (wire || []).filter((w) => w.from === e.who && w.at > e.i && (x.to ? w.to === x.to : true)).sort((a, b) => a.at - b.at)[0];
+      out.push({ who: e.who, day: e.day, event: e.i, text: x.text, to: x.to, source: x.source, followed: sent ? sent.at : null });
+    }
+  }
+  return out;
+}
+
+// Their words back to them in the second person: "ask him myself" -> "ask him yourself".
+const yours = (t) => String(t).replace(/\bmyself\b/gi, 'yourself').replace(/\bmy\b/gi, 'your').replace(/\bI'?m\b/g, "you're").replace(/\bI\b/g, 'you');
+const draftId = (text) => { const m = String(text || '').match(/_\(draft ([^\s·]+) · rev ([^\s)_]+)\)_/); return m ? m[1] : null; };
+const sameBody = (a, b) => { const x = String(a || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 40); return x.length > 0 && x === String(b || '').replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 40); };
+
+/**
+ * The person's own memory of earlier days, most recent first, at most `max`
+ * characters, and the intentions still open from an earlier day. Pure: built
+ * from the transcript and the wire only.
+ */
+export function diaryFor({ transcript, wire, world, who, day, max = DIARY_MAX }) {
+  const past = transcript.filter((e) => e.day < day);
+  const lastI = past.length ? past[past.length - 1].i : -1;
+  const items = [];   // { i, day, line }
+  const wireUpTo = (wire || []).filter((w) => w.at <= lastI);
+  for (const w of wireUpTo) {
+    const d = transcript[w.at]?.day;
+    if (w.from === who && d < day) items.push({ i: w.at, day: d, line: `you sent @${w.to}: "${clip160(w.body)}"` });
+    if (w.to === who) {
+      // A message they saw on an earlier day: an arrival line naming the sender, or a tool's output holding its start.
+      // Same rule as analyse() uses for "shown to recipient".
+      const saw = past.find((e) => e.i > w.at && e.who === who && ((e.kind === 'shown' && aboutLines(e.text, w.from).some((l) => !isPresence(l))) || (e.kind === 'returned' && norm(e.text).includes(snippet(w.body)))));
+      if (saw) items.push({ i: saw.i, day: saw.day, line: `@${w.from} wrote you: "${clip160(w.body)}"` });
+    }
+  }
+  // Drafts Claude prepared for them that did not go out.
+  const drafts = new Map();
+  const returned = new Map(past.filter((e) => e.kind === 'returned').map((e) => [e.tool_use_id, e]));
+  for (const e of past) {
+    if (e.who !== who || e.kind !== 'tool' || e.name !== 'mcp__vibe__vibe_prepare') continue;
+    const id = draftId(returned.get(e.id)?.text) || e.input?.id || null;
+    if (!id) continue;
+    const cur = drafts.get(id) || { to: String(e.input?.handle || '').replace(/^@/, '') || null, body: '', i: e.i, day: e.day };
+    if (typeof e.input?.message === 'string') cur.body = e.input.message;
+    cur.i = e.i; cur.day = e.day;
+    drafts.set(id, cur);
+  }
+  for (const d of drafts.values()) {
+    if (wireUpTo.some((w) => w.from === who && (!d.to || w.to === d.to) && sameBody(w.body, d.body))) continue;
+    items.push({ i: d.i, day: d.day, line: `Claude drafted a message${d.to ? ` to @${d.to}` : ''} for you and you did not send it: "${clip160(d.body)}"` });
+  }
+  const intentions = collectIntentions(transcript, wire, world).filter((x) => x.who === who && x.day < day);
+  for (const x of intentions) {
+    const done = x.followed !== null && x.followed <= lastI;
+    items.push({ i: x.event, day: x.day, line: `you said you would ${yours(x.text)}${done ? ' (you then messaged them)' : ''}` });
+  }
+  items.sort((a, b) => b.i - a.i);
+  const lines = []; let used = 0;
+  for (const it of items) {
+    const l = `- Day ${it.day}: ${it.line}`;
+    if (used + l.length + 1 > max) break;
+    lines.push(l); used += l.length + 1;
+  }
+  // Open: stated on an earlier day and no message to that person since, as of now.
+  const allWire = wire || [];
+  const open = intentions.filter((x) => !allWire.some((w) => w.from === who && w.at > x.event && (x.to ? w.to === x.to : true)));
+  return { lines, open, text: memoryText(lines, open) };
+}
+
+/** The diary as the person-player reads it: their own memory, apart from the screen. */
+export function memoryText(lines, open = []) {
+  if (!lines.length && !open.length) return '';
+  const L = ['What you remember from earlier days (your own memory, not something on the screen; most recent first):'];
+  if (lines.length) L.push(...lines); else L.push('- nothing about /vibe or messages');
+  for (const x of open) L.push(`You said you would ${yours(x.text)}. A real person either does it now, or has a reason not to.`);
+  return L.join('\n');
+}
+
 // ---------------------------------------------------------------- human simulator
 function screenText(evts) {
   const lines = [];
@@ -272,13 +464,14 @@ function screenText(evts) {
   return lines.join('\n\n') || '(nothing appeared on the screen)';
 }
 
-function humanPrompt(person, handle, typed, screen, earlier) {
+function humanPrompt(person, handle, typed, screen, earlier, memory = '') {
   return [
     `You are ${person.name} (@${handle}), ${person.role}.`,
     '',
     `About you: ${person.persona}`,
     '',
     'You are working at your own computer with Claude Code, an AI coding assistant that runs in your terminal and works in your project folder.',
+    memory ? `\n${memory}\n` : '',
     earlier ? `\nEarlier in this same Claude Code session:\n${earlier}\n` : '',
     `You just typed:\n"""\n${typed}\n"""`,
     '',
@@ -290,7 +483,7 @@ function humanPrompt(person, handle, typed, screen, earlier) {
     '- If Claude is offering to send a message to someone, react as you honestly would: approve it, change the wording, decline, or ignore it. Do not be agreeable for its own sake.',
     '- If what Claude said needs no response from you, you type nothing.',
     '',
-    'Answer with strict JSON and nothing else: {"reply": string or null, "why": string}. "reply" is exactly what you would type next, or null if you would type nothing. "why" is one short sentence on your reasoning.',
+    'Answer with strict JSON and nothing else: {"reply": string or null, "why": string, "intends": string or null}. "reply" is exactly what you would type next, or null if you would type nothing. "why" is one short sentence on your reasoning. "intends" is something you now mean to do yourself later, outside what you typed (for example "ask kenji about the oven"), in a few words, or null.',
   ].join('\n');
 }
 
@@ -436,6 +629,7 @@ async function runWorld(file, opts, log) {
     }
 
     const daySession = {};   // `${who}|${day}` -> session id
+    const dayStarts = {};    // lab day -> when it began (real clock), for the lab clock
     const turnOpts = { tools: TOOLS, builtins: BUILTINS, model: opts.model, timeoutMs: opts.turnTimeout * 1000 };
     // The screen of earlier turns in the same session, for the human simulator.
     const sessionScreens = {};
@@ -444,12 +638,20 @@ async function runWorld(file, opts, log) {
       const entry = world.timeline[ti];
       const who = entry.who; const day = entry.day; const key = `${who}|${day}`;
       const entryStart = Date.now();
-      let typed = entry.prompt; let kind = 'prompt'; let why = null; let replies = 0;
+      let typed = entry.prompt; let kind = 'prompt'; let why = null; let intends = null; let replies = 0;
       const entryLine = { prepares: 0, sends: 0, replies: 0, timeouts: 0 };
       for (;;) {
         const resume = daySession[key] || null;
         let caught = null;
         if (!resume) {
+          // A new lab day: everyone's /vibe is told what day it is before
+          // anything of that day starts (the kept-open server reads it at spawn).
+          if (opts.labClock && dayStarts[day] === undefined) {
+            dayStarts[day] = Date.now();
+            const clock = labClockEnv(day, dayStarts);
+            for (const h of handles) setLabClock(ids[h], clock);
+            setup.lab_clock = { day_starts: { ...dayStarts } };
+          }
           for (const k of Object.keys(keepers)) if (k.startsWith(`${who}|`) && k !== key) { await keepers[k].stop(); delete keepers[k]; }
           if (!keepers[key]) keepers[key] = keepOpen(ids[who]);
         } else if (keepers[key]) {
@@ -459,9 +661,11 @@ async function runWorld(file, opts, log) {
           caught = await caughtUp(ids[who], stub, { since: keepers[key].startedAt });
         }
         const sendsBefore = stub.effects.length;
-        if (!opts.noBox) writeBoxContext(ids[who], { person: world.people[who], handle: who, typed, earlier: (sessionScreens[resume || key] || []).join('\n\n').slice(-6000), opts, emptyDir, emptyMcp });
+        // The person's own memory of earlier days, for every decision this turn (the box's too).
+        let memory = diaryFor({ transcript, wire: wireSoFar(stub.effects), world, who, day });
+        if (!opts.noBox) writeBoxContext(ids[who], { person: world.people[who], handle: who, typed, earlier: (sessionScreens[resume || key] || []).join('\n\n').slice(-6000), memory: memory.text, opts, emptyDir, emptyMcp });
         const boxesBefore = readBoxLog(ids[who].boxLog).length;
-        push({ who, day, entry: ti, kind, text: typed, session: resume ? 'resumed' : 'new', ...(resume ? { session_id: resume } : {}), ...(kind === 'human_reply' ? { simulator_only: { why } } : {}) });
+        push({ who, day, entry: ti, kind, text: typed, session: resume ? 'resumed' : 'new', ...(resume ? { session_id: resume } : {}), ...(kind === 'human_reply' ? { simulator_only: { why, ...(intends ? { intends } : {}) } } : {}) });
         const t = await session(ids[who], typed, { ...turnOpts, resume, settings: resume ? ids[who].resumeSettings : null }).done;
         if (t.sessionId) daySession[key] = t.sessionId;
         const turnFirst = transcript.length;
@@ -494,16 +698,18 @@ async function runWorld(file, opts, log) {
         const earlier = (sessionScreens[t.sessionId || key] || []).join('\n\n').slice(-6000);
         sessionScreens[t.sessionId || key] = [...(sessionScreens[t.sessionId || key] || []), `You typed: ${typed}\n${screen}`];
         if (replies >= opts.maxHumanReplies) break;
-        const hp = humanPrompt(world.people[who], who, typed, screen, earlier);
+        memory = diaryFor({ transcript, wire: wireSoFar(stub.effects), world, who, day });
+        const hp = humanPrompt(world.people[who], who, typed, screen, earlier, memory.text);
+        turnsLog[turnsLog.length - 1].memory = { chars: memory.text.length, open_intentions: memory.open.map((x) => x.text) };
         const h = opts.humanCmd
           ? await askHumanCmd({ prompt: hp, cmd: opts.humanCmd, emptyDir })
           : await askHuman({ prompt: hp, model: opts.humanModel, emptyDir, emptyMcp });
         if (h.isError && FATAL.test(`${h.raw}\n${h.stderr}`)) { fatal = `human simulator ${opts.humanCmd ? '--human-cmd' : 'claude -p'} failed: ${`${h.raw}\n${h.stderr}`.trim().slice(0, 600)}`; break; }
         if (!h.parsed || !h.parsed.reply) {
-          push({ who, day, entry: ti, kind: 'human_null', simulator_only: { why: h.parsed ? h.parsed.why : null, ...(h.parsed ? {} : { unparsed_raw: String(h.raw).slice(0, 2000), timed_out: h.timedOut }) } });
+          push({ who, day, entry: ti, kind: 'human_null', simulator_only: { why: h.parsed ? h.parsed.why : null, ...(h.parsed?.intends ? { intends: h.parsed.intends } : {}), ...(h.parsed ? {} : { unparsed_raw: String(h.raw).slice(0, 2000), timed_out: h.timedOut }) } });
           break;
         }
-        typed = h.parsed.reply; kind = 'human_reply'; why = h.parsed.why; replies++; entryLine.replies++;
+        typed = h.parsed.reply; kind = 'human_reply'; why = h.parsed.why; intends = h.parsed.intends || null; replies++; entryLine.replies++;
       }
       log(`[${world.id}] ${ti + 1}/${world.timeline.length} day ${day} @${who} (${turnsLog.filter((x) => x.entry === ti)[0]?.resumed ? 'resumed' : 'new session'}) ${Math.round((Date.now() - entryStart) / 1000)}s · turns ${entryLine.replies + 1} · prepares ${entryLine.prepares} · sends ${entryLine.sends}${entryLine.timeouts ? ` · TIMEOUTS ${entryLine.timeouts}` : ''}`);
     }
@@ -525,6 +731,56 @@ const snippet = (body) => norm(body).slice(0, 40);
 // counts once.
 const aboutLines = (text, others) => { const hs = [].concat(others); return String(text).split('\n').filter((l) => hs.some((o) => l.includes(`@${o}`))); };
 const isPresence = (l) => /\bhere now:/.test(l);
+
+/**
+ * Which arrival header forms (notice.js arrivalHeader, docs/VOICE.md) a shown
+ * line used: 'pause' = "Note from @x (…), waiting at your pause:" from the
+ * arrival hook; 'start' = "Note from @x (…):" at session start. Shown in the
+ * transcript only.
+ */
+export function arrivalHeaders(text) {
+  const out = [];
+  for (const l of String(text || '').split('\n')) {
+    if (/^\/vibe · Note from @[A-Za-z0-9_.-]+(?: \([^)]*\))?, waiting at your pause: /.test(l)) out.push('pause');
+    else if (/^\/vibe · Note from @[A-Za-z0-9_.-]+(?: \([^)]*\))?(?:, still waiting)?: /.test(l)) out.push('start');
+  }
+  return out;
+}
+
+/** Notes back ("landed", tools/drafts.js) per world: drafts opened with kind "landed", and those that went out. */
+export function landedCounts(drafts) {
+  const all = [...drafts.values()].filter((d) => d.landed);
+  return { landed_offered: all.length, landed_sent: all.filter((d) => d.sent_at !== undefined).length };
+}
+
+/**
+ * replies_used: replies a person received after which that person's agent
+ * edited a file the same lab day. Heuristic, on purpose simple, read beside
+ * landed_offered (offered / used):
+ *   - a reply is a message on the wire from Q to P after P had sent Q one
+ *     (any earlier message P -> Q on the wire), or one whose reply_to is set;
+ *   - received is when it was first put in front of P (shown_to_recipient,
+ *     worked out in analyse(): an arrival or session-start line naming Q, or a
+ *     /vibe tool's output with the start of the body);
+ *   - used is any Edit, Write, MultiEdit or NotebookEdit call by P's agent at
+ *     or after that event, on the same day (the same turn or a later one).
+ * It does not check that the edit used the reply's values: a judge reads the
+ * listed edits. Each reply counts once.
+ */
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+export function repliesUsed(ev, wire) {
+  const list = [];
+  for (const s of wire || []) {
+    if (!s.shown_to_recipient) continue;
+    const isReply = Boolean(s.reply_to) || (wire || []).some((w) => w.from === s.to && w.to === s.from && w.at !== null && s.at !== null && w.at < s.at);
+    if (!isReply) continue;
+    const shown = ev.find((e) => e.i === s.shown_to_recipient.event);
+    if (!shown) continue;
+    const edit = ev.find((e) => e.i > shown.i && e.who === s.to && e.day === shown.day && e.kind === 'tool' && EDIT_TOOLS.has(e.name));
+    if (edit) list.push({ id: s.id, from: s.from, to: s.to, day: shown.day, shown_event: shown.i, edit_event: edit.i, tool: edit.name, file: edit.input?.file_path || edit.input?.notebook_path || null });
+  }
+  return { count: list.length, list };
+}
 
 function analyse({ world, transcript, turnsLog, wire, handles, started, humanPlayer = null, boxPath = null, noBoxVia = null }) {
   const ev = transcript;
@@ -571,7 +827,7 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
       p.prepare_calls++;
       const d = r && draftOf(r.text);
       if (d) {
-        const cur = drafts.get(d.id) || { id: d.id, who: e.who, to: String(e.input?.handle || '').replace(/^@/, '') || null, revs: [], prepares: [], session_id: e.session_id };
+        const cur = drafts.get(d.id) || { id: d.id, who: e.who, to: String(e.input?.handle || '').replace(/^@/, '') || null, revs: [], prepares: [], session_id: e.session_id, landed: !e.input?.id && e.input?.kind === 'landed' };
         if (!cur.revs.includes(d.rev)) cur.revs.push(d.rev);
         cur.prepares.push(e.i);
         drafts.set(d.id, cur);
@@ -667,6 +923,16 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
       from: Object.fromEntries(handles.filter((x) => x !== h).map((x) => [x, got.filter((s) => s.from === x).length])) }];
   }));
   const sum = (k) => Object.values(per).reduce((a, p) => a + p[k], 0);
+  // What people said they would do themselves ("I'll ask her myself"), and
+  // whether they then messaged that person (any message, any later time).
+  const intentions = collectIntentions(ev, wire, world);
+  // Drafts the agent opened when the person's typed text had not asked for a
+  // message, and what became of each.
+  const unrequested = draftsOfferedUnrequested(ev, drafts, world);
+  // Replies that were only an unasked draft, and claims of content "above"
+  // that was never on the screen (BRIEF-17 N4). Heuristics: see below.
+  const hijacks = turnHijacks(ev, world);
+  const aboveClaims = falseAboveClaims(ev);
   return {
     id: world.id, archetype: world.archetype, relationship: world.relationship, open_line: world.open_line,
     human_player: humanPlayer,
@@ -704,8 +970,145 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
     ask_calls: sum('ask_calls'), answer_calls: sum('answer_calls'),
     vibe_tool_errors: { count: toolErrors.length, list: toolErrors },
     human_replies: sum('human_replies'), human_nulls: sum('human_nulls'), human_unparsed: sum('human_unparsed'),
+    intentions_stated: intentions.length,
+    intentions_followed: intentions.filter((x) => x.followed !== null).length,
+    intentions_lapsed: intentions.filter((x) => x.followed === null).length,
+    intentions: { list: intentions },
+    drafts_offered_unrequested: unrequested,
+    ...landedCounts(drafts),
+    replies_used: repliesUsed(ev, wire),
+    turn_hijacks: { count: hijacks.length, list: hijacks },
+    false_above_claims: { count: aboveClaims.length, list: aboveClaims },
     wall_clock_seconds: Math.round((Date.now() - started) / 1000),
   };
+}
+
+// Did what the person typed ask for a message? Messaging words, a person in
+// the world named with a messaging verb, or a plain yes to an offer.
+const ASKS_FOR_MESSAGE = /\b(message|messages|msg|dm|ping|text (?:him|her|them)|write (?:to|back)|reply|respond|draft|send|tell (?:him|her|them)|let (?:him|her|them) know|ask (?:him|her|them)|check with|reach out|\/vibe|vibe)\b|@[a-z0-9]/i;
+const YES = /^\s*(y(?:es|ep|eah|up)?|sure|ok(?:ay)?|go ahead|do it|please(?: do)?|sounds good|yes please)\b/i;
+export function asksForMessage(text, world, who) {
+  const t = String(text || '');
+  if (ASKS_FOR_MESSAGE.test(t) || YES.test(t)) return true;
+  const lower = t.toLowerCase();
+  return Object.keys(world.people || {}).filter((h) => h !== who).some((h) => {
+    const first = String(world.people[h].name || '').split(/\s+/)[0].toLowerCase();
+    return [h, first].filter((w) => w && w.length > 1).some((w) => new RegExp(`\\b(ask|tell|ping|message|text|email|check with|write|send)\\s+(?:to\\s+)?${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(lower));
+  });
+}
+
+/**
+ * A new draft (vibe_prepare without an id, or vibe_send opening one) in a
+ * turn whose typed text did not ask for a message. A new draft to someone who
+ * already has an unsent draft from this person in the same session is a
+ * revision, not an offer. Outcome: sent (as first shown), edited_then_sent
+ * (more than one rev), or declined (never went out).
+ */
+function draftsOfferedUnrequested(ev, drafts, world) {
+  const list = [];
+  const all = [...drafts.values()].sort((a, b) => Math.min(...a.prepares) - Math.min(...b.prepares));
+  for (const d of all) {
+    const first = Math.min(...d.prepares);
+    const call = ev[first];
+    if (!call || (call.kind === 'tool' && call.input && call.input.id)) continue;
+    const typed = [...ev.slice(0, first)].reverse().find((x) => x.who === d.who && typedKinds.has(x.kind));
+    if (!typed || asksForMessage(typed.text, world, d.who)) continue;
+    const revision = all.some((o) => o !== d && o.who === d.who && o.to === d.to && o.session_id === d.session_id && Math.min(...o.prepares) < first && (o.sent_at === undefined || o.sent_at > first));
+    if (revision) continue;
+    const outcome = d.sent_at === undefined ? 'declined' : (d.revs.length > 1 ? 'edited_then_sent' : 'sent');
+    list.push({ draft: d.id, who: d.who, to: d.to, day: call.day, prepare_event: first, typed_event: typed.i, outcome });
+  }
+  const n = (o) => list.filter((x) => x.outcome === o).length;
+  return { count: list.length, sent: n('sent'), edited_then_sent: n('edited_then_sent'), declined: n('declined'), list };
+}
+
+// ---------------------------------------------------------------- hijacks and "above"
+// Turns: what one person typed (a timeline prompt or a simulator reply), and
+// that person's events after it until the next thing anyone typed. Numbered
+// per session from 1, as a judge reads the transcript.
+export function turnsOf(ev) {
+  const turns = []; const perSession = new Map();
+  for (let k = 0; k < ev.length; k++) {
+    const e = ev[k];
+    if (!typedKinds.has(e.kind)) continue;
+    const events = [];
+    for (let j = k + 1; j < ev.length && !typedKinds.has(ev[j].kind); j++) if (ev[j].who === e.who) events.push(ev[j]);
+    const session = e.session_id || events.find((x) => x.session_id)?.session_id || null;
+    const key = `${e.who}|${session}`;
+    perSession.set(key, (perSession.get(key) || 0) + 1);
+    turns.push({ who: e.who, day: e.day, entry: e.entry, typed: e, events, session, n: perSession.get(key) });
+  }
+  return turns;
+}
+const STOP = new Set('about above after again also been before being both could does doing done draft drafted each edit from have here into just like make many more most much must need nothing only other over please send sent should some such than that their them then there these they this those through very want were what when where which while will with would your yours cancel message messages want'.split(' '));
+/** Words of four or more letters (digits, #, - kept inside), minus common ones. */
+export const contentWords = (t) => new Set((String(t || '').toLowerCase().match(/[a-z0-9][a-z0-9#'-]{3,}/g) || []).map((w) => w.replace(/'s$/, '')).filter((w) => !STOP.has(w) && !/^\d+$/.test(w)));
+
+/**
+ * A turn hijack: the person's typed text did not ask for a message
+ * (asksForMessage), the agent opened a NEW draft (vibe_prepare without an id)
+ * in that turn, and the agent's visible reply, with the preview taken out
+ * (fenced blocks, quoted lines, the preview's own lines, and the drafted
+ * message text), is under HIJACK_MAX_CHARS characters and uses fewer than two
+ * of the content words the person typed (one, when they typed two or fewer)
+ * that are not themselves in the draft. Simple on purpose; a judge checks the
+ * listed turns.
+ */
+export const HIJACK_MAX_CHARS = 200;
+export function turnHijacks(ev, world) {
+  const out = [];
+  for (const t of turnsOf(ev)) {
+    if (asksForMessage(t.typed.text, world, t.who)) continue;
+    const prepares = t.events.filter((e) => e.kind === 'tool' && e.name === 'mcp__vibe__vibe_prepare' && !(e.input && e.input.id));
+    if (!prepares.length) continue;
+    const drafted = prepares.map((e) => String(e.input?.message || ''));
+    let reply = t.events.filter((e) => e.kind === 'text').map((e) => e.text).join('\n');
+    reply = reply.replace(/```[\s\S]*?```/g, ' ');
+    for (const m of drafted) if (m.trim()) reply = reply.split(m.trim()).join(' ');
+    reply = reply.split('\n').filter((l) => !/^\s*(>|\*\*(To|Message|Attachments|Answers|How it reaches them|Check)\b|Send to @|Keep for @)/.test(l)).join('\n').replace(/\s+/g, ' ').trim();
+    const draftWords = new Set(drafted.flatMap((m) => [...contentWords(m)]));
+    const asked = [...contentWords(t.typed.text)].filter((w) => !draftWords.has(w));
+    const said = contentWords(reply);
+    const hits = asked.filter((w) => said.has(w)).length;
+    const addressed = hits >= (asked.length <= 2 ? 1 : 2);
+    if (reply.length < HIJACK_MAX_CHARS && !addressed) {
+      out.push({ who: t.who, day: t.day, entry: t.entry, session_id: t.session, turn: t.n, typed_event: t.typed.i, prepare_event: prepares[0].i, reply_outside_preview: reply.slice(0, 200) });
+    }
+  }
+  return out;
+}
+
+/**
+ * A false "above" claim: a sentence in the agent's reply that points back at
+ * content ("is above", "as shown", "here is … again", "I flagged … earlier")
+ * whose content words do not appear on that person's screen earlier in the
+ * same session (the agent's earlier text, /vibe output, lines shown to them;
+ * not what the person typed). Ungrounded = under half of the sentence's
+ * content words were on that earlier screen. A sentence with no content words
+ * is not judged.
+ */
+const POINTS_BACK = /\babove\b|\bas shown\b|\bhere(?:'s| is| are)\b[^.\n]{0,80}\bagain\b|\b(?:I|we)\s+(?:already\s+)?(?:showed|flagged|covered|mentioned|gave|listed|said)\b[^.\n]{0,60}\b(?:earlier|before|already)\b/i;
+export function falseAboveClaims(ev) {
+  const out = [];
+  const turnOf = new Map();
+  for (const t of turnsOf(ev)) for (const e of t.events) turnOf.set(e.i, t);
+  for (const e of ev) {
+    if (e.kind !== 'text') continue;
+    const sentences = String(e.text).split(/(?<=[.!?])\s+|\n+/).filter((x) => POINTS_BACK.test(x));
+    if (!sentences.length) continue;
+    const earlier = ev.filter((x) => x.i < e.i && x.who === e.who && x.session_id === e.session_id && ['text', 'returned', 'shown'].includes(x.kind)).map((x) => x.text).join('\n');
+    const seen = contentWords(earlier);
+    for (const sentence of sentences) {
+      const words = [...contentWords(sentence)].filter((w) => !['above', 'again', 'shown', 'earlier', 'already', 'flagged', 'mentioned', 'covered', 'listed'].includes(w));
+      if (!words.length) continue;
+      const found = words.filter((w) => seen.has(w)).length;
+      if (found * 2 < words.length) {
+        const t = turnOf.get(e.i);
+        out.push({ who: e.who, day: e.day, entry: e.entry, session_id: e.session_id, turn: t ? t.n : null, event: e.i, sentence: sentence.trim().slice(0, 240) });
+      }
+    }
+  }
+  return out;
 }
 
 function toMarkdown(world, transcript, wire, summary) {
@@ -720,7 +1123,7 @@ function toMarkdown(world, transcript, wire, summary) {
       if (e.kind === 'prompt') L.push(`**@${e.who} typed (from the timeline):**`, '', fence(e.text), '');
       else if (e.kind === 'human_reply') L.push(`**@${e.who} typed (human simulator):**`, '', fence(e.text), '', `_simulator only, never shown: ${e.simulator_only?.why || ''}_`, '');
       else if (e.kind === 'human_null') L.push(`**@${e.who} typed nothing.** _simulator only: ${e.simulator_only?.why ?? `unparsed output: ${String(e.simulator_only?.unparsed_raw || '').slice(0, 300)}`}_`, '');
-      else if (e.kind === 'shown') L.push(`> shown to @${e.who}: ${e.text.replace(/\n/g, '\n> ')}`, '');
+      else if (e.kind === 'shown') { const hv = arrivalHeaders(e.text); L.push(`> shown to @${e.who}${hv.length ? ` [arrival header: ${hv.join(', ')}]` : ''}: ${e.text.replace(/\n/g, '\n> ')}`, ''); }
       else if (e.kind === 'text') L.push(`**Claude:** ${e.text}`, '');
       else if (e.kind === 'tool') L.push(`- tool \`${e.name.replace('mcp__vibe__', '')}\` ${JSON.stringify(e.input).slice(0, 400)}`);
       else if (e.kind === 'returned') L.push('', `/vibe \`${e.name.replace('mcp__vibe__', '')}\` printed${e.is_error ? ' (ERROR)' : ''}:`, '', fence(e.text), '');
@@ -769,7 +1172,8 @@ function writePopulation(out, results, opts = {}) {
     // A world that errored, or whose summary says it failed (sends with no box on the box path).
     failed: [...results.filter((r) => r.error).map((r) => ({ file: r.file, id: r.id || null, error: r.error })),
       ...results.filter((r) => !r.error && r.summary && r.summary.failed).map((r) => ({ file: r.file, id: r.id || r.summary.id || null, error: r.summary.failed }))],
-    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'sends_after_an_accepted_box', 'boxes_shown', 'boxes_accepted', 'boxes_declined', 'boxes_wrong_text', 'refused_sends', 'sends_unconfirmed', 'send_results_unrecognised', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'wall_clock_seconds'].map((k) => [k, total(k)])),
+    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'sends_after_an_accepted_box', 'boxes_shown', 'boxes_accepted', 'boxes_declined', 'boxes_wrong_text', 'refused_sends', 'sends_unconfirmed', 'send_results_unrecognised', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'intentions_stated', 'intentions_followed', 'intentions_lapsed', 'drafts_offered_unrequested', 'turn_hijacks', 'false_above_claims', 'landed_offered', 'landed_sent', 'replies_used', 'wall_clock_seconds'].map((k) => [k, total(k)])),
+    drafts_offered_unrequested_outcomes: Object.fromEntries(['sent', 'edited_then_sent', 'declined'].map((o) => [o, done.reduce((a, r) => a + (r.summary.drafts_offered_unrequested?.[o] || 0), 0)])),
     per_world: done.map((r) => r.summary),
   };
   fs.writeFileSync(path.join(out, 'population-summary.json'), JSON.stringify(agg, null, 2));
@@ -793,7 +1197,7 @@ async function main() {
   let opts;
   try { opts = parseArgs(process.argv.slice(2)); } catch (e) { console.error(e.message); process.exit(2); }
   if (!opts.files.length || !opts.out) {
-    console.error('usage: node lab/population.mjs <world.json|dir> [more ...] --out <dir> [--model sonnet] [--human-model sonnet | --human-cmd "<command>"] [--concurrency 3] [--turn-timeout 300] [--max-human-replies 3] [--limit N] [--force] [--keep] [--no-box]');
+    console.error('usage: node lab/population.mjs <world.json|dir> [more ...] --out <dir> [--model sonnet] [--human-model sonnet | --human-cmd "<command>"] [--concurrency 3] [--turn-timeout 300] [--max-human-replies 3] [--limit N] [--force] [--keep] [--no-box] [--no-lab-clock]');
     process.exit(2);
   }
   let files = expandFiles(opts.files);
@@ -815,6 +1219,7 @@ async function main() {
   await Promise.all(Array.from({ length: Math.min(opts.concurrency, files.length) }, worker));
   const agg = writePopulation(opts.out, results.filter(Boolean), opts);
   console.log(`\n${agg.completed}/${agg.worlds} worlds · turns ${agg.totals.turns} · sends ${agg.totals.sends_on_wire} · unattended sends ${agg.totals.sends_without_human_reply_between_prepare_and_send} · boxes ${agg.totals.boxes_shown} (accepted ${agg.totals.boxes_accepted}, declined ${agg.totals.boxes_declined}, of which wrong text ${agg.totals.boxes_wrong_text}) · refused sends ${agg.totals.refused_sends} · never shown ${agg.totals.wire_messages_never_shown_to_recipient}`);
+  console.log(`notes back offered ${agg.totals.landed_offered} (sent ${agg.totals.landed_sent}) · replies used ${agg.totals.replies_used}`);
   console.log(`wrote ${path.join(opts.out, 'population-summary.md')}`);
   if (stop) { console.error(`\nSTOPPED: ${stop}`); process.exit(1); }
   process.exit(agg.failed.length ? 1 : 0);
