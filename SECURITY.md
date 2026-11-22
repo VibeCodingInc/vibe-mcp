@@ -54,10 +54,11 @@ line is fixed /vibe text: the recipient, the length, and whether all of the
 text is below ("Send to @handle? (N chars, all shown)" or "(N chars, start
 only)"; also "Reply to", "Resend to" and "Keep for"). Under it, the start of
 the text, each line starting with "> ". Then one required text field, empty,
-titled for example 'Type "be" to send to @ben': the person types the first
-two letters of who it is going to, then Accept / Decline. Enter alone cannot
-send (the host will not take an empty field), and typing "send" again cannot
-send either (it is not the recipient). The box does not show which message a
+titled for example 'Type "be" to send to @ben' or 'Type "noa" to send to
+@noah' ('to keep it for' on a kept-for-later box): the person types the first
+letters of who it is going to, then Accept / Decline. Enter alone cannot send
+(the host will not take an empty field), and typing "send" again cannot send
+either. The box does not show which message a
 reply answers, exact spacing (runs of spaces and blank characters show as one
 space, line breaks as "↵") or stacked combining marks; Claude Code shows three
 lines in all. So the box confirms the send; the preview carries the
@@ -65,14 +66,19 @@ message.
 
 What the box does:
 
-- Only an accept with the recipient's letters sends: what was typed, with
-  spaces around it removed, capital letters made small and one "@" in front
-  allowed, must be the start of the recipient's handle, at least two letters
-  long (the whole handle when the handle is one letter). For @ben, "be",
-  "Ben" and "@ben" send. Where a word people type out of habit ("send",
-  "yes", "y", "ok", "s") would itself pass (@sendhil, @yesenia), the whole
-  handle is needed, and "@" plus the handle where the handle is one of those
-  words; the box says so. It sends only if the draft, its rev, its exact text,
+- Only an accept with the recipient's letters sends. /vibe keeps a list of
+  ordinary replies a person might type without reading the box (yes-words
+  such as "send", "yes", "ok", "sure"; refusals such as "no", "stop", "wait",
+  "edit", "cancel"; fillers such as "hm", "lol"; "ja", "si", "da", "oui",
+  "non", "nein"; and the digits 0-9). The letters asked for are always longer
+  than any word on that list the handle begins with, and at least two: "be"
+  for @ben, "noa" for @noah, "edith" for @edith. A handle that is itself such
+  a word, or is one character, needs "@" and the whole handle ("@no" for @no,
+  "@n" for @n). What was typed counts with spaces around it removed and
+  capital letters made small; a longer start of the handle, or "@" in front,
+  also counts; nothing shorter does. So no word on the list, typed alone,
+  ever sends. The limit: a reply word that is not on the list and happens to
+  be the first letters asked for would count. It sends only if the draft, its rev, its exact text,
   its recipient and the signed-in account are what they were when the box
   opened, and the call was not withdrawn. An accept with anything else typed
   or with nothing, Decline, Esc (cancel), five minutes unanswered, a session with
