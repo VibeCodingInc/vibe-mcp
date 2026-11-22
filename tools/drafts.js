@@ -22,9 +22,9 @@
  *  - Shown, then a typed turn: Send goes only if the person has had a turn (a
  *    prompt, recorded by the arrival hook) after the rev was last shown, so an
  *    agent cannot show and send in one turn (turns.js). Where the host can
- *    show a box (confirm-box.js), the person must ALSO press Accept in a box
- *    /vibe opens, bound to the id, rev and text in it: a typed turn AND
- *    Accept wherever turns are recorded; the box alone where they are not.
+ *    show a box (confirm-box.js), the person must ALSO type the recipient's
+ *    first letters and accept in a box /vibe opens, bound to the id, rev and text in it: a typed turn
+ *    AND the box wherever turns are recorded; the box alone where they are not.
  *  - Exactly once: Send claims the draft under a whole-file lock, sends with
  *    an idempotency key derived from the exact text, and finalizes against
  *    the latest stored state. A draft whose delivery could not be confirmed
@@ -888,11 +888,12 @@ function claimDraft(d, rev) {
 
 // ── the Send box (confirm-box.js) ─────────────────────────────────────────────
 // Wherever person turns are recorded (Claude Code with the arrival hook), a
-// send needs BOTH the turn check (a typed message after the preview) AND an
-// Accept in a box /vibe opens, for every draft, whatever its length. Where
+// send needs BOTH the turn check (a typed message after the preview) AND the
+// recipient's letters typed and accepted in a box /vibe opens, for every draft, whatever its
+// length (Enter alone cannot send: confirm-box.js schemaFor). Where
 // turns cannot be recorded, the box alone decides. One box at a time; a draft
 // whose box was not accepted needs showing again and a typed turn; after any
-// answer but Accept, no box for any draft until the person types again.
+// answer but an accept with the recipient's letters, no box for any draft until the person types again.
 // Tool results never repeat the box, its answer, or the rev; every outcome
 // after the box but a send reads the same, except: another box open, a hook
 // found, the account changed.
@@ -968,8 +969,8 @@ function openBox(id, rev, me) {
     if (boxBlocked(d) || blockedAfterNonAccept(drafts, now)) return { refused: notAccepted(d.to) };
     const nonce = crypto.randomBytes(16).toString('hex');
     d.boxAt = now;
-    d.box = { nonce, at: now, rev, sha: sha256(message), me, turn: turn.check, project: here, pid: process.pid };
-    return { boxed: { id: d.id, to: d.to, nonce, text: boxMessageFor(d) } };
+    d.box = { nonce, at: now, rev, sha: sha256(message), to: d.to, me, turn: turn.check, project: here, pid: process.pid };
+    return { boxed: { id: d.id, to: d.to, held: Boolean(d.held), nonce, text: boxMessageFor(d) } };
   });
 }
 
@@ -1010,7 +1011,7 @@ function turnsTracked() {
   try { return require('../turns').judge(0).check !== 'unavailable'; } catch { return false; }
 }
 /**
- * The latest answer but Accept, for any draft, blocks every box until a
+ * The latest answer but an accept with the recipient's letters, for any draft, blocks every box until a
  * person's turn recorded after it; where turns are not recorded, for
  * NON_ACCEPT_COOLDOWN_MS.
  */
@@ -1026,7 +1027,7 @@ function blockedAfterNonAccept(drafts, now = Date.now()) {
 /**
  * The person's answer to the box, under the lock. Only the box that is open
  * for this draft is answered (an answer naming another is ignored and sends
- * nothing); it is closed whatever the answer. Only an Accept within the
+ * nothing); it is closed whatever the answer. Only an accept with the letters within the
  * timeout, by the same account, of the same rev and exact text, with the call
  * not withdrawn and the draft still sendable, claims the draft. Everything
  * else but a changed account reads, and is recorded, as not accepted, so the
@@ -1048,7 +1049,7 @@ function closeBox(id, nonce, answer, { signal = null, rev = null } = {}) {
     const me = config.getHandle();
     if (me !== box.me) return { refused: boxRefusal(BOX_ACCOUNT, 'account_changed') };
     const message = compose(d).trim();
-    if (revOf(d) !== box.rev || (rev !== null && rev !== box.rev) || sha256(message) !== box.sha || (Number.isFinite(d.preparedAt) && d.preparedAt > box.at)) return refuse();
+    if (revOf(d) !== box.rev || (rev !== null && rev !== box.rev) || sha256(message) !== box.sha || (box.to !== undefined && box.to !== d.to) || (Number.isFinite(d.preparedAt) && d.preparedAt > box.at)) return refuse();
     if (cannotSend(d, box.rev, me)) return refuse();
     // Accepted: this box is spent. A Send whose delivery does not confirm can
     // be tried again through the ordinary path (turn check, a new box).
@@ -1081,7 +1082,7 @@ async function sendWithBox(id, rev, me, box, { signal = null } = {}) {
   const o = tryOpen(id, rev, me);
   if (o.result) return o.result;
   if (o.unseen) return unseenRefusal(o.unseen.unseen, o.unseen.why, { boxy: true });
-  const answer = await confirmBox.ask(box, o.boxed.text, { ...(box.timeoutMs ? { timeoutMs: box.timeoutMs } : {}), signal });
+  const answer = await confirmBox.ask(box, o.boxed.text, { to: o.boxed.to, held: o.boxed.held, ...(box.timeoutMs ? { timeoutMs: box.timeoutMs } : {}), signal });
   return afterClose(closeBox(o.boxed.id, o.boxed.nonce, answer, { signal, rev }));
 }
 
@@ -1112,9 +1113,15 @@ async function sendStateless(id, rev, me, ctx) {
       const d = loadDrafts().find(x => x.id === id);
       return notAccepted(d ? d.to : 'them');
     }
-    // A hook that appeared while the box was open: the box is closed unanswered.
-    const hook = r && typeof r === 'object' && r.action === 'accept' ? hookRefusal() : null;
-    const closed = closeBox(id, state.n, !hook && r && typeof r === 'object' && r.action === 'accept' ? 'accept' : 'none', { signal: ctx.signal || null, rev });
+    // Only accept with the recipient's letters typed is yes (confirm-box.js
+    // answerOf), judged against the recipient recorded on disk when the box
+    // opened, never anything in the request. A hook that appeared while the
+    // box was open: the box is closed unanswered.
+    const open = loadDrafts().find(x => x.id === id);
+    const boxTo = open && open.box && open.box.nonce === state.n ? (open.box.to || open.to) : null;
+    const answer = boxTo ? confirmBox.answerOf(r, boxTo) : 'none';
+    const hook = answer === 'accept' ? hookRefusal() : null;
+    const closed = closeBox(id, state.n, !hook && answer === 'accept' ? 'accept' : 'none', { signal: ctx.signal || null, rev });
     if (hook && !closed.display) return hook;
     return afterClose(closed);
   }
@@ -1123,7 +1130,7 @@ async function sendStateless(id, rev, me, ctx) {
   if (o.unseen) return unseenRefusal(o.unseen.unseen, o.unseen.why, { boxy: true });
   return {
     inputRequired: {
-      inputRequests: { [confirmBox.INPUT_KEY]: { method: 'elicitation/create', params: confirmBox.request(o.boxed.text, '2026-07-28') } },
+      inputRequests: { [confirmBox.INPUT_KEY]: { method: 'elicitation/create', params: confirmBox.request(o.boxed.text, '2026-07-28', o.boxed.to, { held: o.boxed.held }) } },
       requestState: packState(o.boxed.id, o.boxed.nonce),
     },
   };

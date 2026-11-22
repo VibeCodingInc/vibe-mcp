@@ -44,8 +44,8 @@ depends on the host:
 
 | Host | Required before a send |
 |------|------------------------|
-| Shows /vibe's box, and records person turns (Claude Code with the arrival hook) | A message the person typed after the preview (the turn check) AND Accept in the box, for every draft, whatever its length |
-| Shows the box, but turns are not recorded (another host, or no hook) | Accept in the box |
+| Shows /vibe's box, and records person turns (Claude Code with the arrival hook) | A message the person typed after the preview (the turn check) AND the recipient's letters typed in the box, for every draft, whatever its length |
+| Shows the box, but turns are not recorded (another host, or no hook) | The recipient's letters typed in the box |
 | No box, turns recorded | The turn check |
 | No box, turns not recorded | Nothing beyond the agent's call: the preview says so |
 
@@ -53,17 +53,35 @@ What the box shows. The box is opened by /vibe, not by the agent. Its first
 line is fixed /vibe text: the recipient, the length, and whether all of the
 text is below ("Send to @handle? (N chars, all shown)" or "(N chars, start
 only)"; also "Reply to", "Resend to" and "Keep for"). Under it, the start of
-the text, each line starting with "> ". The box does not show which message a
+the text, each line starting with "> ". Then one required text field, empty,
+titled for example 'Type "be" to send to @ben' or 'Type "noa" to send to
+@noah' ('to keep it for' on a kept-for-later box): the person types the first
+letters of who it is going to, then Accept / Decline. Enter alone cannot send
+(the host will not take an empty field), and typing "send" again cannot send
+either. The box does not show which message a
 reply answers, exact spacing (runs of spaces and blank characters show as one
 space, line breaks as "↵") or stacked combining marks; Claude Code shows three
-lines in all. So the box confirms the choice; the preview carries the
+lines in all. So the box confirms the send; the preview carries the
 message.
 
 What the box does:
 
-- Only Accept sends, and only if the draft, its rev, its exact text and the
-  signed-in account are what they were when the box opened, and the call was
-  not withdrawn. Decline, Esc (cancel), five minutes unanswered, a session with
+- Only an accept with the recipient's letters sends. /vibe keeps a list of
+  ordinary replies a person might type without reading the box (yes-words
+  such as "send", "yes", "ok", "sure"; refusals such as "no", "stop", "wait",
+  "edit", "cancel"; fillers such as "hm", "lol"; "ja", "si", "da", "oui",
+  "non", "nein"; and the digits 0-9). The letters asked for are always longer
+  than any word on that list the handle begins with, and at least two: "be"
+  for @ben, "noa" for @noah, "edith" for @edith. A handle that is itself such
+  a word, or is one character, needs "@" and the whole handle ("@no" for @no,
+  "@n" for @n). What was typed counts with spaces around it removed and
+  capital letters made small; a longer start of the handle, or "@" in front,
+  also counts; nothing shorter does. So no word on the list, typed alone,
+  ever sends. The limit: a reply word that is not on the list and happens to
+  be the first letters asked for would count. It sends only if the draft, its rev, its exact text,
+  its recipient and the signed-in account are what they were when the box
+  opened, and the call was not withdrawn. An accept with anything else typed
+  or with nothing, Decline, Esc (cancel), five minutes unanswered, a session with
   no keyboard (`claude -p`), an error, or a draft edited or cancelled while
   the box was open: nothing is sent, the draft is kept, and the agent gets the
   same result for all of them, so it cannot learn what the person pressed.
@@ -74,7 +92,7 @@ What the box does:
   the same as any other message not sent. Unattended sending is what an agent
   account (below) is for.
 - A draft whose box was not accepted needs showing again with `vibe_prepare`
-  and a typed message before another box. After any answer but Accept, no box
+  and a typed message before another box. After any other answer, no box
   opens for any draft until the person types again (five minutes where turns
   are not recorded). The record of a box not accepted lives with its draft and
   lapses when the draft expires, 24 hours after it was opened.
@@ -87,12 +105,17 @@ What the box does:
   box can open for the same draft without a new typed message: it is the same
   showing, and the retry delivers at most once.
 - The agent learns only whether it was sent, with two exceptions that can
-  only follow an Accept: the signed-in account changed while the box was
-  open, and (on 2026-07-28) a hook found when the Accept came back.
+  only follow an accept with the right letters: the signed-in account
+  changed while the box was open, and (on 2026-07-28) a hook found when that
+  accept came back.
+
+What was wrong in 0.9.23: its box had no field, so Accept was already
+selected and a stray or queued Enter (for example, right after the person
+typed "send") accepted it before they had seen it.
 
 The hook tripwire. Claude Code lets a hook answer a box with no dialog
 (`Elicitation` and `ElicitationResult` hooks). Before a box opens, and again
-when an Accept comes back on 2026-07-28, `vibe_send` reads exactly these four
+when an accept with the right letters comes back on 2026-07-28, `vibe_send` reads exactly these four
 files as JSON and refuses to send if one has an `Elicitation` or
 `ElicitationResult` key under `hooks`, or exists and cannot be read as JSON
 (it names the file):
@@ -115,7 +138,7 @@ Known limits:
   own Send for Buddy and the terminal), and the sign-in token in
   `~/.vibe/config.json` (or `auth.json`) can call the API directly.
 - A prompt the agent scheduled for itself (a wake-up, a `/loop`) still counts
-  as a turn for the turn check, but cannot press Accept.
+  as a turn for the turn check, but cannot type into the box.
 - The open line's hourly cap (six unattended messages to one person) is
   enforced per server process for messages in flight; receipts are shared.
 - /vibe's state lives in `VIBE_HOME` (default `~/.vibe`), with turn records

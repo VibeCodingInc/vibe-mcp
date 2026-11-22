@@ -365,6 +365,6 @@ test('SERVER_INSTRUCTIONS: waiting is not leaving out the rest; asked: true only
   assert.ok(serverInstructions(LOCAL).includes(S));
   assert.ok(!serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'answerFirst' }).includes(S));
   const cmd = fs.readFileSync(path.join(ROOT, 'hosts', 'vibe-command.md'), 'utf8');
-  assert.ok(cmd.includes('Show the preview exactly as it returns it, with one line on why this person; showing it never replaces the rest of your reply: anything else the person asked for comes first, in full. Pass `asked: true` only when the person asked for this message (running `/vibe` is asking).'));
+  assert.ok(cmd.includes('Showing the preview never replaces the rest of your reply: anything else the person asked for comes first, in full. Pass `asked: true` only when the person asked for this message (running `/vibe` is asking).'));
   assert.ok(!cmd.includes('Show exactly what it returns'));
 });

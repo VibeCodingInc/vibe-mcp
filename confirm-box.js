@@ -9,11 +9,13 @@
  * counts, even "no, don't send". Where the host can show a box itself (MCP
  * elicitation), vibe_send also asks the person directly: a box whose first
  * line is fixed /vibe wording (recipient, length, whether all of it is
- * shown), then the text, each line quoted with "> ", and Accept / Decline.
+ * shown), then the text, each line quoted with "> ", then one required text
+ * field (type the first letters of the recipient) and Accept / Decline.
  * The box shows the start of the text, not the reply target and not exact
  * spacing, so the preview is where the person reads the message:
  *   - wherever person turns are recorded, a send needs the turn check (a
- *     typed message after the preview) AND Accept, for every draft;
+ *     typed message after the preview) AND the recipient's letters typed and
+ *     accepted in the box, for every draft;
  *   - where the turn check is unavailable (a host that is not Claude Code, or
  *     Claude Code with no turn ever recorded because the hook is not
  *     installed), the box alone decides.
@@ -50,8 +52,115 @@ const WRAP_COLUMNS = 72;
 const VISIBLE_LINES = 3;
 /** A line break inside the text, as shown in the box: it does not use up a line. Display only. */
 const NEWLINE_MARK = ' ↵ ';
-/** The form asked for: no fields, so the box is Accept / Decline. */
-const SCHEMA = Object.freeze({ type: 'object', properties: Object.freeze({}) });
+/**
+ * The form asked for: one required text field, no default. The person types
+ * the first letters of who it is going to: always more letters than any
+ * ordinary reply word the handle begins with (rule, below). History:
+ *   0.9.23  no fields: Accept was pre-selected, and a stray Enter (one still
+ *           queued after the person typed "send") accepted the box before they
+ *           saw it.
+ * Live key tests on Claude Code 2.1.330 chose this field over the others: a
+ * required text field with no default refuses Enter ("This field is
+ * required"), typing goes straight into it, and the message area still shows
+ * VISIBLE_LINES lines. A choice field was too hard to accept; a tick box and
+ * a "type s" field were accepted by the very habit that caused the 0.9.23 bug.
+ * A first cut asked for two letters, so "no" sent to @noah and "edit" to
+ * @edith: a reply word typed into the box must never be the send key.
+ */
+const FIELD = 'to';
+/**
+ * Ordinary replies a person types without reading the box: yes-words,
+ * refusals, fillers, a few other languages, and single digits. No word here,
+ * typed alone, ever sends (rule). Lower-case.
+ */
+const REPLY_WORDS = Object.freeze([
+  's', 'send', 'y', 'ye', 'yes', 'yea', 'yeah', 'yep', 'yup', 'ya', 'ok', 'okay', 'k', 'kk', 'sure', 'fine', 'good', 'go', 'do',
+  'n', 'no', 'nope', 'nah', 'not', 'don', 'dont', 'stop', 'wait', 'hold', 'later', 'cancel', 'edit', 'esc', 'x', 'q', 'nvm',
+  'hi', 'hey', 'hm', 'hmm', 'ah', 'oh', 'um', 'uh', 'er', 'lol', 'wow', 'thx', 'ty', 'pls', 'thanks', 'maybe',
+  'ja', 'si', 'da', 'oui', 'non', 'nein',
+  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+]);
+/**
+ * Longest field title, in characters, that Claude Code shows uncut (2.1.330
+ * cut a title at about 47: "Confirm send (Space to toggle Yes, then ↓ Accep…").
+ */
+const TITLE_MAX = 40;
+const FIELD_LIMITS = Object.freeze({ minLength: 1, maxLength: 40 });
+const ENTER_NOTE = 'Enter alone will not send; Esc cancels.';
+
+/** Typed text as compared: trimmed, ASCII letters lower-cased (nothing else folded). */
+const fold = (v) => String(v).trim().replace(/[A-Z]/g, (c) => c.toLowerCase());
+
+/**
+ * What the person must type to send to `to`: { need, len, at }. The first
+ * `len` characters of the handle, where len = max(2, 1 + the longest reply
+ * word the handle starts with); when that is longer than the handle, "@" and
+ * the whole handle (at: true).
+ */
+function rule(to) {
+  const h = fold(to);
+  const longest = REPLY_WORDS.reduce((m, w) => (h.startsWith(w) && w.length > m ? w.length : m), 0);
+  const len = Math.max(2, longest + 1);
+  if (len > h.length) return { need: `@${h}`, len, at: true };
+  return { need: h.slice(0, len), len, at: false };
+}
+
+/**
+ * Does the typed value confirm a send to `to`? Trimmed, ASCII lower-cased: a
+ * prefix of the handle at least `len` long (one optional leading "@"), or, in
+ * the "@" case, exactly "@" + handle. Nothing shorter.
+ */
+function typedOk(to, value) {
+  if (typeof value !== 'string') return false;
+  const h = fold(to);
+  if (!h) return false;
+  const r = rule(h);
+  const t = fold(value);
+  if (r.at) return t === r.need;
+  const bare = t.startsWith('@') ? t.slice(1) : t;
+  return bare.length >= r.len && h.startsWith(bare);
+}
+
+/** The field's title and description for a box to `to` (`held`: a kept-for-later box), within TITLE_MAX. */
+function fieldText(to, { held = false } = {}) {
+  const h = fold(to);
+  const r = rule(h);
+  const verb = held ? 'keep it' : 'send';
+  const long = `Type "${r.need}" to ${verb} ${held ? 'for' : 'to'} @${h}`;
+  const short = `Type "${r.need}" to ${verb}`;
+  const fits = (t) => t.length <= TITLE_MAX;
+  const title = fits(long) ? long : fits(short) ? short : 'Type @ and the whole handle';
+  const what = r.at
+    ? `"@" and the whole handle of who it is going to${title === long ? '' : ', as on the first line'}.`
+    : 'The first letters of who it is going to.';
+  return { title, description: `${what} ${ENTER_NOTE}` };
+}
+
+/** The requestedSchema for a box to `to`. */
+function schemaFor(to, opts = {}) {
+  const { title, description } = fieldText(to, opts);
+  return {
+    type: 'object',
+    properties: { [FIELD]: { type: 'string', title, description, ...FIELD_LIMITS } },
+    required: [FIELD],
+  };
+}
+
+/**
+ * The person's answer, from an elicitation result for a box to `to`:
+ * 'accept' only for action "accept" whose content has its own `to` string
+ * that typedOk accepts; 'decline' for an explicit decline; 'wrong' for an
+ * accept with any other content; else 'none'. All but 'accept' are a
+ * non-accept.
+ */
+function answerOf(result, to) {
+  if (!result || typeof result !== 'object') return 'none';
+  if (result.action === 'decline') return 'decline';
+  if (result.action !== 'accept') return 'none';
+  const c = result.content;
+  const ok = c && typeof c === 'object' && !Array.isArray(c) && Object.prototype.hasOwnProperty.call(c, FIELD) && typedOk(to, c[FIELD]);
+  return ok ? 'accept' : 'wrong';
+}
 /** How long a box may stay open before the send is given up. */
 const TIMEOUT_MS = 5 * 60 * 1000;
 /** The key of the one input request a stateless (2026-07-28) vibe_send asks for. */
@@ -205,8 +314,8 @@ function fits(text) {
 }
 
 /** The params of elicitation/create for a protocol version. */
-function request(text, protocolVersion) {
-  const params = { message: text, requestedSchema: SCHEMA };
+function request(text, protocolVersion, to, { held = false } = {}) {
+  const params = { message: text, requestedSchema: schemaFor(to, { held }) };
   if (MODE_VERSIONS.has(protocolVersion)) params.mode = 'form';
   return params;
 }
@@ -220,9 +329,10 @@ function isOpen() { return openNow; }
  * Open the box and wait. `box.request(params, { signal })` sends the request
  * to the client and resolves with its result. Returns 'accept', 'decline',
  * 'busy', or 'none' (cancel, error, client refusal, timeout, the call itself
- * cancelled). Only an explicit action "accept" is yes.
+ * cancelled, an accept with the wrong text). Only action "accept" with the
+ * recipient's letters typed is yes (answerOf).
  */
-async function ask(box, text, { timeoutMs = TIMEOUT_MS, signal = null } = {}) {
+async function ask(box, text, { to, held = false, timeoutMs = TIMEOUT_MS, signal = null } = {}) {
   if (openNow) return 'busy';
   if (signal && signal.aborted) return 'none';
   openNow = true;
@@ -236,13 +346,11 @@ async function ask(box, text, { timeoutMs = TIMEOUT_MS, signal = null } = {}) {
     });
     let result;
     try {
-      result = await Promise.race([Promise.resolve().then(() => box.request(request(text, box.protocolVersion), { signal: ctl.signal })), stop]);
+      result = await Promise.race([Promise.resolve().then(() => box.request(request(text, box.protocolVersion, to, { held }), { signal: ctl.signal })), stop]);
     } catch { return 'none'; }
     if (result && result.stopped) { ctl.abort(); return 'none'; }
-    const action = result && typeof result === 'object' ? result.action : undefined;
-    if (action === 'accept') return 'accept';
-    if (action === 'decline') return 'decline';
-    return 'none';
+    const answer = answerOf(result, to);
+    return answer === 'wrong' ? 'none' : answer;
   } finally {
     if (timer) clearTimeout(timer);
     if (signal && onAbort) signal.removeEventListener('abort', onAbort);
@@ -349,7 +457,8 @@ function labAllowsHook(env = process.env) {
 }
 
 module.exports = {
-  WRAP_COLUMNS, VISIBLE_LINES, NEWLINE_MARK, SCHEMA, TIMEOUT_MS, INPUT_KEY, ELICITATION_VERSIONS,
+  WRAP_COLUMNS, VISIBLE_LINES, NEWLINE_MARK, TIMEOUT_MS, INPUT_KEY, ELICITATION_VERSIONS,
+  FIELD, REPLY_WORDS, TITLE_MAX, rule, typedOk, fieldText, schemaFor, answerOf,
   declaresForm, noteClient, available, clientState,
   displayWidth, wrapLine, textLines, question, message, fits, request, ask, isOpen,
   settingsAnswerBox, settingsFiles, answeringHook, labAllowsHook, managedSettingsFile,
