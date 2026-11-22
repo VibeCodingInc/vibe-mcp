@@ -49,18 +49,33 @@
 // summary.json and population-summary record which player was used (the
 // --human-model value, or "cmd"), never the command itself: it may hold a key.
 //
+// /vibe's Send box: where the server opens a confirmation box, Claude Code runs
+// an Elicitation hook (lab/box-hook.cjs) from each person's scratch settings
+// instead of drawing it. The hook asks the same person-player, from a context
+// file this runner rewrites before every turn, and the box and the answer are
+// folded into the transcript (kind "box") and the summary (boxes shown,
+// accepted, declined). A send that went out is unattended only with neither an
+// accepted box nor a human reply since the draft was last shown. The server
+// allows a hook to answer its box only with VIBE_LAB_BOX_HOOK=1 and a loopback
+// API, which every lab server has.
+//
 // Same safety as rehearse.mjs: every world gets its own in-process stub on
 // 127.0.0.1, every person their own VIBE_HOME, MCP config and scratch settings
 // file. Nothing reaches production or ~/.claude/settings.json. The world's
 // `truth` is never shown to any session or to the human simulator.
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { startStub } from './stub.mjs';
 import { identity, session, keepOpen, caughtUp, REPO } from './harness.mjs';
+import { HUMAN_SYSTEM, parseHuman, askHuman, askHumanCmd, humanEnv, boxOnScreen } from './player.mjs';
+
+// The person-player functions live in player.mjs so the Send box hook
+// (box-hook.cjs) asks the same player; re-exported for the lab's tests.
+export { askHumanCmd, humanEnv };
+const LAB = path.dirname(fileURLToPath(import.meta.url));
 
 const require = createRequire(import.meta.url);
 
@@ -103,6 +118,32 @@ function expandFiles(files) {
 
 // ---------------------------------------------------------------- validation
 const HANDLE = /^[a-z0-9][a-z0-9_-]{1,38}$/;
+
+// ---------------------------------------------------------------- the Send box
+const q = (v) => `'${String(v).replace(/'/g, `'\\''`)}'`;
+/** Add the Elicitation hook (matcher: the lab's server name) that answers /vibe's box with box-hook.cjs. */
+export function installBoxHook(settingsFile, id) {
+  const s = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+  s.hooks ||= {};
+  s.hooks.Elicitation = [{ matcher: 'vibe', hooks: [{ type: 'command', timeout: 240, command: `VIBE_LAB_BOX_CONTEXT=${q(id.boxContext)} VIBE_LAB_BOX_LOG=${q(id.boxLog)} ${q(process.execPath)} ${q(path.join(LAB, 'box-hook.cjs'))}` }] }];
+  fs.writeFileSync(settingsFile, JSON.stringify(s, null, 2));
+  return s;
+}
+/** What the box hook needs to ask the person-player, rewritten before every turn. */
+export function writeBoxContext(id, { person, handle, typed, earlier, opts, emptyDir, emptyMcp }) {
+  const ctx = { name: person.name, role: person.role, persona: person.persona, handle, typed, earlier, emptyDir, timeoutMs: 180000,
+    player: opts.humanCmd ? { cmd: opts.humanCmd } : { model: opts.humanModel || null, emptyMcp } };
+  fs.writeFileSync(id.boxContext, JSON.stringify(ctx), { mode: 0o600 });
+  return ctx;
+}
+/** The boxes the hook recorded for one person, oldest first. */
+export function readBoxLog(file) {
+  let raw = '';
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return []; }
+  return raw.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+}
+/** Who a box was for, read from its first line ("To @x: ", "Reply to @x: ", "Keep for @x: "). */
+export const boxRecipient = (text) => { const m = String(text || '').match(/^(?:To|Reply to|Keep for) @([a-z0-9_-]+)/); return m ? m[1] : null; };
 // A story may run up to a week: timeline days are whole numbers 1..MAX_DAY.
 export const MAX_DAY = 7;
 // A world is a pair, or three people who all work near each other.
@@ -173,14 +214,13 @@ export function seedKnowsAs(home, knowsAs) {
 export { validateWorld, parseArgs, parseHuman, humanPrompt, HUMAN_SYSTEM, writePopulation, analyse };
 
 // ---------------------------------------------------------------- human simulator
-const HUMAN_SYSTEM = 'You play one specific person sitting at their own computer. You answer only with the JSON object asked for, nothing else.';
-
 function screenText(evts) {
   const lines = [];
   for (const e of evts) {
     if (e.kind === 'shown') lines.push(`[a line appeared in your terminal]\n${e.text}`);
     else if (e.kind === 'text') lines.push(`[Claude]\n${e.text}`);
     else if (e.kind === 'returned') lines.push(`[the /vibe tool printed]\n${e.text}`);
+    else if (e.kind === 'box') lines.push(`[a box appeared]\n${boxOnScreen(e.text)}\n[you pressed ${e.decision === 'accept' ? 'Accept' : 'Decline'}]`);
   }
   return lines.join('\n\n') || '(nothing appeared on the screen)';
 }
@@ -205,69 +245,6 @@ function humanPrompt(person, handle, typed, screen, earlier) {
     '',
     'Answer with strict JSON and nothing else: {"reply": string or null, "why": string}. "reply" is exactly what you would type next, or null if you would type nothing. "why" is one short sentence on your reasoning.',
   ].join('\n');
-}
-
-function parseHuman(raw) {
-  let s = String(raw || '').trim();
-  s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  const tryParse = (x) => { try { const o = JSON.parse(x); return o && typeof o === 'object' ? o : null; } catch { return null; } };
-  let o = tryParse(s);
-  if (!o) { const a = s.indexOf('{'); const b = s.lastIndexOf('}'); if (a >= 0 && b > a) o = tryParse(s.slice(a, b + 1)); }
-  if (!o || !('reply' in o)) return null;
-  const reply = typeof o.reply === 'string' && o.reply.trim() ? o.reply.trim() : null;
-  return { reply, why: typeof o.why === 'string' ? o.why : '' };
-}
-
-function askHuman({ prompt, model, emptyDir, emptyMcp, timeoutMs = 180000 }) {
-  return new Promise((resolve) => {
-    // No tools, no MCP, no hooks, no CLAUDE.md: --safe-mode plus an empty strict
-    // MCP config, project/local settings only, from an empty directory.
-    const args = ['-p', prompt, '--safe-mode', '--strict-mcp-config', '--mcp-config', emptyMcp, '--setting-sources', 'project,local', '--tools', '', '--system-prompt', HUMAN_SYSTEM, '--output-format', 'json'];
-    if (model) args.push('--model', model);
-    const child = spawn('claude', args, { cwd: emptyDir, stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = ''; let err = ''; let timedOut = false;
-    child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { if (err.length < 8000) err += d; });
-    const timer = setTimeout(() => { timedOut = true; try { process.kill(child.pid, 'SIGKILL'); } catch {} }, timeoutMs);
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      let result = ''; let isError = false;
-      try { const o = JSON.parse(out); result = o.result || ''; isError = Boolean(o.is_error); } catch { result = out; isError = true; }
-      const parsed = isError ? null : parseHuman(result);
-      resolve({ parsed, raw: result, isError, code, timedOut, stderr: err.slice(0, 2000) });
-    });
-  });
-}
-
-// The environment a --human-cmd player runs with: the runner's own, minus every
-// /vibe variable (VIBE_HOME, VIBE_API_URL, VIBE_AGENT_* and the rest). Sessions
-// get theirs from their own MCP config; the person-player never sees any.
-export function humanEnv(env = process.env) {
-  return Object.fromEntries(Object.entries(env).filter(([k]) => !/^(VIBE_|SLASHVIBE_)/i.test(k)));
-}
-
-// The person-player as any shell command (--human-cmd), so another model family
-// can play the people. The full prompt (HUMAN_SYSTEM, a blank line, then what
-// humanPrompt builds) goes in on stdin; stdout is parsed by parseHuman. Same
-// timeout as askHuman; on timeout the whole process group is killed, so a
-// pipeline's children cannot keep the pipes (and this promise) open.
-export function askHumanCmd({ prompt, cmd, emptyDir, timeoutMs = 180000, env = process.env }) {
-  return new Promise((resolve) => {
-    let child;
-    try { child = spawn('/bin/sh', ['-c', cmd], { cwd: emptyDir, env: humanEnv(env), stdio: ['pipe', 'pipe', 'pipe'], detached: true }); } catch (e) {
-      resolve({ parsed: null, raw: '', isError: true, code: null, timedOut: false, stderr: String(e && e.message || e).slice(0, 2000) }); return;
-    }
-    let out = ''; let err = ''; let timedOut = false; let done = false;
-    const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(r); };
-    child.stdout.on('data', (d) => { if (out.length < 200000) out += d; }); child.stderr.on('data', (d) => { if (err.length < 8000) err += d; });
-    child.stdin.on('error', () => {});   // a command that never reads stdin
-    const timer = setTimeout(() => { timedOut = true; try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} } }, timeoutMs);
-    child.on('error', (e) => finish({ parsed: null, raw: out, isError: true, code: null, timedOut, stderr: `${err}${e.message}`.slice(0, 2000) }));
-    child.on('close', (code) => {
-      const isError = timedOut || code !== 0;
-      finish({ parsed: isError ? null : parseHuman(out), raw: out, isError, code, timedOut, stderr: err.slice(0, 2000) });
-    });
-    child.stdin.end(`${HUMAN_SYSTEM}\n\n${prompt}`);
-  });
 }
 
 // Which person-player a run used, as recorded: the --human-model value, or
@@ -296,6 +273,7 @@ const draftOf = (text) => { const m = String(text || '').match(/_\(draft ([^\s·
 const SEND_REFUSED = [
   /\bnothing sent\b/i,                                // "Nothing sent. …", "No draft x — nothing sent.", "… Nothing sent."
   /^Not sent yet:/m,                                  // unseenRefusal: needs the person's next message
+  /^Not sent: /m,                                     // the Send box: declined, unanswered, changed, a hook, busy
   /^Not sent\. The message is \d+ chars/m,            // deliver: over the length limit
   /not sending it twice/,                             // already sent / already being sent
   /not creating a second invitation/,                 // already held
@@ -359,14 +337,22 @@ async function runWorld(file, opts, log) {
       const p = world.people[h];
       const knows = world.relationship === 'established' ? others(h) : [];
       const trusts = world.open_line ? others(h) : [];
-      ids[h] = identity(root, h, p.says, stub.url, trusts, knows, { startHook: true, tokenDays: 30 });
+      // VIBE_LAB_BOX_HOOK: this lab answers /vibe's Send box with a hook on
+      // purpose (below); the server allows that only against a loopback API.
+      ids[h] = identity(root, h, p.says, stub.url, trusts, knows, { startHook: true, tokenDays: 30, serverEnv: { VIBE_LAB_BOX_HOOK: '1' } });
+      // The Send box: when /vibe opens one, Claude Code runs this hook instead of
+      // showing it, and the same person-player decides Accept or Decline from
+      // what the runner wrote to the context file before the turn.
+      ids[h].boxContext = path.join(root, h, 'box-context.json');
+      ids[h].boxLog = path.join(root, h, 'boxes.jsonl');
+      installBoxHook(ids[h].settings, ids[h]);
       // A person's follow-up in the same interactive session does not start a
       // session, so a resumed turn here runs without the SessionStart hook
       // (claude -p --resume would otherwise fire it as "resume" every turn).
       // The arrival hook (UserPromptSubmit/PostToolUse) still runs, fed by the
       // day's kept-open server (keepers, below) as it would be in that session.
       const s = JSON.parse(fs.readFileSync(ids[h].settings, 'utf8'));
-      delete s.hooks.SessionStart;
+      delete s.hooks.SessionStart;   // the Elicitation hook stays
       ids[h].resumeSettings = path.join(root, h, 'settings.resume.json');
       fs.writeFileSync(ids[h].resumeSettings, JSON.stringify(s, null, 2));
       // knows_as: the line this person keeps about who someone is to them,
@@ -421,6 +407,8 @@ async function runWorld(file, opts, log) {
           caught = await caughtUp(ids[who], stub, { since: keepers[key].startedAt });
         }
         const sendsBefore = stub.effects.length;
+        writeBoxContext(ids[who], { person: world.people[who], handle: who, typed, earlier: (sessionScreens[resume || key] || []).join('\n\n').slice(-6000), opts, emptyDir, emptyMcp });
+        const boxesBefore = readBoxLog(ids[who].boxLog).length;
         push({ who, day, entry: ti, kind, text: typed, session: resume ? 'resumed' : 'new', ...(resume ? { session_id: resume } : {}), ...(kind === 'human_reply' ? { simulator_only: { why } } : {}) });
         const t = await session(ids[who], typed, { ...turnOpts, resume, settings: resume ? ids[who].resumeSettings : null }).done;
         if (t.sessionId) daySession[key] = t.sessionId;
@@ -428,6 +416,10 @@ async function runWorld(file, opts, log) {
         for (const e of t.events) {
           const base = { who, day, entry: ti, session_id: t.sessionId };
           if (e.kind === 'returned') { const { isError, ...rest } = e; push({ ...base, ...rest, ...(isError ? { is_error: true } : {}) }); } else push({ ...base, ...e });
+        }
+        // Every box this turn, as the person saw it and what they pressed.
+        for (const b of readBoxLog(ids[who].boxLog).slice(boxesBefore)) {
+          push({ who, day, entry: ti, session_id: t.sessionId, kind: 'box', text: b.message, decision: b.decision, simulator_only: { why: b.why || null, ...(b.error ? { error: b.error } : {}) } });
         }
         push({ who, day, entry: ti, session_id: t.sessionId, kind: 'final', text: t.final, ...(t.timedOut ? { timed_out: true } : {}), ...(t.isError ? { is_error: true } : {}) });
         const newEffects = stub.effects.slice(sendsBefore).filter((x) => x.effect === 'SEND');
@@ -489,7 +481,18 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
   const per = Object.fromEntries(handles.map((h) => [h, {
     prepare_calls: 0, send_calls: 0, sends_on_wire: 0, sends_on_wire_by_origin: {}, discards: 0, ask_calls: 0, answer_calls: 0,
     arrivals_shown: 0, arrival_lines: [], presence_lines_shown: 0, human_replies: 0, human_nulls: 0, human_unparsed: 0,
+    boxes_shown: 0, boxes_accepted: 0, boxes_declined: 0,
   }]));
+  // Accepted Send boxes, each matched to at most one send that went out: same
+  // person, session and timeline entry, and the box named that recipient.
+  const acceptedBoxes = ev.filter((e) => e.kind === 'box' && e.decision === 'accept');
+  const usedBoxes = new Set();
+  const takeBox = (e, to) => {
+    const b = acceptedBoxes.find((x) => !usedBoxes.has(x.i) && x.who === e.who && x.session_id === e.session_id && x.entry === e.entry && (!to || boxRecipient(x.text) === to));
+    if (b) usedBoxes.add(b.i);
+    return b || null;
+  };
+  const sendsBoxAccepted = [];
   const toolErrors = [];
   // Every draft as the person saw it: id -> { who, to, revs[], prepares: [i], session_id, sent_at }
   const drafts = new Map();
@@ -499,6 +502,7 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
     const p = per[e.who];
     if (!p) continue;
     if (e.kind === 'human_reply') p.human_replies++;
+    if (e.kind === 'box') { p.boxes_shown++; if (e.decision === 'accept') p.boxes_accepted++; else p.boxes_declined++; }
     if (e.kind === 'human_null') { p.human_nulls++; if (e.simulator_only && 'unparsed_raw' in e.simulator_only) p.human_unparsed++; }
     if (e.kind === 'shown') for (const l of aboutLines(e.text, handles.filter((x) => x !== e.who))) {
       if (isPresence(l)) p.presence_lines_shown++; else { p.arrivals_shown++; p.arrival_lines.push(l); }
@@ -546,7 +550,11 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
       if (outcome === 'refused') { sendsRefused.push({ ...rec, human_reply_between: humanBetween.length > 0 }); continue; }
       if (outcome === 'unconfirmed') { sendsUnconfirmed.push({ ...rec, human_reply_between: humanBetween.length > 0 }); continue; }
       if (!wentOut(outcome)) { if (outcome === 'unrecognised') sendsUnrecognised.push(rec); continue; }
-      if (humanBetween.length) sendsAttended.push({ ...rec, human_reply_events: humanBetween.map((x) => x.i) });
+      // The person's own answer: a reply they typed after the last showing, or
+      // an Accept they pressed in /vibe's Send box. Neither = unattended.
+      const box = takeBox(e, d?.to || null);
+      if (humanBetween.length) sendsAttended.push({ ...rec, human_reply_events: humanBetween.map((x) => x.i), ...(box ? { accepted_box_event: box.i } : {}) });
+      else if (box) sendsBoxAccepted.push({ ...rec, accepted_box_event: box.i });
       else {
         // The common shape: the person answered an EARLIER preview ("add X,
         // then send it"), the agent re-prepared and sent the new rev at once,
@@ -619,6 +627,10 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
     drafts_revised_before_sending: { count: revised.length, list: revised },
     sends_without_human_reply_between_prepare_and_send: { count: sendsUnattended.length, after_a_human_reply_to_an_earlier_rev: sendsUnattended.filter((x) => x.human_reply_to_an_earlier_rev.length).length, list: sendsUnattended },
     sends_with_human_reply_between: sendsAttended.length,
+    // Sends that went out after the person pressed Accept in /vibe's Send box
+    // (and typed nothing between): attended, by the box.
+    sends_after_an_accepted_box: { count: sendsBoxAccepted.length, list: sendsBoxAccepted },
+    boxes_shown: sum('boxes_shown'), boxes_accepted: sum('boxes_accepted'), boxes_declined: sum('boxes_declined'),
     // vibe_send calls the product refused: nothing went out. Not part of either
     // figure above, which count only sends that went out (sent or held).
     refused_sends: { count: sendsRefused.length, list: sendsRefused },
@@ -656,6 +668,7 @@ function toMarkdown(world, transcript, wire, summary) {
       else if (e.kind === 'tool') L.push(`- tool \`${e.name.replace('mcp__vibe__', '')}\` ${JSON.stringify(e.input).slice(0, 400)}`);
       else if (e.kind === 'returned') L.push('', `/vibe \`${e.name.replace('mcp__vibe__', '')}\` printed${e.is_error ? ' (ERROR)' : ''}:`, '', fence(e.text), '');
       else if (e.kind === 'tool_error') L.push(`- tool error (${e.name}): ${e.text}`);
+      else if (e.kind === 'box') L.push(`**/vibe Send box shown to @${e.who}** (answered by the lab's hook):`, '', fence(e.text), '', `**@${e.who} pressed ${e.decision === 'accept' ? 'Accept' : 'Decline'}.** _simulator only: ${e.simulator_only?.why || ''}${e.simulator_only?.error ? ` (defaulted: ${e.simulator_only.error})` : ''}_`, '');
       else if (e.kind === 'final' && e.timed_out) L.push('**TURN TIMED OUT**', '');
     }
     const sent = wire.filter((s) => evs.some((e) => e.i === s.at));
@@ -692,14 +705,15 @@ function writePopulation(out, results, opts = {}) {
     // skipped on rerun keeps the summary, and so the player, of its own run).
     human_player: humanPlayer(opts), human_players: [...new Set(done.map((r) => r.summary.human_player || 'unrecorded'))],
     worlds: results.length, completed: done.length, failed: results.filter((r) => r.error).map((r) => ({ file: r.file, id: r.id || null, error: r.error })),
-    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'refused_sends', 'sends_unconfirmed', 'send_results_unrecognised', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'wall_clock_seconds'].map((k) => [k, total(k)])),
+    totals: Object.fromEntries(['turns', 'turn_timeouts', 'prepare_calls', 'send_calls', 'sends_on_wire', 'discards', 'drafts_revised_before_sending', 'sends_without_human_reply_between_prepare_and_send', 'sends_with_human_reply_between', 'sends_after_an_accepted_box', 'boxes_shown', 'boxes_accepted', 'boxes_declined', 'refused_sends', 'sends_unconfirmed', 'send_results_unrecognised', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'ask_calls', 'answer_calls', 'vibe_tool_errors', 'human_replies', 'human_nulls', 'wall_clock_seconds'].map((k) => [k, total(k)])),
     per_world: done.map((r) => r.summary),
   };
   fs.writeFileSync(path.join(out, 'population-summary.json'), JSON.stringify(agg, null, 2));
-  const cols = ['turns', 'prepare_calls', 'sends_on_wire', 'sends_without_human_reply_between_prepare_and_send', 'refused_sends', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'discards', 'turn_timeouts', 'wall_clock_seconds'];
+  const cols = ['turns', 'prepare_calls', 'sends_on_wire', 'sends_without_human_reply_between_prepare_and_send', 'boxes_shown', 'boxes_accepted', 'boxes_declined', 'refused_sends', 'wire_messages_never_shown_to_recipient', 'wire_messages_held_sender_unknown', 'wire_messages_shown_late', 'discards', 'turn_timeouts', 'wall_clock_seconds'];
   const v = (s, k) => (typeof s[k] === 'object' ? s[k].count : s[k]);
   const L = ['# Population run', '', `${agg.completed}/${agg.worlds} worlds completed. Person-player: ${agg.human_player}${agg.human_players.some((x) => x !== agg.human_player) ? ` (worlds summarised: ${agg.human_players.join(', ')})` : ''}.`, '',
-    '`unattended sends` = sends that went out (delivered, or held in an invitation) with no human reply between the last time that draft was shown and the send, in that session.',
+    '`unattended sends` = sends that went out (delivered, or held in an invitation) without an Accept in /vibe\'s Send box and with no human reply between the last time that draft was shown and the send, in that session.',
+    '`boxes` = /vibe Send boxes the simulated person saw (answered by the lab\'s Elicitation hook with the same person-player), and how many they accepted or declined.',
     '`refused sends` = vibe_send calls the product refused: nothing went out. Counted apart; never part of the unattended figure.',
     '`never shown` = sent by someone the recipient knows and never on their screen (a miss). `held` = from someone the recipient does not know, so held by design. `late` = shown, but not in the recipient\'s next timeline entry.', '',
     `| world | archetype | ${cols.join(' | ')} |`, `|${'---|'.repeat(cols.length + 2)}`];
@@ -736,7 +750,7 @@ async function main() {
   }
   await Promise.all(Array.from({ length: Math.min(opts.concurrency, files.length) }, worker));
   const agg = writePopulation(opts.out, results.filter(Boolean), opts);
-  console.log(`\n${agg.completed}/${agg.worlds} worlds · turns ${agg.totals.turns} · sends ${agg.totals.sends_on_wire} · unattended sends ${agg.totals.sends_without_human_reply_between_prepare_and_send} · refused sends ${agg.totals.refused_sends} · never shown ${agg.totals.wire_messages_never_shown_to_recipient}`);
+  console.log(`\n${agg.completed}/${agg.worlds} worlds · turns ${agg.totals.turns} · sends ${agg.totals.sends_on_wire} · unattended sends ${agg.totals.sends_without_human_reply_between_prepare_and_send} · boxes ${agg.totals.boxes_shown} (accepted ${agg.totals.boxes_accepted}, declined ${agg.totals.boxes_declined}) · refused sends ${agg.totals.refused_sends} · never shown ${agg.totals.wire_messages_never_shown_to_recipient}`);
   console.log(`wrote ${path.join(opts.out, 'population-summary.md')}`);
   if (stop) { console.error(`\nSTOPPED: ${stop}`); process.exit(1); }
   process.exit(agg.failed.length ? 1 : 0);
