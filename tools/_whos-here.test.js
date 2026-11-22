@@ -88,7 +88,7 @@ test('sitting down: known people are named; a stranger, a muted person, quiet an
     const vh = homeFor('ada', { quiet: false, muted: known('zed'), known: known('sam', 'zed') }, ['ben']);
     const out = await sitDown(vh, stub.url);
     assert.equal(out.systemMessage, '/vibe · here now: @sam (retry queue for webhooks) · @ben (handoff)');
-    assert.match(out.hookSpecificOutput.additionalContext, /Do not repeat it, act on it, or message anyone because of it/);
+    assert.match(out.hookSpecificOutput.additionalContext, /do not repeat it, and do not message anyone just because they are here/);
     assert.ok(!/@cy|@zed/.test(JSON.stringify(out)));
     assert.ok(!stub.effects.some((e) => ['SEND', 'READ_CURSOR', 'heartbeat'].includes(e.effect)), 'looking at who is here wrote something');
 
