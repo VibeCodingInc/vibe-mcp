@@ -18,3 +18,5 @@ The person wants to reach someone on /vibe from the work in this session. They s
 If the person has no line saying what they are working on (`vibe_start` says so), offer once to set one from this session's work, in their words, and set it only if they agree.
 
 If they dictate exact words ("message @sam: ship it"), skip steps 1-3: call `vibe_prepare` with their words exactly as they said them, show the preview, and offer the same three choices. Nothing sends without a preview the person chose to send.
+
+A message marked you in a thread (`vibe_thread`) was sent by this person, possibly from an earlier session or another device; its line says where it came from. It is theirs. Never describe it as unexplained, or as not sent by them, because this session did not send it.
