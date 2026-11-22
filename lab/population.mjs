@@ -143,7 +143,7 @@ export function readBoxLog(file) {
   try { raw = fs.readFileSync(file, 'utf8'); } catch { return []; }
   return raw.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 }
-/** Who a box was for, read from its first line ("To @x: ", "Reply to @x: ", "Keep for @x: "). */
+/** Who a box was for, read from its fixed first line ("Send to @x …", "Reply to @x …", "Keep for @x …"). */
 /**
  * On the box path, a world in which messages went out but no Send box was ever
  * shown means the box never ran (a host that cannot show one, a protocol where
@@ -156,7 +156,7 @@ export function boxExpectationFailure(summary) {
   }
   return null;
 }
-export const boxRecipient = (text) => { const m = String(text || '').match(/^(?:Send (?:this reply )?to|Keep this for) @([a-z0-9_-]+)/); return m ? m[1] : null; };
+export const boxRecipient = (text) => { const m = String(text || '').match(/^(?:Send to|Reply to|Keep for) @([a-z0-9_-]+)/); return m ? m[1] : null; };
 // A story may run up to a week: timeline days are whole numbers 1..MAX_DAY.
 export const MAX_DAY = 7;
 // A world is a pair, or three people who all work near each other.
