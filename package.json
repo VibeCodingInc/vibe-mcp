@@ -90,6 +90,7 @@
     "near.js",
     "unsent.js",
     "showable.js",
-    "host-command.js"
+    "host-command.js",
+    "confirm-box.js"
   ]
 }

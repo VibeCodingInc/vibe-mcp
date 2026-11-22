@@ -35,6 +35,7 @@ const authStore = require('./auth-store');
 const actorSession = require('./actor-session');
 const arrival = require('./arrival');
 const agentAuth = require('./agent-auth');
+const confirmBox = require('./confirm-box');
 const pkg = require('./package.json');
 
 // ─── MCP protocol identity (spec 2026-07-28, dual-era) ──────────────────
@@ -175,6 +176,57 @@ class VibeMCPServer {
     presence.start();
   }
 
+  /**
+   * A request from this server to the client (stdio): resolves with the
+   * client's result, rejects on its error. An aborted request is withdrawn
+   * with notifications/cancelled, so the host can close what it opened.
+   */
+  requestClient(method, params, { signal } = {}) {
+    if (!this.pending) { this.pending = new Map(); this.nextRequestId = 1; }
+    const id = `vibe-${this.nextRequestId++}`;
+    return new Promise((resolve, reject) => {
+      const done = () => { this.pending.delete(id); if (signal) signal.removeEventListener('abort', onAbort); };
+      const onAbort = () => {
+        if (!this.pending.has(id)) return;
+        done();
+        this.notify('notifications/cancelled', { requestId: id, reason: 'timed out' });
+        reject(new Error('cancelled'));
+      };
+      this.pending.set(id, {
+        resolve: (v) => { done(); resolve(v); },
+        reject: (e) => { done(); reject(e); },
+      });
+      if (signal) {
+        if (signal.aborted) { onAbort(); return; }
+        signal.addEventListener('abort', onAbort);
+      }
+      try {
+        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+      } catch (e) { done(); reject(e); }
+    });
+  }
+
+  /** A response to one of this server's requests. True if it was one. */
+  takeResponse(msg) {
+    if (!msg || typeof msg !== 'object' || msg.method !== undefined || msg.id === undefined) return false;
+    if (!('result' in msg) && !('error' in msg)) return false;
+    const p = this.pending && this.pending.get(msg.id);
+    if (p) {
+      if (msg.error) { const e = new Error(String(msg.error.message || 'error')); e.code = msg.error.code; p.reject(e); }
+      else p.resolve(msg.result);
+    }
+    return true;
+  }
+
+  /** The Send box for vibe_send (confirm-box.js) on this connection. */
+  box() {
+    const state = confirmBox.clientState();
+    return {
+      protocolVersion: state && state.protocolVersion,
+      request: (params, opts) => this.requestClient('elicitation/create', params, opts),
+    };
+  }
+
   notify(method, params = {}) {
     try { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n'); } catch {}
   }
@@ -223,8 +275,12 @@ class VibeMCPServer {
         // keeps it so presence can say which agent this session lives in.
         require('./host').setClientInfo(params?.clientInfo);
         const requested = params?.protocolVersion;
+        const negotiated = LEGACY_PROTOCOL_VERSIONS.includes(requested) ? requested : LEGACY_PROTOCOL_VERSIONS[0];
+        // Whether this client can show the person a Send box (confirm-box.js):
+        // form elicitation, declared here, in a version that has it.
+        confirmBox.noteClient({ protocolVersion: negotiated, capabilities: params?.capabilities });
         return ok({
-          protocolVersion: LEGACY_PROTOCOL_VERSIONS.includes(requested) ? requested : LEGACY_PROTOCOL_VERSIONS[0],
+          protocolVersion: negotiated,
           capabilities: SERVER_CAPABILITIES,
           serverInfo: SERVER_INFO,
           instructions: SERVER_INSTRUCTIONS,
@@ -286,7 +342,13 @@ class VibeMCPServer {
         try {
           const wasAuthed = isAuthed();
           presence.noteActivity(); // a tool call means the person is here: polls snap back to fast
-          const result = await tool.handler(params.arguments || {});
+          // vibe_send asks the person in a box when the client can show one.
+          // Only on a connection opened with initialize: a stateless (modern)
+          // request has no session to send a request back on.
+          const isModern = params?._meta?.[META_PROTOCOL_VERSION] !== undefined;
+          const result = params.name === 'vibe_send'
+            ? await tool.handler(params.arguments || {}, { box: !isModern && confirmBox.available() ? this.box() : null })
+            : await tool.handler(params.arguments || {});
           if (!wasAuthed && isAuthed()) this.notify('notifications/tools/list_changed');
           const callResult = { content: [{ type: 'text', text: result.display || JSON.stringify(result, null, 2) }] };
           if (result.structured) callResult.structuredContent = result.structured;
@@ -321,12 +383,17 @@ class VibeMCPServer {
       buffer = lines.pop() || '';
       for (const line of lines) {
         if (!line.trim()) continue;
-        try {
-          const response = await this.handleRequest(JSON.parse(line));
+        let msg;
+        try { msg = JSON.parse(line); } catch (e) { process.stderr.write(`Error: ${e.message}\n`); continue; }
+        // The client's answer to a request of ours (the Send box) is never
+        // queued behind the tool call that is waiting for it.
+        if (this.takeResponse(msg)) continue;
+        // A tool call may wait on the person (the Send box): it is not
+        // awaited here, so nothing else on the connection waits behind it.
+        const handled = this.handleRequest(msg).then((response) => {
           if (response) process.stdout.write(JSON.stringify(response) + '\n');
-        } catch (e) {
-          process.stderr.write(`Error: ${e.message}\n`);
-        }
+        }).catch((e) => { process.stderr.write(`Error: ${e.message}\n`); });
+        if (msg.method !== 'tools/call') await handled;
       }
     });
 
