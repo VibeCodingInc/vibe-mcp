@@ -91,6 +91,7 @@
     "unsent.js",
     "showable.js",
     "host-command.js",
-    "confirm-box.js"
+    "confirm-box.js",
+    "notice.js"
   ]
 }
