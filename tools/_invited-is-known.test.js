@@ -98,7 +98,7 @@ test('the round trip: Ada invites, Nell signs in with the code and writes first,
     input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 's1' }),
     env: { ...process.env, VIBE_ARRIVALS_DIR: arrival.spoolDir() }, encoding: 'utf8',
   });
-  assert.match(out.stdout, /@nell \(you invited them\) wrote you/);
+  assert.match(out.stdout, /Note from @nell \((just now|\d+m ago); you invited them\), waiting at your pause/);
 
   // Her second message is an ordinary arrival: "you invited them" is said once.
   stub.post('nell', 'ada', 'also: dead-letter after how many tries?');

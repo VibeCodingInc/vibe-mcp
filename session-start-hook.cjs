@@ -302,6 +302,25 @@ function waitingCount(messages, now = Date.now()) {
   return `${n} messages waiting, ${fresh} new`;
 }
 
+/**
+ * One message waiting, said as a note (notice.js arrivalHeader). At session
+ * start nothing waited for a pause, so the line says only who and when:
+ *   /vibe · Note from @maya (yesterday): "..."
+ *   /vibe · Note from @maya (yesterday), still waiting: "..."   (shown before, unanswered)
+ * No time is printed when the message's time is unknown. Pure.
+ */
+function noteWhen(at, now = Date.now()) {
+  if (!Number.isFinite(at)) return '';
+  const labclock = require('./labclock');
+  const mins = Math.floor((labclock.now(now) - labclock.at(at)) / 60000);
+  if (mins < 60) return mins < 1 ? 'just now' : `${mins}m ago`;
+  return sinceWhen(at, now);
+}
+function startNoteLine(m, now = Date.now()) {
+  const when = noteWhen(m.at, now);
+  return `/vibe · Note from @${inertField(m.from, 40)}${when ? ` (${when})` : ''}${m.seen ? ', still waiting' : ''}: \u201c${inertField(m.text, 140)}\u201d`;
+}
+
 function normalizeDoors(value) {
   const rows = Array.isArray(value) ? value : [];
   return rows
@@ -396,7 +415,9 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
     // loaded into startup context · … · no delivery receipt written; may appear
     // again": true, and written for whoever built it. The note to the model above
     // still carries those facts.
-    shown.push(`/vibe · ${waitingCount(messages, now)} · ${messages.length === 1 ? 'from' : 'latest from'} @${inertField(latest.from, 40)}${messages.length > 1 && latest.seen ? ` (still waiting${latest.at ? ` since ${sinceWhen(latest.at, now)}` : ''})` : ''}: \u201c${preview}\u201d`);
+    shown.push(messages.length === 1 && notice.on('arrivalHeader')
+      ? startNoteLine(latest, now)
+      : `/vibe · ${waitingCount(messages, now)} · ${messages.length === 1 ? 'from' : 'latest from'} @${inertField(latest.from, 40)}${messages.length > 1 && latest.seen ? ` (still waiting${latest.at ? ` since ${sinceWhen(latest.at, now)}` : ''})` : ''}: \u201c${preview}\u201d`);
   }
 
   for (const r of reminders) {
@@ -670,6 +691,8 @@ module.exports = {
   normalizeSignin,
   sinceWhen,
   waitingCount,
+  startNoteLine,
+  noteWhen,
   normalizeUnsent,
   noteSessionStart,
   fetchUnsent,

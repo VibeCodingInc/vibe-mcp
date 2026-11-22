@@ -39,7 +39,7 @@ function sitDown(vh, apiUrl) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, 'hook', 'run'], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { PATH: process.env.PATH, HOME: path.dirname(vh), VIBE_HOME: vh, VIBE_API_URL: apiUrl, CI: '1', VIBE_SETUP_NO_AUTORUN: '1', NODE_OPTIONS: process.env.NODE_OPTIONS || '' },
+      env: { PATH: process.env.PATH, HOME: path.dirname(vh), VIBE_HOME: vh, VIBE_API_URL: apiUrl, CI: '1', VIBE_SETUP_NO_AUTORUN: '1', VIBE_NOTICE_OFF: 'arrivalHeader' /* these pin the waiting-count wording; the note form is tested in _voice.test.js */, NODE_OPTIONS: process.env.NODE_OPTIONS || '' },
     });
     let out = '';
     child.stdout.on('data', (d) => { out += d; });
@@ -81,7 +81,7 @@ test('announced mid-session by the arrival hook, unanswered: the next session sa
       input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 's1' }),
       env: { ...process.env, VIBE_ARRIVALS_DIR: path.join(vh, 'arrivals'), VIBE_TURNS_DIR: path.join(vh, 'turns') }, encoding: 'utf8',
     });
-    assert.match(JSON.parse(hook.stdout).systemMessage, /^\/vibe · @mira wrote you: "second question: page size\?"$/);
+    assert.match(JSON.parse(hook.stdout).systemMessage, /^\/vibe · Note from @mira \((just now|\d+m ago)\), waiting at your pause: "second question: page size\?"$/);
     const next = await sitDown(vh, stub.url);
     assert.equal(waiting(next.out), '/vibe · 1 message still waiting since earlier today · from @mira: “second question: page size?”');
   } finally { await stub.close(); }

@@ -89,7 +89,7 @@ test('a spooled arrival is announced once per machine, on either hook event', ()
   assert.equal(first.hookSpecificOutput.hookEventName, 'PostToolUse');
   assert.match(first.hookSpecificOutput.additionalContext, /@leo just wrote/);
   assert.match(first.hookSpecificOutput.additionalContext, /Agentic Marketing/);
-  assert.match(first.systemMessage, /@leo wrote you: "did the deck land\?"/);
+  assert.match(first.systemMessage, /Note from @leo \([^)]*\), waiting at your pause: "did the deck land\?"/);
   assert.deepEqual(runHook(dir, 'UserPromptSubmit'), { suppressOutput: true }, 'second presenter stays quiet');
   assert.equal(arrival.claim('msg_abc123', env), false, 'the footer and the channel lose the claim too');
 });
@@ -263,7 +263,7 @@ test('a reminder rides along with an arrival instead of replacing it', () => {
   const rows = arrival.record([thread()], 'seth', { since: now - 60_000, env });
   assert.equal(rows.length, 1);
   const out = promptHook(arrival.spoolDir(env), 'I am stuck on the lease length', 'both');
-  assert.match(out.systemMessage, /wrote you/);
+  assert.match(out.systemMessage, /Note from @leo/);
   assert.match(out.hookSpecificOutput.additionalContext, /just wrote to the person/);
   assert.match(out.hookSpecificOutput.additionalContext, /vibe_bump/);
 });

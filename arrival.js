@@ -198,7 +198,47 @@ function render(item) {
   const verb = lineOpen && line.isAgentAnswer(item.text) ? "'s agent answered"
     : (lineOpen && line.isAgentAsk(item.text) ? "'s agent asked over your open line" : ' wrote you');
   const invited = item.invited && !lineOpen ? ' (you invited them)' : '';
-  return { context, line: `/vibe · @${from}${invited}${verb}: "${inertField(text, 140)}"` };
+  const out = { context, line: `/vibe · @${from}${invited}${verb}: "${inertField(text, 140)}"` };
+  // The person's own words, shown at a pause (notice.js arrivalHeader). Only for
+  // something a person wrote: an agent's ask or answer keeps its own mark. The
+  // age is worked out by the hook when it prints (headerLine), so it is true then.
+  if (verb === ' wrote you' && notice.on('arrivalHeader')) {
+    out.header = { from, invited: Boolean(item.invited && !lineOpen), said: inertField(text, 140), ...headerClock(item.sentAt) };
+  }
+  return out;
+}
+
+/**
+ * When the message was written, for the hook to say "(2m ago)". In a lab run
+ * the display clock may be shifted (labclock.js): the shift rides along, so
+ * the hook (no dependencies) shows what everything else shows. Nothing when
+ * the time is not known: then no age is printed.
+ */
+function headerClock(sentAt) {
+  if (!Number.isFinite(sentAt) || sentAt <= 0) return {};
+  const labclock = require('./labclock');
+  return { at: labclock.at(sentAt), shift: labclock.now(0) };
+}
+
+/** "just now", "4m ago", "3h ago", "2d ago". Pure. Must match hooks/arrival-hook.cjs ago(). */
+function ago(ms) {
+  if (!Number.isFinite(ms)) return '';
+  const m = Math.floor(Math.max(0, ms) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+/**
+ * The person's line for an arrival shown at a pause (a prompt or a tool step,
+ * which is when the hook runs): `/vibe · Note from @maya (2m ago), waiting at
+ * your pause: "..."`. Pure. Must match hooks/arrival-hook.cjs headerLine().
+ */
+function headerLine(h, now = Date.now()) {
+  const bits = [Number.isFinite(h.at) ? ago(now + (Number.isFinite(h.shift) ? h.shift : 0) - h.at) : '', h.invited ? 'you invited them' : ''].filter(Boolean).join('; ');
+  return `/vibe · Note from @${h.from}${bits ? ` (${bits})` : ''}, waiting at your pause: "${h.said}"`;
 }
 
 // ── the spool ───────────────────────────────────────────────────────────────
@@ -269,9 +309,9 @@ function record(threads, me, { since = 0, roster = [], bindingFor = null, env = 
       // What this side asked, so the answer is read beside its question.
       item.asked = line.receipts({ env }).filter((r) => r.kind === 'asked' && r.with === line.norm(t.lastFrom)).pop() || null;
     }
-    const rendered = render(item);
+    const rendered = render({ ...item, sentAt: t.lastTimestamp });
     // `text` rides along so vibe_answer can check what it is answering.
-    const row = { id: item.id, to: item.to, from: item.from, at: item.at, text: item.text, context: rendered.context, line: rendered.line };
+    const row = { id: item.id, to: item.to, from: item.from, at: item.at, text: item.text, context: rendered.context, line: rendered.line, ...(rendered.header ? { header: rendered.header } : {}) };
     try {
       writeAtomic(path.join(dir, `${safeId(item.id)}.json`), row);
       out.push(row);
@@ -420,6 +460,6 @@ async function wroteLastPeople(threads, me, { kindOf = null, limit = 3, ...opts 
 module.exports = {
   wroteLastPeople,
   spoolDir, safeId, claim, isClaimed, isSpooled, told,
-  render, pickArrivals, record, prune, wroteLast, countReply, countWaiting,
+  render, pickArrivals, record, prune, wroteLast, countReply, countWaiting, headerLine, ago,
   SPOOL_TTL_MS, ARRIVAL_SLACK_MS,
 };
