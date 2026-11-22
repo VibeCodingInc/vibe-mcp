@@ -10,13 +10,13 @@
  * elicitation), vibe_send also asks the person directly: a box whose first
  * line is fixed /vibe wording (recipient, length, whether all of it is
  * shown), then the text, each line quoted with "> ", and Accept / Decline.
- * The rule: the person must be able to see every word that will be sent.
- *   - The whole text fits in the box: Accept is enough.
- *   - It does not fit: the turn check (a typed message after the preview)
- *     AND Accept.
- *   - Where the turn check is unavailable (a host that is not Claude Code, or
+ * The box shows the start of the text, not the reply target and not exact
+ * spacing, so the preview is where the person reads the message:
+ *   - wherever person turns are recorded, a send needs the turn check (a
+ *     typed message after the preview) AND Accept, for every draft;
+ *   - where the turn check is unavailable (a host that is not Claude Code, or
  *     Claude Code with no turn ever recorded because the hook is not
- *     installed), the box alone decides, whatever the length.
+ *     installed), the box alone decides.
  * The model never sees the box or the answer, only the tool result.
  *
  * Two ways a box is opened, by protocol era (index.js decides which applies):
@@ -184,11 +184,14 @@ const charCount = (text) => graphemes(text).length;
  */
 function question({ to, held = false, retry = false, reply = false, text }) {
   const n = charCount(text);
-  // Both facts, always: how long it is, and whether all of it is below.
-  // Short enough for 72 columns with a 15-character handle and a 4-digit count.
-  const len = `(${n} char${n === 1 ? '' : 's'}, ${fits(text) ? 'all shown' : 'only start shown'})`;
-  if (held) return `Keep for @${to} till they join? ${len}`;
-  return `${reply ? 'Reply' : 'Send'} to @${to}${retry ? ' again' : ''} now? ${len}`;
+  const whole = fits(text);
+  // Both facts, always: how long it is, and whether all of it is below. Within
+  // 72 columns for the longest handle (39) and a 4-digit count: the long form
+  // when it fits, else the short one.
+  const lead = held ? `Keep for @${to}?` : `${retry ? 'Resend' : reply ? 'Reply' : 'Send'} to @${to}?`;
+  const chars = `${n} char${n === 1 ? '' : 's'}`;
+  const long = `${lead} (${chars}, ${whole ? 'all shown' : 'start only'})`;
+  return long.length <= WRAP_COLUMNS ? long : `${lead} (${chars}, ${whole ? 'all' : 'start'})`;
 }
 
 /** The box's whole message: the question, then the whole text, each line quoted, wrapped. */
@@ -249,31 +252,27 @@ async function ask(box, text, { timeoutMs = TIMEOUT_MS, signal = null } = {}) {
 }
 
 // ── hooks that could answer the box ─────────────────────────────────────────
+// A tripwire for the documented settings locations, checked exactly: each
+// file is parsed as JSON, and only a key `Elicitation` or `ElicitationResult`
+// under `hooks` (as the host reads it, case-sensitive) refuses. A settings
+// file that exists but does not parse refuses too, named: it cannot be
+// checked. Not covered: a file passed with `claude --settings`, hooks in
+// skill, agent or command frontmatter or plugin manifests if the host honours
+// them, and anything the host adds later.
 
-const HOOK_EVENT = /^elicitation(result)?$/i;
+const HOOK_EVENTS = ['Elicitation', 'ElicitationResult'];
 
 /**
- * Does this settings text hold a hook that could answer the box? Any
- * Elicitation or ElicitationResult entry counts, whatever its matcher: the
- * name this server is registered under is the person's choice, not known
- * here. A file that does not parse (after removing a byte-order mark) counts
- * when its text, with \uXXXX escapes decoded, mentions "elicitation".
+ * One settings text: 'hook' (an Elicitation or ElicitationResult key under
+ * hooks), 'json' (it does not parse as JSON, after removing a byte-order
+ * mark), or null.
  */
 function settingsAnswerBox(raw) {
-  const text = String(raw).replace(/^﻿/, '');
   let s;
-  try { s = JSON.parse(text); } catch {
-    const decoded = text.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
-    return /elicitation/i.test(decoded);
-  }
-  const hooks = s && typeof s === 'object' ? s.hooks : undefined;
-  if (hooks === undefined || hooks === null) return false;
-  if (typeof hooks !== 'object' || Array.isArray(hooks)) return /elicitation/i.test(JSON.stringify(hooks));
-  for (const [event, entries] of Object.entries(hooks)) {
-    if (!HOOK_EVENT.test(event)) continue;
-    if (!Array.isArray(entries) || entries.length > 0) return true;
-  }
-  return false;
+  try { s = JSON.parse(String(raw).replace(/^﻿/, '')); } catch { return 'json'; }
+  const hooks = s && typeof s === 'object' && !Array.isArray(s) ? s.hooks : undefined;
+  if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) return null;
+  return HOOK_EVENTS.some((e) => Object.prototype.hasOwnProperty.call(hooks, e)) ? 'hook' : null;
 }
 
 function shortPath(file) {
@@ -290,52 +289,39 @@ function managedSettingsFile(platform = process.platform) {
 
 const PLUGIN_MAX_DEPTH = 4;
 const PLUGIN_MAX_DIRS = 200;
-/** hooks/hooks.json files under <config dir>/plugins, by a bounded walk that does not follow links. */
+/** hooks/hooks.json files under <config dir>/plugins: a bounded walk that does not follow links or enter node_modules. */
 function pluginHookFiles(configDir) {
   const out = [];
-  const root = path.join(configDir, 'plugins');
   let visited = 0;
   const walk = (dir, depth) => {
     if (depth > PLUGIN_MAX_DEPTH || visited >= PLUGIN_MAX_DIRS) return;
     visited += 1;
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
-      if (!e.isDirectory()) continue;   // a link is not followed
+    for (const e of entries.sort((x, y) => (x.name < y.name ? -1 : 1))) {
+      if (!e.isDirectory() || e.name === 'node_modules') continue;   // a link is not followed
       const sub = path.join(dir, e.name);
       if (e.name === 'hooks') out.push(path.join(sub, 'hooks.json'));
       else walk(sub, depth + 1);
       if (visited >= PLUGIN_MAX_DIRS) return;
     }
   };
-  walk(root, 0);
+  walk(path.join(configDir, 'plugins'), 0);
   return out;
 }
 
 /**
- * Every settings file this scan reads hooks from: the project's own
- * .claude/settings.json and settings.local.json, the same two in each parent
- * folder up to the home folder (or the filesystem root), the user's
- * settings.json, the managed settings file, and plugins' hooks/hooks.json.
- * The host may load hooks from places this list does not include.
+ * The files the tripwire reads: the project's .claude/settings.json and
+ * settings.local.json, the user's settings.json (CLAUDE_CONFIG_DIR, or
+ * ~/.claude), the managed settings file, and plugins' hooks/hooks.json.
  */
 function settingsFiles(env = process.env, cwd = process.cwd, { platform = process.platform } = {}) {
   const files = [];
   let project = null;
   try { project = require('./turns').projectDir(env, cwd); } catch {}
-  const pair = (dir) => { files.push(path.join(dir, '.claude', 'settings.json')); files.push(path.join(dir, '.claude', 'settings.local.json')); };
   if (project) {
-    const start = path.resolve(project);
-    pair(start);
-    const home = path.resolve(os.homedir());
-    let dir = start;
-    for (let i = 0; i < 64; i++) {
-      if (dir === home) break;
-      const up = path.dirname(dir);
-      if (up === dir) break;
-      dir = up;
-      pair(dir);
-    }
+    files.push(path.join(project, '.claude', 'settings.json'));
+    files.push(path.join(project, '.claude', 'settings.local.json'));
   }
   const named = typeof env.CLAUDE_CONFIG_DIR === 'string' && env.CLAUDE_CONFIG_DIR.trim();
   const configDir = named || path.join(os.homedir(), '.claude');
@@ -343,102 +329,16 @@ function settingsFiles(env = process.env, cwd = process.cwd, { platform = proces
   const managed = managedSettingsFile(platform);
   if (managed) files.push(managed);
   files.push(...pluginHookFiles(configDir));
-  return [...new Set(files)];
-}
-
-// ── hooks in skill, agent and command frontmatter ────────────────────────────
-// Claude Code can also take hooks from the YAML frontmatter of a skill
-// (.claude/skills/<name>/SKILL.md), a subagent (.claude/agents/<name>.md) or a
-// command (.claude/commands/<name>.md). Whether the host honours an
-// Elicitation hook there is not verified; any mention is refused.
-
-const FRONTMATTER_MAX_FILES = 200;
-const FRONTMATTER_MAX_BYTES = 64 * 1024;
-
-/** The frontmatter (between the first two `---` lines), or null. */
-function frontmatter(text) {
-  const lines = String(text).replace(/^\uFEFF/, '').split(/\r?\n/);
-  if (!lines.length || lines[0].trim() !== '---') return null;
-  const end = lines.findIndex((l, i) => i > 0 && l.trim() === '---');
-  return end > 0 ? lines.slice(1, end).join('\n') : null;
-}
-/** Does this file's frontmatter mention elicitation (any case, \\uXXXX decoded)? */
-function frontmatterAnswersBox(text) {
-  const fm = frontmatter(text);
-  if (fm === null) return false;
-  return /elicitation/i.test(fm.replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16))));
-}
-
-/** The base folders whose .claude-style skill, agent and command files are scanned. */
-function frontmatterBases(env = process.env, cwd = process.cwd) {
-  const bases = [];
-  let project = null;
-  try { project = require('./turns').projectDir(env, cwd); } catch {}
-  if (project) bases.push(path.join(project, '.claude'));
-  const named = typeof env.CLAUDE_CONFIG_DIR === 'string' && env.CLAUDE_CONFIG_DIR.trim();
-  bases.push(named || path.join(os.homedir(), '.claude'));
-  return bases;
+  return files;
 }
 
 /**
- * Candidate files under one base: skills/<name>/SKILL.md, agents/*.md,
- * commands/*.md. Bounded; a file or folder whose real path leaves the base
- * is skipped.
- */
-function frontmatterFiles(base, budget) {
-  const out = [];
-  let realBase;
-  try { realBase = fs.realpathSync(base); } catch { return out; }
-  const inside = (p) => { try { const r = fs.realpathSync(p); return r === realBase || r.startsWith(realBase + path.sep) ? r : null; } catch { return null; } };
-  const list = (dir) => { try { return fs.readdirSync(dir).sort(); } catch { return []; } };
-  const add = (file) => { if (budget.left <= 0) return false; const r = inside(file); if (r) { out.push({ file, real: r }); budget.left -= 1; } return budget.left > 0; };
-  const skills = path.join(base, 'skills');
-  if (inside(skills)) for (const name of list(skills)) { if (!add(path.join(skills, name, 'SKILL.md'))) return out; }
-  for (const sub of ['agents', 'commands']) {
-    const dir = path.join(base, sub);
-    if (!inside(dir)) continue;
-    for (const name of list(dir)) if (name.endsWith('.md') && !add(path.join(dir, name))) return out;
-  }
-  return out;
-}
-
-function readBounded(real) {
-  let fd;
-  try {
-    if (!fs.statSync(real).isFile()) return null;
-    fd = fs.openSync(real, 'r');
-    const buf = Buffer.alloc(FRONTMATTER_MAX_BYTES);
-    const n = fs.readSync(fd, buf, 0, FRONTMATTER_MAX_BYTES, 0);
-    return buf.subarray(0, n).toString('utf8');
-  } catch { return null; } finally { if (fd !== undefined) { try { fs.closeSync(fd); } catch {} } }
-}
-
-/** The first skill, agent or command file whose frontmatter mentions elicitation, or null. */
-function frontmatterHook(env = process.env, cwd = process.cwd) {
-  const budget = { left: FRONTMATTER_MAX_FILES };
-  for (const base of frontmatterBases(env, cwd)) {
-    for (const { file, real } of frontmatterFiles(base, budget)) {
-      const text = readBounded(real);
-      if (text !== null && frontmatterAnswersBox(text)) return shortPath(file);
-    }
-    if (budget.left <= 0) break;
-  }
-  return null;
-}
-
-/**
- * The first settings file with a hook that could answer /vibe's box, as a
- * path to show the person, or null; then the first skill, agent or command
- * file whose frontmatter mentions one. Files are read through their real
- * path; nothing is written. A file that is missing or cannot be read is
- * skipped: the host cannot read it either.
+ * The first settings file that trips the wire, as { file, why: 'hook' | 'json' }
+ * with a path to show the person, or null. Read through the real path; nothing
+ * is written. A missing file is skipped; one that exists but cannot be read
+ * is skipped too (the host cannot read it either), named only with VIBE_DEBUG.
  */
 function answeringHook(env = process.env, cwd = process.cwd) {
-  const fromSettings = settingsHook(env, cwd);
-  return fromSettings || frontmatterHook(env, cwd);
-}
-
-function settingsHook(env = process.env, cwd = process.cwd) {
   for (const file of settingsFiles(env, cwd)) {
     let real;
     try { real = fs.realpathSync(file); } catch { continue; }
@@ -447,11 +347,11 @@ function settingsHook(env = process.env, cwd = process.cwd) {
       if (!fs.statSync(real).isFile()) continue;
       raw = fs.readFileSync(real, 'utf8');
     } catch {
-      // Exists but cannot be read: skipped (the host cannot read it either).
       if (env.VIBE_DEBUG) { try { process.stderr.write(`/vibe: hook scan could not read ${shortPath(file)}\n`); } catch {} }
       continue;
     }
-    if (settingsAnswerBox(raw)) return shortPath(file);
+    const why = settingsAnswerBox(raw);
+    if (why) return { file: shortPath(file), why };
   }
   return null;
 }
@@ -476,6 +376,5 @@ module.exports = {
   declaresForm, noteClient, available, clientState,
   displayWidth, wrapLine, textLines, question, message, fits, request, ask, isOpen,
   settingsAnswerBox, settingsFiles, answeringHook, labAllowsHook, managedSettingsFile, pluginHookFiles,
-  frontmatter, frontmatterAnswersBox, frontmatterHook, FRONTMATTER_MAX_FILES, FRONTMATTER_MAX_BYTES,
   _resetForTest,
 };
