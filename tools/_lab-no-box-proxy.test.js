@@ -127,20 +127,24 @@ test('behind the proxy, a Claude Code client that declares elicitation (2025-11-
   });
 });
 
-test('behind the proxy, a stateless (2026-07-28) request declaring elicitation gets no input_required, only the turn check', async () => {
-  await realSession(async ({ send, wait, personTurn, stub }) => {
-    const meta = { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', [CAPS]: { elicitation: { form: {} } }, 'io.modelcontextprotocol/clientInfo': { name: 'claude-code', version: '2.1.330' } };
-    send({ id: 1, method: 'tools/call', params: { name: 'vibe_prepare', arguments: { handle: 'ben', message: 'stateless, no box' }, _meta: meta } });
-    const d = draftOf(textOf(await wait(1)));
-    send({ id: 2, method: 'tools/call', params: { name: 'vibe_send', arguments: d, _meta: meta } });
-    const refused = (await wait(2)).result;
-    assert.equal(refused.resultType, 'complete');
-    assert.match(refused.content[0].text, /^Not sent yet:/);
+test('behind the proxy, a session opened as Claude Code opens it (discover probe answered -32601, then initialize 2025-11-25) gets the turn check and no box', async () => {
+  await realSession(async ({ send, wait, rows, personTurn, stub }) => {
+    const info = { name: 'claude-code', version: '2.1.330' };
+    // Claude Code's probe declares elicitation in _meta; the server, as shipped, does not serve 2026-07-28.
+    send({ id: 'server-discover-probe-1', method: 'server/discover', params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientInfo': info, [CAPS]: { elicitation: { form: {}, url: {} } } } } });
+    assert.equal((await wait('server-discover-probe-1')).error.code, -32601, 'the probe falls back to initialize');
+    send({ id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: { roots: { listChanged: true }, elicitation: { form: {}, url: {} } }, clientInfo: info } });
+    assert.equal((await wait(0)).result.protocolVersion, '2025-11-25');
+    send({ id: 1, method: 'tools/call', params: { name: 'vibe_prepare', arguments: { handle: 'ben', message: 'probe, initialize, no box' } } });
+    const prep = textOf(await wait(1));
+    assert.match(prep, /This app cannot show \/vibe's confirmation box, so sending relies on your typed reply\./, 'the proxy took effect on initialize');
+    const d = draftOf(prep);
+    send({ id: 2, method: 'tools/call', params: { name: 'vibe_send', arguments: d } });
+    assert.match(textOf(await wait(2)), /^Not sent yet:/);
     await personTurn();
-    send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d, _meta: meta } });
-    const sent = (await wait(3)).result;
-    assert.equal(sent.resultType, 'complete', 'no input_required');
-    assert.match(sent.content[0].text, /^Sent to \*\*@ben\*\*/);
+    send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d } });
+    assert.match(textOf(await wait(3)), /^Sent to \*\*@ben\*\*/);
+    assert.equal(rows.some((r) => r.method === 'elicitation/create'), false, 'no box was opened');
     assert.equal(stub.effects.filter((e) => e.effect === 'SEND').length, 1);
   });
 });

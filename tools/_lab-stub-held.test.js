@@ -48,7 +48,7 @@ test('the stub answers a Keep as the platform does: dry run digest, refusal on a
   } finally { await stub.close(); }
 });
 
-test('the gate\'s case end to end: a long Keep, stateless box accepted, with vibe_thread in the same chunk both times, is held', async () => {
+test('the gate\'s case end to end: a long Keep, box accepted (initialize 2025-11-25, as Claude Code opens), with vibe_thread in the same chunk both times, is held', async () => {
   const { startStub } = await import(path.join(ROOT, 'lab', 'stub.mjs'));
   const stub = await startStub({ people: { ada: { says: 'me', kind: 'human' }, ines: { says: 'ines', kind: 'human' } } });
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-stub-held-'));
@@ -62,24 +62,28 @@ test('the gate\'s case end to end: a long Keep, stateless box accepted, with vib
   const rows = []; let buf = '';
   child.stdout.on('data', (c) => { buf += c; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); try { rows.push(JSON.parse(l)); } catch {} } });
   const send = (...ms) => child.stdin.write(ms.map((m) => JSON.stringify({ jsonrpc: '2.0', ...m })).join('\n') + '\n');
-  const wait = (id) => new Promise((resolve, reject) => { const t0 = Date.now(); const f = () => { const r = rows.find((x) => x.id === id); if (r) return resolve(r); if (Date.now() - t0 > 15_000) return reject(new Error(`no response ${id}`)); setTimeout(f, 20); }; f(); });
-  const meta = { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': { elicitation: { form: {} } }, 'io.modelcontextprotocol/clientInfo': { name: 'claude-code', version: 'test' } };
+  const waitFor = (pred) => new Promise((resolve, reject) => { const t0 = Date.now(); const f = () => { const r = rows.find(pred); if (r) return resolve(r); if (Date.now() - t0 > 15_000) return reject(new Error(`timed out: ${JSON.stringify(rows).slice(0, 500)}`)); setTimeout(f, 20); }; f(); });
+  const wait = (id) => waitFor((x) => x.id === id && (x.result !== undefined || x.error !== undefined));
   const text = 'Heads up: quote-service 5xx is at 7.8% and I am rolling back CHG-2291 on the quote-db pooler (6432 back to session mode, pool 120). Quote-service uses server-side prepares, which transaction mode breaks.';
   try {
-    send({ id: 1, method: 'tools/call', params: { name: 'vibe_prepare', arguments: { handle: 'dalia', message: text }, _meta: meta } });
+    // As Claude Code 2.1.330 opens: the stateless probe is not served, so it falls back to initialize.
+    send({ id: 'server-discover-probe-1', method: 'server/discover', params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28' } } });
+    assert.equal((await wait('server-discover-probe-1')).error.code, -32601);
+    send({ id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: { elicitation: { form: {}, url: {} } }, clientInfo: { name: 'claude-code', version: 'test' } } });
+    await wait(0);
+    send({ id: 1, method: 'tools/call', params: { name: 'vibe_prepare', arguments: { handle: 'dalia', message: text } } });
     const prep = (await wait(1)).result.content[0].text;
     assert.match(prep, /\*\*To:\*\* @dalia \(not on \/vibe yet\)/);
     const id = prep.match(/draft (w[0-9a-f]+)/)[1]; const rev = prep.match(/rev ([0-9a-f]{8})/)[1];
     await new Promise((r) => setTimeout(r, 5));
     turns.record(project, Date.now(), { VIBE_HOME: home });   // the person typed "send"
-    send({ id: 2, method: 'tools/call', params: { name: 'vibe_send', arguments: { id, rev }, _meta: meta } },
-      { id: 3, method: 'tools/call', params: { name: 'vibe_thread', arguments: { handle: 'ines' }, _meta: meta } });
-    const first = (await wait(2)).result;
-    assert.equal(first.resultType, 'input_required');
-    assert.match(first.inputRequests.send_confirmation.params.message, /^Keep for @dalia\? \(\d+ chars, start only\)\n> Heads up/);
-    send({ id: 4, method: 'tools/call', params: { name: 'vibe_send', arguments: { id, rev }, inputResponses: { send_confirmation: { action: 'accept', content: {} } }, requestState: first.requestState, _meta: meta } },
-      { id: 5, method: 'tools/call', params: { name: 'vibe_thread', arguments: { handle: 'ines' }, _meta: meta } });
-    const done = (await wait(4)).result.content[0].text;
+    send({ id: 2, method: 'tools/call', params: { name: 'vibe_send', arguments: { id, rev } } },
+      { id: 3, method: 'tools/call', params: { name: 'vibe_thread', arguments: { handle: 'ines' } } });
+    const box = await waitFor((r) => r.method === 'elicitation/create');
+    assert.match(box.params.message, /^Keep for @dalia\? \(\d+ chars, start only\)\n> Heads up/);
+    send({ id: box.id, result: { action: 'accept', content: {} } },
+      { id: 5, method: 'tools/call', params: { name: 'vibe_thread', arguments: { handle: 'ines' } } });
+    const done = (await wait(2)).result.content[0].text;
     assert.match(done, /^Held for @dalia\. \/vibe created the invitation\./, done);
     const held = stub.effects.filter((e) => e.effect === 'HELD');
     assert.equal(held.length, 1);

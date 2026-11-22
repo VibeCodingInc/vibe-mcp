@@ -21,8 +21,8 @@ const store = require('../store');
 const drafts = require('./drafts');
 
 const INDEX = path.join(__dirname, '..', 'index.js');
-function rpc(messages, env = {}) {
-  const out = spawnSync(process.execPath, [INDEX], {
+function rpc(messages, env = {}, script = INDEX) {
+  const out = spawnSync(process.execPath, [script], {
     input: messages.map((m) => JSON.stringify({ jsonrpc: '2.0', ...m })).join('\n') + '\n',
     env: { ...process.env, VIBE_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-rpc-')), VIBE_API_URL: 'http://127.0.0.1:9', ...env },
     encoding: 'utf8', timeout: 30_000,
@@ -63,13 +63,31 @@ test('the surface is six tools, the two open-line tools, the visit and sign-in p
   assert.match(get(1).result.instructions, /Before you tell them someone has not replied .*vibe_thread/);
 });
 
-test('modern clients are served statelessly; an unsupported revision is refused with the supported list', () => {
+test('as shipped, 2026-07-28 is not served: discover is Method not found, a stateless request is refused with the initialize-era versions, initialize works', () => {
+  const V = 'io.modelcontextprotocol/protocolVersion';
+  const get = rpc([
+    { id: 1, method: 'server/discover', params: { _meta: { [V]: '2026-07-28' } } },
+    { id: 2, method: 'tools/list', params: { _meta: { [V]: '2026-07-28' } } },
+    { id: 3, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, _meta: { [V]: '2026-07-28' } } },
+    { id: 4, method: 'tools/list', params: { _meta: { [V]: '2025-11-25' } } },
+    { id: 5, method: 'nope' },
+  ]);
+  assert.deepEqual(get(1).error, { code: -32601, message: 'Method not found: server/discover' });
+  assert.equal(get(2).error.code, -32022);
+  assert.deepEqual(get(2).error.data, { supported: ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'], requested: '2026-07-28' });
+  assert.equal(get(3).result.protocolVersion, '2025-11-25', 'initialize always selects the initialize era');
+  assert.ok(Array.isArray(get(4).result.tools), 'a legacy version named in _meta is not a stateless request');
+  assert.equal(get(5).error.code, -32601);
+  assert.equal(require('../index').SERVE_STATELESS, false);
+});
+
+test('with the stateless path turned on (test fixture), modern clients are served statelessly; an unsupported revision is refused with the supported list', () => {
   const V = 'io.modelcontextprotocol/protocolVersion';
   const get = rpc([
     { id: 1, method: 'server/discover', params: { _meta: { [V]: '2026-07-28' } } },
     { id: 2, method: 'tools/list', params: { _meta: { [V]: '2099-01-01' } } },
     { id: 3, method: 'nope' },
-  ]);
+  ], {}, path.join(__dirname, '..', 'test', 'fixtures', 'stateless-server.cjs'));
   assert.equal(get(1).result.resultType, 'complete');
   assert.ok(get(1).result.supportedVersions.includes('2026-07-28'));
   assert.equal(get(2).error.code, -32022);

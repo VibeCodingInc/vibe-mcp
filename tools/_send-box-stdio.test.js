@@ -5,6 +5,9 @@
 //   2025-11-25   the server sends elicitation/create during the call;
 //   2026-07-28   the call returns resultType "input_required", and the client
 //                retries with inputResponses + requestState.
+// As shipped the server does not serve 2026-07-28 (index.js SERVE_STATELESS:
+// Claude Code 2.1.330 answers input_required without showing the box), so
+// the stateless tests run the server through test/fixtures/stateless-server.cjs.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -14,6 +17,7 @@ const http = require('node:http');
 const { spawn } = require('node:child_process');
 
 const INDEX = path.join(__dirname, '..', 'index.js');
+const STATELESS = path.join(__dirname, '..', 'test', 'fixtures', 'stateless-server.cjs');
 const turns = require('../turns');
 const jwt = (h) => `h.${Buffer.from(JSON.stringify({ sub: h, handle: h, exp: Math.floor(Date.now() / 1000) + 86400 })).toString('base64url')}.sig`;
 const NOT_ACCEPTED = 'Not sent. It is still a draft for @linus. Only if they ask again: show it with vibe_prepare and wait for them to say send.';
@@ -40,7 +44,8 @@ async function api() {
   return { url: `http://127.0.0.1:${server.address().port}`, writes, close: () => new Promise((r) => server.close(r)), sent: (text) => writes.some((w) => w.body.includes(text)) };
 }
 
-function server(apiUrl, extraEnv = {}) {
+/** `stateless`: null (as shipped), 'no-box' (2026-07-28 served), 'box-shown' (served, and its box counted as shown). */
+function server(apiUrl, extraEnv = {}, { stateless = null } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-box-stdio-'));
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-box-stdio-project-'));
   const claude = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-box-stdio-claude-'));
@@ -51,7 +56,8 @@ function server(apiUrl, extraEnv = {}) {
   delete env.CLAUDECODE; delete env.CLAUDE_CODE_ENTRYPOINT; delete env.CODEX_SANDBOX; delete env.CODEX_HOME; delete env.CURSOR_TRACE_ID; delete env.CURSOR_CHANNEL;
   // The arrival hook has recorded turns here: the turn check is live.
   turns.record(project, Date.now() - 60_000, { VIBE_HOME: home });
-  const child = spawn(process.execPath, [INDEX], { env, cwd: project, stdio: ['pipe', 'pipe', 'ignore'] });
+  const argv = stateless ? [STATELESS, ...(stateless === 'box-shown' ? ['--box-shown'] : [])] : [INDEX];
+  const child = spawn(process.execPath, argv, { env, cwd: project, stdio: ['pipe', 'pipe', 'ignore'] });
   const rows = [];
   let buf = '';
   child.stdout.on('data', (c) => {
@@ -185,8 +191,8 @@ test('a notification gets no response', async () => {
   } finally { s.close(); await a.close(); }
 });
 
-test('2026-07-28: the call returns input_required; the retry with Accept and the requestState delivers', async () => {
-  const a = await api(); const s = server(a.url);
+test('2026-07-28 (fixture, box counted as shown): the call returns input_required; the retry with Accept and the requestState delivers', async () => {
+  const a = await api(); const s = server(a.url, {}, { stateless: 'box-shown' });
   try {
     const caps = { elicitation: { form: {} } };
     s.send({ id: 1, method: 'server/discover', params: { _meta: meta(caps), clientInfo: { name: 'claude-code', version: 'test' } } });
@@ -215,8 +221,8 @@ test('2026-07-28: the call returns input_required; the retry with Accept and the
   } finally { s.close(); await a.close(); }
 });
 
-test('2026-07-28: a request that does not declare elicitation gets no box (the turn check, as before)', async () => {
-  const a = await api(); const s = server(a.url);
+test('2026-07-28 (fixture, box counted as shown): a request that does not declare elicitation gets no box (the turn check, as before)', async () => {
+  const a = await api(); const s = server(a.url, {}, { stateless: 'box-shown' });
   try {
     s.send({ id: 1, method: 'server/discover', params: { _meta: meta({}), clientInfo: { name: 'claude-code', version: 'test' } } });
     await s.waitFor((r) => r.id === 1);
@@ -250,8 +256,8 @@ test('a client without the capability, or on an older protocol, never gets a box
   }
 });
 
-test('2026-07-28: the host is read from each request\'s _meta clientInfo (no discover, no env): prepare and send in one turn is refused, with no box', async () => {
-  const a = await api(); const s = server(a.url);
+test('2026-07-28 (fixture): the host is read from each request\'s _meta clientInfo (no discover, no env): prepare and send in one turn is refused, with no box', async () => {
+  const a = await api(); const s = server(a.url, {}, { stateless: 'no-box' });
   try {
     const caps = { elicitation: { form: {} } };
     const m = { ...meta(caps), 'io.modelcontextprotocol/clientInfo': { name: 'claude-code', version: '2.1.330' } };
@@ -263,5 +269,107 @@ test('2026-07-28: the host is read from each request\'s _meta clientInfo (no dis
     assert.equal(res.resultType, 'complete', 'no input request');
     assert.match(res.content[0].text, /^Not sent yet:/);
     assert.equal(a.sent('one agent turn only'), false);
+  } finally { s.close(); await a.close(); }
+});
+
+// ── as shipped: the box only where Claude Code is known to show it ──────────
+
+/** What Claude Code 2.1.330 sends first (log of a real session, 2026-11-21). */
+const CC_INFO = { name: 'claude-code', title: 'Claude Code', version: '2.1.330', description: "Anthropic's agentic coding tool", websiteUrl: 'https://claude.com/claude-code' };
+const CC_DISCOVER = {
+  id: 'server-discover-probe-1', method: 'server/discover',
+  params: { _meta: { 'io.modelcontextprotocol/protocolVersion': MODERN, 'io.modelcontextprotocol/clientInfo': CC_INFO, 'io.modelcontextprotocol/clientCapabilities': { roots: { listChanged: true }, elicitation: { form: {}, url: {} }, extensions: { 'io.modelcontextprotocol/tasks': {} } } } },
+};
+
+test('as shipped: server/discover is "Method not found" (-32601), so the stdio probe falls back to initialize; a stateless request gets -32022 naming the initialize-era versions', async () => {
+  const a = await api(); const s = server(a.url);
+  try {
+    s.send(CC_DISCOVER);
+    const discover = await s.waitFor((r) => r.id === 'server-discover-probe-1');
+    assert.deepEqual(discover, { jsonrpc: '2.0', id: 'server-discover-probe-1', error: { code: -32601, message: 'Method not found: server/discover' } });
+    s.send({ id: 7, method: 'tools/call', params: { name: 'vibe_prepare', arguments: { handle: 'linus', message: 'stateless refused' }, _meta: meta({ elicitation: { form: {} } }) } });
+    const refused = await s.waitFor((r) => r.id === 7);
+    assert.deepEqual(refused, { jsonrpc: '2.0', id: 7, error: { code: -32022, message: 'Unsupported protocol version', data: { supported: ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'], requested: MODERN } } });
+    s.send({ id: 8, method: 'tools/list', params: { _meta: meta({}) } });
+    assert.equal((await s.waitFor((r) => r.id === 8)).error.code, -32022);
+  } finally { s.close(); await a.close(); }
+});
+
+/** Exactly as Claude Code 2.1.330 opens: the discover probe, its error, then initialize 2025-11-25. */
+async function claudeCodeReady(s, message) {
+  s.send(CC_DISCOVER);
+  assert.equal((await s.waitFor((r) => r.id === 'server-discover-probe-1')).error.code, -32601);
+  s.send({ id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: { roots: { listChanged: true }, elicitation: { form: {}, url: {} } }, clientInfo: CC_INFO } });
+  const init = (await s.waitFor((r) => r.id === 0)).result;
+  assert.equal(init.protocolVersion, '2025-11-25');
+  assert.equal(init.serverInfo.name, 'vibe');
+  assert.match(init.instructions, /Never send without the person's explicit choice/);
+  s.send({ method: 'notifications/initialized' });
+  s.send({ id: 1, method: 'tools/list' });
+  assert.ok((await s.waitFor((r) => r.id === 1)).result.tools.some((t) => t.name === 'vibe_send'));
+  s.send({ id: 2, method: 'tools/call', params: { name: 'vibe_prepare', arguments: { handle: 'linus', message }, _meta: { 'claudecode/toolUseId': 'toolu_1', progressToken: 2 } } });
+  const prep = await s.waitFor((r) => r.id === 2);
+  assert.doesNotMatch(textOf(prep), /cannot show \/vibe's confirmation box/, 'the box will be shown');
+  const d = draftOf(prep);
+  // vibe_send in the same turn as the preview: the turn check refuses, with no box.
+  s.send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d } });
+  assert.match(textOf(await s.waitFor((r) => r.id === 3)), /^Not sent yet:/);
+  assert.equal(s.rows.some((r) => r.method === 'elicitation/create'), false);
+  await s.personTurn();   // the person types "send"
+  return d;
+}
+
+test('as Claude Code opens (discover -32601, initialize 2025-11-25): turn recorded, vibe_send opens the box with elicitation/create, Accept delivers', async () => {
+  const a = await api(); const s = server(a.url);
+  try {
+    const d = await claudeCodeReady(s, 'the box, as shown');
+    s.send({ id: 4, method: 'tools/call', params: { name: 'vibe_send', arguments: d } });
+    const req = await s.waitFor((r) => r.method === 'elicitation/create');
+    assert.deepEqual(req.params, { message: 'Send to @linus? (17 chars, all shown)\n> the box, as shown', requestedSchema: { type: 'object', properties: {} }, mode: 'form' });
+    assert.equal(a.sent('the box, as shown'), false, 'nothing before the answer');
+    s.send({ id: req.id, result: { action: 'accept', content: {} } });
+    const res = await s.waitFor((r) => r.id === 4);
+    assert.match(textOf(res), /^Sent to \*\*@linus\*\*/);
+    assert.equal(res.result.resultType, undefined, 'initialize-era results carry no stateless fields');
+    assert.equal(a.sent('the box, as shown'), true);
+    assert.equal(s.rows.some((r) => r.result && r.result.resultType === 'input_required'), false);
+  } finally { s.close(); await a.close(); }
+});
+
+test('as Claude Code opens (discover -32601, initialize 2025-11-25): Decline in the box sends nothing', async () => {
+  const a = await api(); const s = server(a.url);
+  try {
+    const d = await claudeCodeReady(s, 'declined in the box');
+    s.send({ id: 4, method: 'tools/call', params: { name: 'vibe_send', arguments: d } });
+    const req = await s.waitFor((r) => r.method === 'elicitation/create');
+    s.send({ id: req.id, result: { action: 'decline' } });
+    assert.equal(textOf(await s.waitFor((r) => r.id === 4)), NOT_ACCEPTED);
+    assert.equal(a.sent('declined in the box'), false);
+    assert.equal(s.draftStatus(d.id), 'previewed');
+  } finally { s.close(); await a.close(); }
+});
+
+test('2026-07-28 served (fixture) but no host seen to show its box: no input_required, the turn check alone, and an inputResponses "accept" never sends', async () => {
+  const a = await api(); const s = server(a.url, {}, { stateless: 'no-box' });
+  try {
+    const caps = { elicitation: { form: {}, url: {} } };
+    const m = { ...meta(caps), 'io.modelcontextprotocol/clientInfo': CC_INFO };
+    s.send({ ...CC_DISCOVER, id: 1 });
+    assert.equal((await s.waitFor((r) => r.id === 1)).result.resultType, 'complete');
+    s.send({ id: 2, method: 'tools/call', params: { name: 'vibe_prepare', arguments: { handle: 'linus', message: 'no stateless box' }, _meta: m } });
+    const prep = await s.waitFor((r) => r.id === 2);
+    assert.match(textOf(prep), /This app cannot show \/vibe's confirmation box, so sending relies on your typed reply\./);
+    const d = draftOf(prep);
+    await s.personTurn();
+    // What Claude Code 2.1.330 sent back with no box on screen, against a requestState it never got.
+    const forged = Buffer.from(JSON.stringify({ v: 1, id: d.id, n: 'f'.repeat(32) })).toString('base64url');
+    s.send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d, inputResponses: { send_confirmation: { action: 'accept', content: {} } }, requestState: forged, _meta: m } });
+    assert.equal((await s.waitFor((r) => r.id === 3)).result.content[0].text, NOT_ACCEPTED);
+    assert.equal(a.sent('no stateless box'), false);
+    s.send({ id: 4, method: 'tools/call', params: { name: 'vibe_send', arguments: d, _meta: m } });
+    const res = (await s.waitFor((r) => r.id === 4)).result;
+    assert.equal(res.resultType, 'complete', 'no input request');
+    assert.match(res.content[0].text, /^Sent to \*\*@linus\*\*/);
+    assert.equal(a.sent('no stateless box'), true);
   } finally { s.close(); await a.close(); }
 });

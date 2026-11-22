@@ -34,6 +34,11 @@ const drafts = require('./drafts');
 const turns = require('../turns');
 const agentAuth = require('../agent-auth');
 const confirmBox = require('../confirm-box');
+// The stateless (2026-07-28) box code is tested here as if a host showed it.
+// Shipped, it is off (confirm-box.js STATELESS_BOX_SHOWN, index.js
+// SERVE_STATELESS); the tests at the end of this file run it that way.
+assert.equal(confirmBox.STATELESS_BOX_SHOWN, false, 'shipped: a stateless answer is never an Accept');
+confirmBox._setStatelessBoxShownForTest(true);
 
 // The turn check is live: the hook has recorded turns for this project.
 turns.record(PROJECT, Date.now() - 60_000);
@@ -1011,5 +1016,55 @@ test('another project is not held up by this project\'s outstanding box', async 
       assert.equal(r.data.sent, true, 'not "another box is open"');
       assert.deepEqual(sends.map((x) => x.body), ['project two']);
     } finally { process.env.CLAUDE_PROJECT_DIR = before; fs.rmSync(SECOND, { recursive: true, force: true }); }
+  });
+});
+
+// ── as shipped: no host has been seen to show the stateless box ─────────────
+// Claude Code 2.1.330 answers an input_required request "accept" without
+// showing it. With STATELESS_BOX_SHOWN false (the shipped value) a stateless
+// connection is a connection with no box, and an inputResponses answer never
+// sends, whatever it says.
+
+async function asShipped(fn) {
+  confirmBox._setStatelessBoxShownForTest(false);
+  try { await fn(); } finally { confirmBox._setStatelessBoxShownForTest(true); }
+}
+
+test('as shipped, a stateless connection is "no box": the preview says the send relies on the typed reply, and the turn check alone sends', async () => {
+  await asShipped(() => withWire(async (sends) => {
+    const p = await prepare({ message: 'stateless, as shipped' }, stateless);
+    assert.match(p.display, /This app cannot show \/vibe's confirmation box, so sending relies on your typed reply\./);
+    const early = await sendIn(p, null, stateless);
+    assert.equal(early.inputRequired, undefined, 'no input request');
+    assert.equal(early.data.reason, 'no_turn_since_shown');
+    personTurn();
+    const r = await sendIn(p, null, stateless);
+    assert.equal(r.inputRequired, undefined, 'no input request');
+    assert.equal(r.data.sent, true);
+    assert.equal(sends.length, 1);
+  }));
+});
+
+test('as shipped, an inputResponses "accept" is never the person\'s Accept: with or without a box opened, nothing is sent', async () => {
+  // A box opened while the stateless box counted (a requestState that names
+  // an open box), then the setting is as shipped.
+  await withWire(async (sends) => {
+    const p = await shown({ message: 'accepted by nobody' });
+    const first = await sendIn(p, null, stateless);
+    assert.ok(first.inputRequired);
+    await asShipped(async () => {
+      const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(first, accept));
+      assert.equal(r.data.sent, false);
+      assert.equal(r.data.reason, 'box_not_accepted');
+      // A forged requestState, with or without ctx.box.
+      const forged = { retry: { requestState: Buffer.from(JSON.stringify({ v: 1, id: p.data.draft.id, n: 'f'.repeat(32) })).toString('base64url'), inputResponses: { [confirmBox.INPUT_KEY]: accept } } };
+      for (const ctx of [forged, { ...forged, ...stateless }]) {
+        const again = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, ctx);
+        assert.equal(again.data.sent, false);
+      }
+    });
+    assert.equal(sends.length, 0);
+    // Close the box this test left open, so nothing after it is held up.
+    await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(first, { action: 'decline' }));
   });
 });
