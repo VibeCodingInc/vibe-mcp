@@ -84,7 +84,8 @@ export function cli(id, args, extraEnv = {}) {
 // marks nothing read. activeWindowMs keeps it on the fast cadence (lab time is
 // compressed: the person's next turn is "hours later" in the story).
 export function keepOpen(id, { activeWindowMs = 24 * 60 * 60 * 1000 } = {}) {
-  const server = JSON.parse(fs.readFileSync(id.mcp, 'utf8')).mcpServers.vibe;
+  // The server itself, never a proxy in front of it (population --no-box).
+  const server = JSON.parse(fs.readFileSync(id.directMcp || id.mcp, 'utf8')).mcpServers.vibe;
   const child = spawn(server.command, server.args, {
     cwd: id.work, stdio: ['pipe', 'ignore', 'ignore'],
     env: { ...process.env, ...server.env, VIBE_POLL_ACTIVE_WINDOW_MS: String(activeWindowMs) },

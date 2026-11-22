@@ -59,6 +59,12 @@
 // allows a hook to answer its box only with VIBE_LAB_BOX_HOOK=1 and a loopback
 // API, which every lab server has.
 //
+// --no-box: a host that cannot show the box. Each session's server runs behind
+// lab/no-box-proxy.cjs, which removes the client's elicitation capability
+// (initialize, and per-request _meta), so the server takes the turn-check path
+// alone; no Elicitation hook is installed. Summaries record box_path: false and
+// no_box_via: "proxy", and a world that still gets a Send box result FAILS.
+//
 // Same safety as rehearse.mjs: every world gets its own in-process stub on
 // 127.0.0.1, every person their own VIBE_HOME, MCP config and scratch settings
 // file. Nothing reaches production or ~/.claude/settings.json. The world's
@@ -130,6 +136,23 @@ export function installBoxHook(settingsFile, id) {
   fs.writeFileSync(settingsFile, JSON.stringify(s, null, 2));
   return s;
 }
+/**
+ * --no-box: write a second MCP config whose server is lab/no-box-proxy.cjs in
+ * front of the real one (same command, args and env) and point the sessions
+ * at it. The kept-open server (harness keepOpen) still runs the server
+ * directly (id.directMcp).
+ */
+export function useNoBoxProxy(id) {
+  const cfg = JSON.parse(fs.readFileSync(id.mcp, 'utf8'));
+  const server = cfg.mcpServers.vibe;
+  const proxied = { mcpServers: { vibe: { command: process.execPath, args: [path.join(LAB, 'no-box-proxy.cjs'), server.command, ...server.args], env: server.env } } };
+  const file = path.join(path.dirname(id.mcp), 'mcp.no-box.json');
+  fs.writeFileSync(file, JSON.stringify(proxied));
+  id.directMcp = id.mcp;
+  id.mcp = file;
+  return proxied;
+}
+
 /** What the box hook needs to ask the person-player, rewritten before every turn. */
 export function writeBoxContext(id, { person, handle, typed, earlier, opts, emptyDir, emptyMcp }) {
   const ctx = { name: person.name, role: person.role, persona: person.persona, handle, typed, earlier, emptyDir, timeoutMs: 180000,
@@ -150,6 +173,11 @@ export function readBoxLog(file) {
  * the server offers none): the run did not test what it was meant to. FAILED.
  */
 export function boxExpectationFailure(summary) {
+  if (summary && summary.box_path === false) {
+    // --no-box: a box-path result means the proxy did not take effect.
+    const boxed = (summary.refused_sends?.list || []).filter((r) => /^Not sent\. It is still a draft/.test(String(r.returned || '')));
+    return boxed.length ? `FAILED: --no-box, but ${boxed.length} send(s) got a Send box result: the proxy did not take effect` : null;
+  }
   if (!summary || summary.box_path !== true) return null;
   if ((summary.sends_on_wire || 0) > 0 && (summary.boxes_shown || 0) === 0) {
     return `FAILED: ${summary.sends_on_wire} send(s) went out on the box path and no Send box was shown`;
@@ -358,8 +386,12 @@ async function runWorld(file, opts, log) {
       // what the runner wrote to the context file before the turn.
       ids[h].boxContext = path.join(root, h, 'box-context.json');
       ids[h].boxLog = path.join(root, h, 'boxes.jsonl');
-      // --no-box: the turn-check path only (no hook, no VIBE_LAB_BOX_HOOK).
+      // --no-box: the turn-check path only (no hook, no VIBE_LAB_BOX_HOOK), and
+      // the session's server behind lab/no-box-proxy.cjs, which removes the
+      // client's elicitation capability: Claude Code then reads to the server
+      // as a host that cannot show the box.
       if (!opts.noBox) installBoxHook(ids[h].settings, ids[h]);
+      else useNoBoxProxy(ids[h]);
       // A person's follow-up in the same interactive session does not start a
       // session, so a resumed turn here runs without the SessionStart hook
       // (claude -p --resume would otherwise fire it as "resume" every turn).
@@ -474,7 +506,7 @@ async function runWorld(file, opts, log) {
     await stub.close();
     if (!opts.keep) fs.rmSync(root, { recursive: true, force: true });
   }
-  return finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started, fatal, root, keep: opts.keep, handles, humanPlayer: humanPlayer(opts), boxPath: !opts.noBox });
+  return finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started, fatal, root, keep: opts.keep, handles, humanPlayer: humanPlayer(opts), boxPath: !opts.noBox, noBoxVia: opts.noBox ? 'proxy' : null });
 }
 
 // ---------------------------------------------------------------- analysis + records
@@ -488,7 +520,7 @@ const snippet = (body) => norm(body).slice(0, 40);
 const aboutLines = (text, others) => { const hs = [].concat(others); return String(text).split('\n').filter((l) => hs.some((o) => l.includes(`@${o}`))); };
 const isPresence = (l) => /\bhere now:/.test(l);
 
-function analyse({ world, transcript, turnsLog, wire, handles, started, humanPlayer = null, boxPath = null }) {
+function analyse({ world, transcript, turnsLog, wire, handles, started, humanPlayer = null, boxPath = null, noBoxVia = null }) {
   const ev = transcript;
   const resultFor = new Map();   // tool_use_id -> returned event
   for (const e of ev) if (e.kind === 'returned' && e.tool_use_id) resultFor.set(e.tool_use_id, e);
@@ -632,6 +664,7 @@ function analyse({ world, transcript, turnsLog, wire, handles, started, humanPla
     human_player: humanPlayer,
     // Was this world run with the Send box (the lab's Elicitation hook)?
     box_path: boxPath,
+    ...(noBoxVia ? { no_box_via: noBoxVia } : {}),
     timeline_entries_run: new Set(turnsLog.map((t) => t.entry)).size,
     timeline_entries_total: world.timeline.length,
     days_played: [...new Set(turnsLog.map((t) => t.day))].sort((a, b) => a - b),
@@ -697,11 +730,11 @@ function toMarkdown(world, transcript, wire, summary) {
   return L.join('\n');
 }
 
-function finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started, fatal, handles, humanPlayer, boxPath = null }) {
+function finishWorld({ world, outDir, transcript, turnsLog, stub, setup, started, fatal, handles, humanPlayer, boxPath = null, noBoxVia = null }) {
   const wire = stub.effects.filter((e) => e.effect === 'SEND').map((s) => ({
     id: s.id, at: s._at ?? null, from: s.me, to: s.to, body: s.body, origin: s.origin, approved: s.approved, reply_to: s.reply_to, linked: s.linked, t: new Date(s.t).toISOString(),
   }));
-  const summary = analyse({ world, transcript, turnsLog, wire, handles, started, humanPlayer, boxPath });
+  const summary = analyse({ world, transcript, turnsLog, wire, handles, started, humanPlayer, boxPath, noBoxVia });
   const boxFailure = boxExpectationFailure(summary);
   if (boxFailure) summary.failed = boxFailure;
   const record = { world: { id: world.id, archetype: world.archetype, relationship: world.relationship, inviter: world.inviter ?? null, open_line: world.open_line, people: world.people, timeline: world.timeline }, setup, events: transcript, wire, turns: turnsLog, answer_key: world.truth ?? null, note: 'events[].simulator_only is the human simulator\'s private reasoning: it never appeared on any screen.' };
@@ -723,6 +756,7 @@ function writePopulation(out, results, opts = {}) {
     // skipped on rerun keeps the summary, and so the player, of its own run).
     human_player: humanPlayer(opts), human_players: [...new Set(done.map((r) => r.summary.human_player || 'unrecorded'))],
     box_path: opts.noBox ? false : true,
+    ...(opts.noBox ? { no_box_via: 'proxy' } : {}),
     worlds: results.length, completed: done.length,
     // A world that errored, or whose summary says it failed (sends with no box on the box path).
     failed: [...results.filter((r) => r.error).map((r) => ({ file: r.file, id: r.id || null, error: r.error })),
