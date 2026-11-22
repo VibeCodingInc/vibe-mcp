@@ -21,7 +21,9 @@
  *    person saw; a draft changed since is refused.
  *  - Shown, then a typed turn: Send goes only if the person has had a turn (a
  *    prompt, recorded by the arrival hook) after the rev was last shown, so an
- *    agent cannot show and send in one turn (turns.js).
+ *    agent cannot show and send in one turn (turns.js). Where the host can
+ *    show a box (confirm-box.js), the person's Accept in a box /vibe opens
+ *    is the choice instead, bound to the id, rev and text in the box.
  *  - Exactly once: Send claims the draft under a whole-file lock, sends with
  *    an idempotency key derived from the exact text, and finalizes against
  *    the latest stored state. A draft whose delivery could not be confirmed
