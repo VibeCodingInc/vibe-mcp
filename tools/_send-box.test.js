@@ -950,3 +950,48 @@ test('the preview on a connection with no box says sending relies on the typed r
     assert.ok(!legacy.display.includes(NONE));
   });
 });
+
+// ── the hook scan reaches parent folders, managed settings and plugins ──────
+
+test('a hook in a parent folder\'s .claude/settings.json refuses the send', async () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-box-parent-'));
+  const child = path.join(parent, 'deep', 'project');
+  fs.mkdirSync(child, { recursive: true });
+  writeSettings(path.join(parent, '.claude', 'settings.local.json'), { hooks: { Elicitation: [hookEntry('x')] } });
+  const before = process.env.CLAUDE_PROJECT_DIR;
+  process.env.CLAUDE_PROJECT_DIR = child;
+  try {
+    const found = confirmBox.answeringHook();
+    assert.ok(found && found.endsWith(path.join('.claude', 'settings.local.json')), found);
+    const listed = confirmBox.settingsFiles();
+    assert.ok(listed.includes(path.join(parent, 'deep', '.claude', 'settings.json')), 'every folder on the way up');
+  } finally { process.env.CLAUDE_PROJECT_DIR = before; fs.rmSync(parent, { recursive: true, force: true }); }
+});
+
+test('the managed settings file is in the scan, for macOS and Linux', () => {
+  assert.ok(confirmBox.settingsFiles(process.env, process.cwd, { platform: 'darwin' }).includes('/Library/Application Support/ClaudeCode/managed-settings.json'));
+  assert.ok(confirmBox.settingsFiles(process.env, process.cwd, { platform: 'linux' }).includes('/etc/claude-code/managed-settings.json'));
+});
+
+test('a plugin\'s hooks/hooks.json with an Elicitation hook refuses the send; links are not followed', async () => {
+  const file = path.join(USERDIR, 'plugins', 'marketplaces', 'some-market', 'helper', 'hooks', 'hooks.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ hooks: { ElicitationResult: [hookEntry('')] } }));
+  try {
+    await withWire(async (sends) => {
+      const p = await shown({ message: 'plugin hook' });
+      const box = fakeBox(accept);
+      const r = await sendIn(p, box);
+      assert.equal(r.data.reason, 'box_hook');
+      assert.ok(r.display.includes('hooks.json'), r.display);
+      assert.equal(box.asked.length, 0);
+      assert.equal(sends.length, 0);
+    });
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-box-plugin-out-'));
+    fs.mkdirSync(path.join(outside, 'hooks'));
+    fs.writeFileSync(path.join(outside, 'hooks', 'hooks.json'), '{}');
+    fs.symlinkSync(outside, path.join(USERDIR, 'plugins', 'linked'));
+    assert.ok(!confirmBox.pluginHookFiles(USERDIR).some((f) => f.includes(`${path.sep}linked${path.sep}`)));
+    fs.rmSync(outside, { recursive: true, force: true });
+  } finally { fs.rmSync(path.join(USERDIR, 'plugins'), { recursive: true, force: true }); }
+});

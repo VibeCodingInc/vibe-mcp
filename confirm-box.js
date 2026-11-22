@@ -274,18 +274,69 @@ function shortPath(file) {
   return home && (file === home || file.startsWith(home + path.sep)) ? `~${file.slice(home.length)}` : file;
 }
 
-/** The settings files Claude Code reads hooks from, for this project and this person. */
-function settingsFiles(env = process.env, cwd = process.cwd) {
+/** The managed (enterprise) settings file for this platform, or null. */
+function managedSettingsFile(platform = process.platform) {
+  if (platform === 'darwin') return '/Library/Application Support/ClaudeCode/managed-settings.json';
+  if (platform === 'linux') return '/etc/claude-code/managed-settings.json';
+  return null;
+}
+
+const PLUGIN_MAX_DEPTH = 4;
+const PLUGIN_MAX_DIRS = 200;
+/** hooks/hooks.json files under <config dir>/plugins, by a bounded walk that does not follow links. */
+function pluginHookFiles(configDir) {
+  const out = [];
+  const root = path.join(configDir, 'plugins');
+  let visited = 0;
+  const walk = (dir, depth) => {
+    if (depth > PLUGIN_MAX_DEPTH || visited >= PLUGIN_MAX_DIRS) return;
+    visited += 1;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      if (!e.isDirectory()) continue;   // a link is not followed
+      const sub = path.join(dir, e.name);
+      if (e.name === 'hooks') out.push(path.join(sub, 'hooks.json'));
+      else walk(sub, depth + 1);
+      if (visited >= PLUGIN_MAX_DIRS) return;
+    }
+  };
+  walk(root, 0);
+  return out;
+}
+
+/**
+ * Every settings file this scan reads hooks from: the project's own
+ * .claude/settings.json and settings.local.json, the same two in each parent
+ * folder up to the home folder (or the filesystem root), the user's
+ * settings.json, the managed settings file, and plugins' hooks/hooks.json.
+ * The host may load hooks from places this list does not include.
+ */
+function settingsFiles(env = process.env, cwd = process.cwd, { platform = process.platform } = {}) {
   const files = [];
   let project = null;
   try { project = require('./turns').projectDir(env, cwd); } catch {}
+  const pair = (dir) => { files.push(path.join(dir, '.claude', 'settings.json')); files.push(path.join(dir, '.claude', 'settings.local.json')); };
   if (project) {
-    files.push(path.join(project, '.claude', 'settings.json'));
-    files.push(path.join(project, '.claude', 'settings.local.json'));
+    const start = path.resolve(project);
+    pair(start);
+    const home = path.resolve(os.homedir());
+    let dir = start;
+    for (let i = 0; i < 64; i++) {
+      if (dir === home) break;
+      const up = path.dirname(dir);
+      if (up === dir) break;
+      dir = up;
+      pair(dir);
+    }
   }
   const named = typeof env.CLAUDE_CONFIG_DIR === 'string' && env.CLAUDE_CONFIG_DIR.trim();
-  files.push(path.join(named || path.join(os.homedir(), '.claude'), 'settings.json'));
-  return files;
+  const configDir = named || path.join(os.homedir(), '.claude');
+  files.push(path.join(configDir, 'settings.json'));
+  const managed = managedSettingsFile(platform);
+  if (managed) files.push(managed);
+  files.push(...pluginHookFiles(configDir));
+  return [...new Set(files)];
 }
 
 // ── hooks in skill, agent and command frontmatter ────────────────────────────
@@ -388,7 +439,11 @@ function settingsHook(env = process.env, cwd = process.cwd) {
     try {
       if (!fs.statSync(real).isFile()) continue;
       raw = fs.readFileSync(real, 'utf8');
-    } catch { continue; }
+    } catch {
+      // Exists but cannot be read: skipped (the host cannot read it either).
+      if (env.VIBE_DEBUG) { try { process.stderr.write(`/vibe: hook scan could not read ${shortPath(file)}\n`); } catch {} }
+      continue;
+    }
     if (settingsAnswerBox(raw)) return shortPath(file);
   }
   return null;
@@ -413,7 +468,7 @@ module.exports = {
   WRAP_COLUMNS, VISIBLE_LINES, NEWLINE_MARK, SCHEMA, TIMEOUT_MS, INPUT_KEY, ELICITATION_VERSIONS,
   declaresForm, noteClient, available, clientState,
   displayWidth, wrapLine, textLines, question, message, fits, request, ask, isOpen,
-  settingsAnswerBox, settingsFiles, answeringHook, labAllowsHook,
+  settingsAnswerBox, settingsFiles, answeringHook, labAllowsHook, managedSettingsFile, pluginHookFiles,
   frontmatter, frontmatterAnswersBox, frontmatterHook, FRONTMATTER_MAX_FILES, FRONTMATTER_MAX_BYTES,
   _resetForTest,
 };
