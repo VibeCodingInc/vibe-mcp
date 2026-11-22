@@ -88,6 +88,30 @@ function configured(env = process.env) {
 
 const isAgent = (env = process.env) => Boolean(configured(env));
 
+/**
+ * Is this session really signed in as the configured agent, with its own
+ * credential, and is the identity that would send that agent? VIBE_AGENT_HANDLE
+ * alone says only what the process was told to be: with no usable credential,
+ * or a person's token in VIBE_HOME, what sends is the person, and every rule
+ * for a person applies (the turn check, the Send box). Read locally: the
+ * session token's own claims (minted for this handle, as an agent) and the
+ * handle /vibe would send as. The service checks the token's signature.
+ */
+function signedInAsAgent(env = process.env) {
+  const me = configured(env);
+  if (!me || me.problem) return false;
+  try {
+    const authStore = require('./auth-store');
+    authStore.hydrate();
+    const token = authStore.getToken();
+    if (!token) return false;
+    const seen = authStore.inspectToken(token);
+    if (!seen || !seen.ok || norm(seen.handle) !== me.handle) return false;
+    if (claimsOf(token).mint !== 'agent') return false;
+    return norm(require('./config').getHandle()) === me.handle;
+  } catch { return false; }
+}
+
 /** The credential, for the one other caller that co-presents it (`operate`). Not exported to tools. */
 function credentialForOperator(env = process.env) {
   capture(env);
@@ -213,6 +237,7 @@ async function publicIdentity(handle, { fetchImpl = fetch } = {}) {
 }
 
 module.exports = {
+  signedInAsAgent,
   configured, isAgent, ensureSession, sessionState, publicIdentity, scrub, credentialForOperator, norm, HANDLE,
   _resetForTest: () => { _secret = null; _secretProblem = null; _captured = false; _inFlight = null; },
 };
