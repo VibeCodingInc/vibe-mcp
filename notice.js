@@ -11,9 +11,10 @@
  * where it did draft, every message was sent by the person's choice. So the
  * weak point was noticing and offering. Each change is one switch below.
  *
- * VIBE_NOTICE_VARIANT=off restores the earlier texts, for lab comparison. It
- * is read ONLY when /vibe is a server on this machine (a loopback API URL):
- * a real account always gets the current texts.
+ * VIBE_NOTICE_VARIANT=off restores the earlier texts, for lab comparison;
+ * VIBE_NOTICE_OFF=name1,name2 turns off just the named changes. Both are read
+ * ONLY when /vibe is a server on this machine (a loopback API URL): a real
+ * account always gets the current texts.
  */
 
 const NOTICE = {
@@ -22,6 +23,10 @@ const NOTICE = {
   triggers: true,           // 3. ask-before-guessing, bump-before-another-fix, results that touch someone
   offerIsDraft: true,       // 4. the offer is the draft (vibe_prepare), not a question in prose
   replyFromProject: true,   // 5. a reply may come from the project's files, not only this session
+  // Lab 2026-11-21, outside read (BRIEF-13): the reluctance that remained was
+  // about bothering someone and about looking clueless.
+  quietArrival: true,       // 6. the preview says, truthfully, how the message will reach them
+  showYourWork: true,       // 7. a question says what was already checked, then asks one answerable thing
 };
 
 /** The agent's copy of someone's line about what they are working on. The person's copy stays at 48. */
@@ -36,11 +41,21 @@ function isLoopback(env = process.env) {
   return host === '127.0.0.1' || host === '::1' || host === 'localhost';
 }
 
-/** True when the named change is on. `off` turns all of them off, and only against a loopback API. */
+/** The names VIBE_NOTICE_OFF lists (comma or space separated), as given. */
+function offNames(env = process.env) {
+  return String(env.VIBE_NOTICE_OFF || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+}
+
+/**
+ * True when the named change is on. VIBE_NOTICE_VARIANT=off turns all of them
+ * off and VIBE_NOTICE_OFF=a,b just those; either only against a loopback API.
+ */
 function on(name, env = process.env) {
-  if (!NOTICE[name]) return false;
-  if (String(env.VIBE_NOTICE_VARIANT || '').trim().toLowerCase() === 'off' && isLoopback(env)) return false;
+  if (!Object.prototype.hasOwnProperty.call(NOTICE, name) || !NOTICE[name]) return false;
+  const all = String(env.VIBE_NOTICE_VARIANT || '').trim().toLowerCase() === 'off';
+  const some = offNames(env).includes(name);
+  if ((all || some) && isLoopback(env)) return false;
   return true;
 }
 
-module.exports = { NOTICE, AGENT_SAYS_MAX, PERSON_SAYS_MAX, isLoopback, on };
+module.exports = { NOTICE, AGENT_SAYS_MAX, PERSON_SAYS_MAX, isLoopback, on, offNames };
