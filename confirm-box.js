@@ -9,13 +9,13 @@
  * counts, even "no, don't send". Where the host can show a box itself (MCP
  * elicitation), vibe_send also asks the person directly: a box whose first
  * line is fixed /vibe wording (recipient, length, whether all of it is
- * shown), then the text, each line quoted with "> ", then one required
- * choice (Not now / Send, nothing chosen) and Accept / Decline.
+ * shown), then the text, each line quoted with "> ", then one required text
+ * field (type the first two letters of the recipient) and Accept / Decline.
  * The box shows the start of the text, not the reply target and not exact
  * spacing, so the preview is where the person reads the message:
  *   - wherever person turns are recorded, a send needs the turn check (a
- *     typed message after the preview) AND Send chosen and accepted in the
- *     box, for every draft;
+ *     typed message after the preview) AND the recipient's letters typed and
+ *     accepted in the box, for every draft;
  *   - where the turn check is unavailable (a host that is not Claude Code, or
  *     Claude Code with no turn ever recorded because the hook is not
  *     installed), the box alone decides.
@@ -53,50 +53,103 @@ const VISIBLE_LINES = 3;
 /** A line break inside the text, as shown in the box: it does not use up a line. Display only. */
 const NEWLINE_MARK = ' ↵ ';
 /**
- * The form asked for: one required choice with no default, "Not now" first.
- * 0.9.23 asked for no fields, so the box was Accept / Decline with Accept
- * selected, and a stray Enter (one still queued after the person typed "send")
- * accepted it before they saw it. With a required field and no default,
- * Claude Code shows "Your choice: not set" and refuses Accept until a choice
- * is made (2.1.330, tested by hand): Enter alone cannot send.
- *
- * Labels use `enum` + `enumNames`, the LegacyTitledEnumSchema of the
- * 2025-11-25 and 2026-07-28 schemas (marked "Use TitledSingleSelectEnumSchema
- * instead", still in the EnumSchema union in both). It is the form Claude
- * Code was seen to render with labels; `oneOf` + `const`/`title` is not added
- * beside it, since an object with both matches neither schema member exactly.
- * A host that ignores `enumNames` still shows the two values.
+ * The form asked for: one required text field, no default. The person types
+ * the first two letters of who it is going to (the whole handle for a
+ * one-letter handle). History:
+ *   0.9.23  no fields: Accept was pre-selected, and a stray Enter (one still
+ *           queued after the person typed "send") accepted the box before they
+ *           saw it.
+ * Live key tests on Claude Code 2.1.330 chose this field over the others: a
+ * required text field with no default refuses Enter ("This field is
+ * required"), typing goes straight into it, typing "send" + Enter submits a
+ * value that is not the recipient's letters, and the message area still shows
+ * VISIBLE_LINES lines. A choice field was too hard to accept; a tick box and
+ * a "type s" field were accepted by the very habit that caused the 0.9.23 bug.
  */
-const CHOICE_FIELD = 'choice';
-const CHOICE_SEND = 'send';
-const CHOICE_NOT_NOW = 'not_now';
-const SCHEMA = Object.freeze({
-  type: 'object',
-  properties: Object.freeze({
-    [CHOICE_FIELD]: Object.freeze({
-      type: 'string',
-      title: 'Your choice',
-      enum: Object.freeze([CHOICE_NOT_NOW, CHOICE_SEND]),
-      enumNames: Object.freeze(['Not now', 'Send']),
-    }),
-  }),
-  required: Object.freeze([CHOICE_FIELD]),
-});
+const FIELD = 'to';
+/**
+ * Words a person types out of habit to mean "yes, send". If one of them would
+ * itself pass for a recipient (@sendhil, @yesenia, @okafor), that recipient
+ * needs the whole handle; if the handle IS one of them (@ok, @s), it needs
+ * "@" and the handle.
+ */
+const HABIT_WORDS = Object.freeze(['send', 'yes', 'y', 'ok', 's']);
+/**
+ * Longest field title, in characters, that Claude Code shows uncut (2.1.330
+ * cut a title at about 47: "Confirm send (Space to toggle Yes, then ↓ Accep…").
+ */
+const TITLE_MAX = 40;
+const FIELD_LIMITS = Object.freeze({ minLength: 1, maxLength: 40 });
+const ENTER_NOTE = 'Enter alone will not send; Esc cancels.';
+
+/** Typed text as compared: trimmed, ASCII letters lower-cased (nothing else folded). */
+const fold = (v) => String(v).trim().replace(/[A-Z]/g, (c) => c.toLowerCase());
 
 /**
- * The person's answer, from an elicitation result: 'accept' only for action
- * "accept" whose content chose Send (the exact string, an own property);
- * 'decline' for an explicit decline or a choice of Not now; else 'none'.
+ * What the person must type to send to `to`: { need, min, at }. Normally the
+ * first two letters (any longer prefix also counts, with or without "@");
+ * the whole handle when a habit word would pass; "@" + handle (exactly) when
+ * the handle is itself a habit word.
  */
-function answerOf(result) {
+function rule(to) {
+  const h = fold(to);
+  const min = Math.min(2, h.length);
+  const passes = (t) => t.length >= min && h.startsWith(t);
+  if (!HABIT_WORDS.some(passes)) return { need: h.slice(0, min), min, at: false };
+  if (!HABIT_WORDS.includes(h)) return { need: h, min: h.length, at: false };
+  return { need: `@${h}`, min: h.length, at: true };
+}
+
+/** Does the typed value confirm a send to `to`? */
+function typedOk(to, value) {
+  if (typeof value !== 'string') return false;
+  const h = fold(to);
+  if (!h) return false;
+  const r = rule(h);
+  const t = fold(value);
+  if (r.at) return t === r.need;
+  const bare = t.startsWith('@') ? t.slice(1) : t;
+  return bare.length >= r.min && h.startsWith(bare);
+}
+
+/** The field's title and description for a recipient, within TITLE_MAX. */
+function fieldText(to) {
+  const h = fold(to);
+  const r = rule(h);
+  const long = `Type "${r.need}" to send to @${h}`;
+  const short = `Type "${r.need}" to send`;
+  const whole = r.need === h || r.at;
+  const title = long.length <= TITLE_MAX ? long : short.length <= TITLE_MAX ? short : (r.at ? 'Type "@" and the handle to send' : 'Type the whole handle to send');
+  const what = r.at ? 'Its handle with the "@" in front, as on the first line.'
+    : whole ? `The whole handle of who it is going to${title === long ? '' : ', as on the first line'}.`
+      : 'The first two letters of who it is going to.';
+  return { title, description: `${what} ${ENTER_NOTE}` };
+}
+
+/** The requestedSchema for a box to `to`. */
+function schemaFor(to) {
+  const { title, description } = fieldText(to);
+  return {
+    type: 'object',
+    properties: { [FIELD]: { type: 'string', title, description, ...FIELD_LIMITS } },
+    required: [FIELD],
+  };
+}
+
+/**
+ * The person's answer, from an elicitation result for a box to `to`:
+ * 'accept' only for action "accept" whose content has its own `to` string
+ * that typedOk accepts; 'decline' for an explicit decline; 'wrong' for an
+ * accept with any other content; else 'none'. All but 'accept' are a
+ * non-accept.
+ */
+function answerOf(result, to) {
   if (!result || typeof result !== 'object') return 'none';
   if (result.action === 'decline') return 'decline';
   if (result.action !== 'accept') return 'none';
   const c = result.content;
-  if (!c || typeof c !== 'object' || Array.isArray(c) || !Object.prototype.hasOwnProperty.call(c, CHOICE_FIELD)) return 'none';
-  if (c[CHOICE_FIELD] === CHOICE_SEND) return 'accept';
-  if (c[CHOICE_FIELD] === CHOICE_NOT_NOW) return 'decline';
-  return 'none';
+  const ok = c && typeof c === 'object' && !Array.isArray(c) && Object.prototype.hasOwnProperty.call(c, FIELD) && typedOk(to, c[FIELD]);
+  return ok ? 'accept' : 'wrong';
 }
 /** How long a box may stay open before the send is given up. */
 const TIMEOUT_MS = 5 * 60 * 1000;
@@ -251,8 +304,8 @@ function fits(text) {
 }
 
 /** The params of elicitation/create for a protocol version. */
-function request(text, protocolVersion) {
-  const params = { message: text, requestedSchema: SCHEMA };
+function request(text, protocolVersion, to) {
+  const params = { message: text, requestedSchema: schemaFor(to) };
   if (MODE_VERSIONS.has(protocolVersion)) params.mode = 'form';
   return params;
 }
@@ -266,9 +319,10 @@ function isOpen() { return openNow; }
  * Open the box and wait. `box.request(params, { signal })` sends the request
  * to the client and resolves with its result. Returns 'accept', 'decline',
  * 'busy', or 'none' (cancel, error, client refusal, timeout, the call itself
- * cancelled). Only action "accept" with the choice Send is yes (answerOf).
+ * cancelled, an accept with the wrong text). Only action "accept" with the
+ * recipient's letters typed is yes (answerOf).
  */
-async function ask(box, text, { timeoutMs = TIMEOUT_MS, signal = null } = {}) {
+async function ask(box, text, { to, timeoutMs = TIMEOUT_MS, signal = null } = {}) {
   if (openNow) return 'busy';
   if (signal && signal.aborted) return 'none';
   openNow = true;
@@ -282,10 +336,11 @@ async function ask(box, text, { timeoutMs = TIMEOUT_MS, signal = null } = {}) {
     });
     let result;
     try {
-      result = await Promise.race([Promise.resolve().then(() => box.request(request(text, box.protocolVersion), { signal: ctl.signal })), stop]);
+      result = await Promise.race([Promise.resolve().then(() => box.request(request(text, box.protocolVersion, to), { signal: ctl.signal })), stop]);
     } catch { return 'none'; }
     if (result && result.stopped) { ctl.abort(); return 'none'; }
-    return answerOf(result);
+    const answer = answerOf(result, to);
+    return answer === 'wrong' ? 'none' : answer;
   } finally {
     if (timer) clearTimeout(timer);
     if (signal && onAbort) signal.removeEventListener('abort', onAbort);
@@ -392,8 +447,8 @@ function labAllowsHook(env = process.env) {
 }
 
 module.exports = {
-  WRAP_COLUMNS, VISIBLE_LINES, NEWLINE_MARK, SCHEMA, TIMEOUT_MS, INPUT_KEY, ELICITATION_VERSIONS,
-  CHOICE_FIELD, CHOICE_SEND, CHOICE_NOT_NOW, answerOf,
+  WRAP_COLUMNS, VISIBLE_LINES, NEWLINE_MARK, TIMEOUT_MS, INPUT_KEY, ELICITATION_VERSIONS,
+  FIELD, HABIT_WORDS, TITLE_MAX, rule, typedOk, fieldText, schemaFor, answerOf,
   declaresForm, noteClient, available, clientState,
   displayWidth, wrapLine, textLines, question, message, fits, request, ask, isOpen,
   settingsAnswerBox, settingsFiles, answeringHook, labAllowsHook, managedSettingsFile,

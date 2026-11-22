@@ -66,8 +66,9 @@ function fakeBox(answer, { protocolVersion = '2025-11-25', timeoutMs } = {}) {
   if (timeoutMs) box.timeoutMs = timeoutMs;
   return box;
 }
-/** The person chose Send and accepted: the only answer that sends. */
-const accept = { action: 'accept', content: { choice: 'send' } };
+/** The person typed the recipient's first two letters and accepted: the answer that sends (to @linus). */
+const accept = { action: 'accept', content: { to: 'li' } };
+const acceptFor = (h) => ({ action: 'accept', content: { to: h.slice(0, 2) } });
 const NOT_ACCEPTED = 'Not sent. It is still a draft for @linus. Only if they ask again: show it with vibe_prepare and wait for them to say send.';
 /** A message too long for the box to show whole: the turn check applies on top of the box. */
 const LONG = (tag) => `${tag}: ${'this one is long enough that the box shows only its start, so the preview matters. '.repeat(2).trim()}`;
@@ -108,7 +109,7 @@ test('a typed turn, then Accept: sends exactly the text in the box', async () =>
     assert.equal(box.asked.length, 1, 'one box');
     const { params } = box.asked[0];
     assert.equal(params.message, 'Send to @linus? (24 chars, all shown)\n> cloud owns placement now');
-    assert.deepEqual(params.requestedSchema, { type: 'object', properties: { choice: { type: 'string', title: 'Your choice', enum: ['not_now', 'send'], enumNames: ['Not now', 'Send'] } }, required: ['choice'] });
+    assert.deepEqual(params.requestedSchema, { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to send to @linus', description: 'The first two letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] });
     assert.equal(params.mode, 'form', '2025-11-25 names the form mode');
     assert.equal(r.data.sent, true);
     assert.equal(r.data.turn_check, 'box');
@@ -583,7 +584,7 @@ test('stateless: the first call returns the box as an input request; the retry w
     assert.ok(first.inputRequired, 'input required');
     const req = first.inputRequired.inputRequests[confirmBox.INPUT_KEY];
     assert.equal(req.method, 'elicitation/create');
-    assert.deepEqual(req.params, { message: 'Send to @linus? (23 chars, all shown)\n> over the stateless path', requestedSchema: { type: 'object', properties: { choice: { type: 'string', title: 'Your choice', enum: ['not_now', 'send'], enumNames: ['Not now', 'Send'] } }, required: ['choice'] }, mode: 'form' });
+    assert.deepEqual(req.params, { message: 'Send to @linus? (23 chars, all shown)\n> over the stateless path', requestedSchema: { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to send to @linus', description: 'The first two letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] }, mode: 'form' });
     assert.equal(typeof first.inputRequired.requestState, 'string');
     assert.equal(sends.length, 0, 'nothing sent by the first call');
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(first, accept));
@@ -786,8 +787,9 @@ test('Keep (a message held for someone not on /vibe yet) goes through the box to
     const p = await drafts.vibe_prepare.handler({ handle: 'newbie-dev', message: 'welcome aboard' });
     assert.equal(p.data.draft.held, true);
     personTurn();
-    const box = fakeBox(accept);
+    const box = fakeBox(acceptFor('newbie-dev'));
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, { box });
+    assert.equal(box.asked[0].params.requestedSchema.properties.to.title, 'Type "ne" to send to @newbie-dev');
     assert.equal(box.asked[0].params.message, 'Keep for @newbie-dev? (14 chars, all shown)\n> welcome aboard');
     assert.equal(r.data.held, true);
     assert.equal(invites.filter((b) => !b.dry_run).length, 1);
@@ -1015,51 +1017,128 @@ test('another project is not held up by this project\'s outstanding box', async 
   });
 });
 
-// ── a choice must be made (0.9.24) ───────────────────────────────────────────
+
+// ── type the recipient's letters (0.9.24) ────────────────────────────────────
 // 0.9.23's box had no fields, so Accept was pre-selected and a stray Enter sent.
-// Now only action "accept" with content.choice === "send" sends; every other
-// answer is the standard not-accepted result, on both protocol paths.
+// Now the person types the first two letters of who it is going to; only
+// action "accept" with those letters sends. Enter alone, and "send" typed out
+// of habit, cannot.
+
+const LONG39 = 'abcdefghijklmnopqrstuvwxyz0123456789abc';
+const DESC2 = 'The first two letters of who it is going to. Enter alone will not send; Esc cancels.';
+
+test('the rule for @ben: prefixes of at least two letters, any case, one optional "@", trimmed', () => {
+  for (const t of ['be', 'ben', '@ben', 'Be', 'BEN', '@Be', '  be  ', '\tben\n']) assert.equal(confirmBox.typedOk('ben', t), true, JSON.stringify(t));
+  for (const t of ['', ' ', 'b', '@b', 'e', 'en', 'bex', 'benn', 'ben ben', '@@be', '@', 'b e', 'send', 'yes', 'y', 'ok', 's', 'Send', 'SEND']) assert.equal(confirmBox.typedOk('ben', t), false, JSON.stringify(t));
+  for (const t of [null, undefined, 1, true, ['be'], { to: 'be' }]) assert.equal(confirmBox.typedOk('ben', t), false, String(t));
+});
+
+test('non-ASCII typed input never passes: no folding beyond ASCII letters', () => {
+  for (const t of ['ｂｅ', 'bе' /* Cyrillic e */, 'be​', '​be', 'b́e', 'ＢＥ']) assert.equal(confirmBox.typedOk('ben', t), false, JSON.stringify(t));
+  assert.equal(confirmBox.typedOk('kai', 'Ka'), false, 'KELVIN SIGN is not k');
+  assert.equal(confirmBox.typedOk('ivo', 'İv'), false, 'dotted capital I is not i');
+});
+
+test('a one-character handle needs the whole handle; one that is a habit word needs "@" too', () => {
+  assert.deepEqual(confirmBox.rule('a'), { need: 'a', min: 1, at: false });
+  for (const t of ['a', 'A', '@a', ' a ']) assert.equal(confirmBox.typedOk('a', t), true, t);
+  for (const t of ['', 'ab', 'b']) assert.equal(confirmBox.typedOk('a', t), false, t);
+  assert.equal(confirmBox.fieldText('a').title, 'Type "a" to send to @a');
+  for (const h of ['s', 'y']) {
+    assert.deepEqual(confirmBox.rule(h), { need: `@${h}`, min: 1, at: true });
+    assert.equal(confirmBox.typedOk(h, h), false, `${h} typed alone is the habit`);
+    assert.equal(confirmBox.typedOk(h, `@${h}`), true);
+    assert.equal(confirmBox.typedOk(h, ` @${h.toUpperCase()} `), true);
+    assert.equal(confirmBox.fieldText(h).title, `Type "@${h}" to send to @${h}`);
+  }
+});
+
+test('a 39-character handle: the title is shortened to fit; the first two letters still send', () => {
+  assert.equal(LONG39.length, 39);
+  const { title, description } = confirmBox.fieldText(LONG39);
+  assert.equal(title, 'Type "ab" to send');
+  assert.ok(title.length <= confirmBox.TITLE_MAX);
+  assert.equal(description, DESC2);
+  assert.equal(confirmBox.typedOk(LONG39, 'ab'), true);
+  assert.equal(confirmBox.typedOk(LONG39, `@${LONG39}`), true);
+  assert.equal(confirmBox.typedOk(LONG39, 'a'), false);
+});
+
+test('habit words: one constant; none of them ever confirms a send, for any handle', () => {
+  assert.deepEqual([...confirmBox.HABIT_WORDS], ['send', 'yes', 'y', 'ok', 's']);
+  const handles = ['ben', 'linus', 'a', 's', 'y', 'o', 'se', 'sen', 'send', 'sends', 'sendhil', 'ye', 'yes', 'yesenia', 'ok', 'oka', 'okafor', 'sa', 'sam', LONG39, `send${'x'.repeat(35)}`, `ok${'z'.repeat(37)}`];
+  for (const h of handles) {
+    for (const w of confirmBox.HABIT_WORDS) {
+      for (const typed of [w, w.toUpperCase(), ` ${w} `]) assert.equal(confirmBox.typedOk(h, typed), false, `@${h}: ${JSON.stringify(typed)}`);
+    }
+    // ...and the person can always send by typing what the title asks for.
+    assert.equal(confirmBox.typedOk(h, confirmBox.rule(h).need), true, `@${h}: ${confirmBox.rule(h).need}`);
+    assert.ok(confirmBox.fieldText(h).title.length <= confirmBox.TITLE_MAX, `@${h}: ${confirmBox.fieldText(h).title}`);
+  }
+});
+
+test('a habit-colliding handle needs the whole handle, and the title says so', () => {
+  for (const [h, w] of [['sendhil', 'send'], ['yesenia', 'yes'], ['okafor', 'ok'], ['sends', 'send']]) {
+    assert.deepEqual(confirmBox.rule(h), { need: h, min: h.length, at: false }, h);
+    assert.equal(confirmBox.typedOk(h, w), false);
+    assert.equal(confirmBox.typedOk(h, h.slice(0, 2)), false, 'two letters are not enough here');
+    assert.equal(confirmBox.typedOk(h, h), true);
+    assert.equal(confirmBox.typedOk(h, `@${h.toUpperCase()}`), true);
+    assert.equal(confirmBox.fieldText(h).title, `Type "${h}" to send to @${h}`);
+    assert.match(confirmBox.fieldText(h).description, /^The whole handle of who it is going to\. Enter alone will not send; Esc cancels\.$/);
+  }
+  for (const h of ['send', 'yes', 'ok']) {
+    assert.deepEqual(confirmBox.rule(h), { need: `@${h}`, min: h.length, at: true });
+    assert.equal(confirmBox.typedOk(h, h), false);
+    assert.equal(confirmBox.typedOk(h, `@${h}`), true);
+    assert.equal(confirmBox.fieldText(h).title, `Type "@${h}" to send to @${h}`);
+  }
+  const longCollide = `send${'x'.repeat(35)}`;
+  assert.equal(confirmBox.fieldText(longCollide).title, 'Type the whole handle to send');
+  assert.equal(confirmBox.fieldText(longCollide).description, 'The whole handle of who it is going to, as on the first line. Enter alone will not send; Esc cancels.');
+  assert.equal(confirmBox.typedOk(longCollide, 'se'), false);
+  assert.equal(confirmBox.typedOk(longCollide, longCollide), true);
+  // Not colliding: two letters do.
+  for (const h of ['sean', 'sen', 'se', 'yoko', 'olu']) assert.equal(confirmBox.rule(h).need, h.slice(0, 2), h);
+});
+
+test('the schema as sent, for @ben and for a 39-character handle: one required string field, no default', () => {
+  assert.deepEqual(confirmBox.schemaFor('ben'), { type: 'object', properties: { to: { type: 'string', title: 'Type "be" to send to @ben', description: DESC2, minLength: 1, maxLength: 40 } }, required: ['to'] });
+  assert.deepEqual(confirmBox.schemaFor(LONG39), { type: 'object', properties: { to: { type: 'string', title: 'Type "ab" to send', description: DESC2, minLength: 1, maxLength: 40 } }, required: ['to'] });
+  assert.equal(JSON.stringify(confirmBox.schemaFor('ben')).includes('default'), false);
+  assert.deepEqual(confirmBox.request('x', '2025-11-25', 'ben').requestedSchema, confirmBox.schemaFor('ben'));
+  assert.deepEqual(confirmBox.request('x', '2026-07-28', 'ben').requestedSchema, confirmBox.schemaFor('ben'));
+});
+
+test('answerOf: only accept with the letters is yes; decline is decline; an accept with other content is wrong', () => {
+  assert.equal(confirmBox.answerOf({ action: 'accept', content: { to: 'be' } }, 'ben'), 'accept');
+  assert.equal(confirmBox.answerOf({ action: 'decline' }, 'ben'), 'decline');
+  for (const c of [{}, { choice: 'send' }, { to: 'send' }, { to: '' }, { to: 'b' }, { to: 5 }, Object.create({ to: 'be' }), ['be']]) {
+    assert.equal(confirmBox.answerOf({ action: 'accept', content: c }, 'ben'), 'wrong', JSON.stringify(c));
+  }
+  assert.equal(confirmBox.answerOf({ action: 'accept' }, 'ben'), 'wrong');
+  for (const r of [null, undefined, 'accept', 1, { action: 'cancel', content: { to: 'be' } }, { action: 'ACCEPT', content: { to: 'be' } }]) assert.equal(confirmBox.answerOf(r, 'ben'), 'none');
+});
 
 const NOT_SENDS = [
-  ['accept with Not now', { action: 'accept', content: { choice: 'not_now' } }],
-  ['accept with empty content (what 0.9.23\'s box returned)', { action: 'accept', content: {} }],
+  ['"send" typed (the habit)', { action: 'accept', content: { to: 'send' } }],
+  ['accept with empty content (0.9.23\'s answer)', { action: 'accept', content: {} }],
   ['accept with no content', { action: 'accept' }],
-  ['accept with choice "SEND"', { action: 'accept', content: { choice: 'SEND' } }],
-  ['accept with choice " send"', { action: 'accept', content: { choice: ' send' } }],
-  ['accept with choice true', { action: 'accept', content: { choice: true } }],
-  ['accept with another field', { action: 'accept', content: { confirm: 'send' } }],
-  ['accept with content an array', { action: 'accept', content: ['send'] }],
-  ['accept with choice inherited, not own', { action: 'accept', content: Object.create({ choice: 'send' }) }],
+  ['accept with the old choice field', { action: 'accept', content: { choice: 'send' } }],
+  ['one letter', { action: 'accept', content: { to: 'l' } }],
+  ['wrong letters', { action: 'accept', content: { to: 'lx' } }],
+  ['longer than the handle', { action: 'accept', content: { to: 'linusx' } }],
+  ['someone else', { action: 'accept', content: { to: 'be' } }],
+  ['a number', { action: 'accept', content: { to: 5 } }],
+  ['inherited, not own', { action: 'accept', content: Object.create({ to: 'li' }) }],
+  ['content an array', { action: 'accept', content: ['li'] }],
   ['decline', { action: 'decline' }],
-  ['decline carrying choice send', { action: 'decline', content: { choice: 'send' } }],
+  ['decline carrying the letters', { action: 'decline', content: { to: 'li' } }],
   ['cancel', { action: 'cancel' }],
-  ['cancel carrying choice send', { action: 'cancel', content: { choice: 'send' } }],
+  ['cancel carrying the letters', { action: 'cancel', content: { to: 'li' } }],
 ];
 
-test('the schema as sent: one required choice, Not now first, labelled, no default', () => {
-  const s = confirmBox.SCHEMA;
-  assert.deepEqual(Object.keys(s.properties), ['choice']);
-  assert.deepEqual(s.required, ['choice']);
-  const f = s.properties.choice;
-  assert.equal(f.type, 'string');
-  assert.equal(f.title, 'Your choice');
-  assert.deepEqual(f.enum, ['not_now', 'send'], 'Not now first');
-  assert.deepEqual(f.enumNames, ['Not now', 'Send']);
-  assert.equal('default' in f, false, 'no default: nothing is chosen until the person chooses');
-  assert.equal(JSON.stringify(s).includes('default'), false);
-  assert.deepEqual(confirmBox.request('x', '2025-11-25').requestedSchema, s);
-  assert.deepEqual(confirmBox.request('x', '2026-07-28').requestedSchema, s);
-});
-
-test('answerOf: only accept with choice "send" is yes; Not now and decline are a decline; the rest none', () => {
-  assert.equal(confirmBox.answerOf({ action: 'accept', content: { choice: 'send' } }), 'accept');
-  assert.equal(confirmBox.answerOf({ action: 'accept', content: { choice: 'not_now' } }), 'decline');
-  assert.equal(confirmBox.answerOf({ action: 'decline' }), 'decline');
-  for (const [name, r] of NOT_SENDS) assert.notEqual(confirmBox.answerOf(r), 'accept', name);
-  for (const r of [null, undefined, 'accept', 1, [], { action: 'ACCEPT', content: { choice: 'send' } }]) assert.equal(confirmBox.answerOf(r), 'none');
-});
-
-test('2025-11-25 in process: every answer but accept-with-Send is not sent and recorded as a non-accept', async () => {
+test('2025-11-25 in process: every answer but accept with the letters is not sent and recorded as a non-accept', async () => {
   await withWire(async (sends) => {
     for (const [name, answer] of NOT_SENDS) {
       const p = await shown({ message: `not this one ${Math.random()}` });
@@ -1078,31 +1157,34 @@ test('2025-11-25 in process: every answer but accept-with-Send is not sent and r
   });
 });
 
-test('2025-11-25 in process: a box that times out (no answer) is not sent', async () => {
+test('2025-11-25 in process: "LI", "@linus" and " lin " each send', async () => {
+  await withWire(async (sends) => {
+    for (const to of ['LI', '@linus', ' lin ']) {
+      const p = await shown({ message: `typed ${JSON.stringify(to)}` });
+      const r = await sendIn(p, fakeBox({ action: 'accept', content: { to } }));
+      assert.equal(r.data.sent, true, to);
+    }
+    assert.equal(sends.length, 3);
+  });
+});
+
+test('2025-11-25 in process: a box that times out (no answer) or a client error is not sent', async () => {
   await withWire(async (sends) => {
     const p = await shown({ message: 'nobody answers' });
-    const box = fakeBox(() => new Promise(() => {}), { timeoutMs: 50 });
-    const r = await sendIn(p, box);
+    const r = await sendIn(p, fakeBox(() => new Promise(() => {}), { timeoutMs: 50 }));
     assert.equal(r.display, NOT_ACCEPTED);
     assert.ok(Number.isFinite(drafts.loadDrafts().find((x) => x.id === p.data.draft.id).boxRefusedAt));
+    const q = await shown({ message: 'client failed' });
+    const r2 = await sendIn(q, fakeBox(() => { throw new Error('boom'); }));
+    assert.equal(r2.display, NOT_ACCEPTED);
     assert.equal(sends.length, 0);
   });
 });
 
-test('2025-11-25 in process: a client error is not sent', async () => {
+test('after "send" typed into the box, the next box needs vibe_prepare again and a typed turn, like any non-accept', async () => {
   await withWire(async (sends) => {
-    const p = await shown({ message: 'client failed' });
-    const box = fakeBox(() => { throw new Error('boom'); });
-    const r = await sendIn(p, box);
-    assert.equal(r.display, NOT_ACCEPTED);
-    assert.equal(sends.length, 0);
-  });
-});
-
-test('after accept-with-Not-now, the next box needs vibe_prepare again and a typed turn, like any non-accept', async () => {
-  await withWire(async (sends) => {
-    const p = await shown({ message: 'not now please' });
-    const r1 = await sendIn(p, fakeBox({ action: 'accept', content: { choice: 'not_now' } }));
+    const p = await shown({ message: 'habit please' });
+    const r1 = await sendIn(p, fakeBox({ action: 'accept', content: { to: 'send' } }));
     assert.equal(r1.display, NOT_ACCEPTED);
     const box2 = fakeBox(accept);
     const r2 = await sendIn(p, box2);
@@ -1116,12 +1198,25 @@ test('after accept-with-Not-now, the next box needs vibe_prepare again and a typ
   });
 });
 
-test('stateless: every answer but accept-with-Send is not sent and recorded as a non-accept', async () => {
+test('reply, resend and kept-for-later boxes use the same field: the recipient\'s letters', async () => {
+  const forKeep = confirmBox.request(confirmBox.message({ to: 'newbie-dev', held: true, text: 'hi' }), '2025-11-25', 'newbie-dev');
+  assert.equal(forKeep.message.split('\n')[0], 'Keep for @newbie-dev? (2 chars, all shown)');
+  assert.equal(forKeep.requestedSchema.properties.to.title, 'Type "ne" to send to @newbie-dev');
+  const forReply = confirmBox.request(confirmBox.message({ to: 'ben', reply: true, text: 'hi' }), '2025-11-25', 'ben');
+  assert.equal(forReply.message.split('\n')[0], 'Reply to @ben? (2 chars, all shown)');
+  assert.equal(forReply.requestedSchema.properties.to.title, 'Type "be" to send to @ben');
+  const forResend = confirmBox.request(confirmBox.message({ to: 'ben', retry: true, text: 'hi' }), '2025-11-25', 'ben');
+  assert.equal(forResend.message.split('\n')[0], 'Resend to @ben? (2 chars, all shown)');
+  assert.deepEqual(forResend.requestedSchema, confirmBox.schemaFor('ben'));
+});
+
+test('stateless: every answer but accept with the letters is not sent and recorded as a non-accept', async () => {
   await withWire(async (sends) => {
     for (const [name, answer] of NOT_SENDS) {
       const p = await shown({ message: `stateless not this ${Math.random()}` });
       const first = await sendIn(p, null, stateless);
       assert.ok(first.inputRequired, name);
+      assert.deepEqual(first.inputRequired.inputRequests[confirmBox.INPUT_KEY].params.requestedSchema, confirmBox.schemaFor('linus'));
       const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(first, answer));
       assert.equal(r.display, NOT_ACCEPTED, name);
       assert.equal(r.data.reason, 'box_not_accepted', name);
@@ -1130,6 +1225,17 @@ test('stateless: every answer but accept-with-Send is not sent and recorded as a
       assert.ok(Number.isFinite(d.boxRefusedAt), `${name}: recorded as a non-accept`);
       assert.equal(d.box, undefined, `${name}: the request is spent`);
     }
+    assert.equal(sends.length, 0);
+  });
+});
+
+test('stateless: the letters are judged against the recipient on disk when the box opened', async () => {
+  await withWire(async (sends) => {
+    const p = await shown({ message: 'judged on disk' });
+    const first = await sendIn(p, null, stateless);
+    drafts.transact((all) => { const d = all.find((x) => x.id === p.data.draft.id); d.box.to = 'zed'; });
+    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(first, accept));
+    assert.equal(r.display, NOT_ACCEPTED, '"li" is not @zed; and the recorded recipient no longer matches the draft');
     assert.equal(sends.length, 0);
   });
 });
