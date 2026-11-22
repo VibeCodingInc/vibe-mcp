@@ -301,3 +301,14 @@ test('the hook scores with the server\'s rule: "no" typed for @noah would not se
   assert.equal(r.log[0].decision, 'decline');
   assert.deepEqual(r.log[0].field, { title: 'Type "noa" to keep it for @noah', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.' });
 });
+
+test('with no schema in the hook input, the hook draws the field the server would send', async () => {
+  const { serverSchema } = require('../lab/box-hook.cjs');
+  const cb = require('../confirm-box');
+  assert.deepEqual(serverSchema('Send to @noah? (3 chars, all shown)\n> hey'), cb.schemaFor('noah'));
+  assert.deepEqual(serverSchema('Keep for @noah? (3 chars, all shown)\n> hey'), cb.schemaFor('noah', { held: true }));
+  assert.equal(serverSchema('nothing'), null);
+  const r = await runHook({ cmd: 'cat > /dev/null; echo \'{"press":"accept","typed":"noa"}\'', input: JSON.stringify({ hook_event_name: 'Elicitation', message: 'Send to @noah? (3 chars, all shown)\n> hey' }) });
+  assert.equal(r.log[0].decision, 'accept');
+  assert.equal(r.log[0].field.title, 'Type "noa" to send to @noah');
+});

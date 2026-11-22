@@ -56,6 +56,13 @@ function recipientOf(message) {
   return m ? m[1] : null;
 }
 
+/** The schema the server sends for the box on line 1 (confirm-box.js schemaFor), or null. */
+function serverSchema(message) {
+  const to = recipientOf(message);
+  if (!to) return null;
+  try { return require('../confirm-box').schemaFor(to, { held: /^Keep for /.test(String(message)) }); } catch { return null; }
+}
+
 /** Would the server send on this answer? Its own rule, on the recipient named on line 1. */
 function wouldSend(message, answer, key = 'to') {
   if (!answer || answer.action !== 'accept') return false;
@@ -118,7 +125,9 @@ async function main() {
     try { input = JSON.parse(await readStdin()); } catch { return finish({ error: 'hook input is not JSON' }); }
     message = boxMessage(input);
     if (message === null) return finish({ error: 'no box message in the hook input' });
-    schema = boxSchema(input);
+    // The field as the server asked for it; if the host did not pass the
+    // schema on, the one the server would send for the recipient on line 1.
+    schema = boxSchema(input) || serverSchema(message);
     const file = process.env.VIBE_LAB_BOX_CONTEXT;
     if (!file) return finish({ message, schema, error: 'VIBE_LAB_BOX_CONTEXT is not set' });
     let ctx;
@@ -136,4 +145,4 @@ async function main() {
 
 if (require.main === module) main();
 
-module.exports = { boxMessage, boxSchema, answerFor, recipientOf, wouldSend };
+module.exports = { boxMessage, boxSchema, serverSchema, answerFor, recipientOf, wouldSend };
