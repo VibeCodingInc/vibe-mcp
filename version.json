@@ -1,16 +1,17 @@
 {
-  "version": "0.9.22",
+  "version": "0.9.23",
   "updated": "2026-11-21",
-  "changelog": "A reply you drafted and never sent is brought back, and the rule that nothing goes without you is held more tightly by code.",
+  "changelog": "Send is now confirmed in a box that /vibe opens and the agent cannot answer, and your own earlier messages are labelled as yours.",
   "features": [
-    "A reply you prepared and never sent or dropped, while the other person is still waiting, is brought back once: \"your reply to @handle is drafted but not sent · want to see it again?\". It never sends anything by itself",
-    "A message you already saw and have not answered now reads \"still waiting since yesterday\" instead of looking new",
-    "A draft shown in an earlier conversation must be shown again before it can be sent. Re-showing a draft always needs a fresh typed message from you before it goes",
-    "Only a message you typed counts as your turn. A report from a subagent, a message from another session or a background notice no longer does",
-    "A pick in a question menu does not count as your choice; the agent shows the preview and asks in words",
-    "A message or link carrying characters that do not show, long runs of blank lines, or a look-alike handle is refused when it is prepared. Ordinary emoji and scripts that need joiners still work",
-    "An untouched older /vibe command file is updated when the server starts; one you edited is left alone",
-    "Known gap, stated in SECURITY.md: a wake-up the agent schedules for itself still counts as your turn"
+    "When the agent sends, /vibe opens its own confirmation box naming the person and showing the start of the message. Only Accept sends. The agent cannot see the box or answer it",
+    "Where /vibe can tell that you typed, sending needs both: you say send after seeing the preview, then you press Accept",
+    "After a Decline or Esc, no box opens again until you type, and the agent is told only that it was not sent",
+    "With nobody at the keyboard the box cannot be accepted, so nothing goes. Unattended sending needs an agent account",
+    "/vibe refuses to send if a hook is set up in your settings to answer its box for you",
+    "In a thread, each of your own messages says where it came from, so a new session no longer treats your earlier message as unexplained",
+    "Apps that cannot show the box keep the earlier check, and the preview says so",
+    "An agent account is exempt only when really signed in as that agent, not because a setting says so",
+    "Open-line questions can no longer exceed their hourly limit when asked in parallel"
   ],
   "deprecated": [],
   "breaking": false,
