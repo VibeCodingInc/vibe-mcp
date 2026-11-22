@@ -55,4 +55,28 @@ choice.
   invisible person may still be in one, so never "just you"):
   `Nobody else shows as here right now; notes wait till they're back.`
 - A note back when a reply changed the work, as a draft the person chooses to
-  send: `That landed: I'm keeping tool_choice on auto and dropping the retry wrapper.`
+  send: `Your bare-ID answer landed: issue_refund pattern is now ^[0-9]{5,8}$ and the ORD- rule is out of the prompt. Not published to staging yet.`
+
+## The note back is a receipt
+
+A note back tells someone their answer changed the work here. It is a
+one-sentence receipt of what changed on the person's side: the concrete file,
+setting or decision that was actually updated, with "not deployed yet" or
+"local only" when it is not live. It uses only numbers and names that are in
+the person's files or in the answer itself.
+
+It carries no question, no request and no instruction to the other person. If
+the person also needs something more from them, that is a separate ordinary
+draft, offered separately. If nothing changed (the answer only agreed with
+what they had), there is no note back. `vibe_prepare` refuses a note back with
+a question mark in it (`?`, `？` or `؟`); whether a sentence is an order is
+left to the guidance, not the code.
+
+From an outside review of 11 real notes back (2026-11-22), the shapes to avoid:
+
+- A new request inside the thank-you: `Thanks, your 3,112 is in the postmortem.
+  Can you pull a /v2/quotes failed count and error stop time?` The receipt is
+  the first sentence; the request is its own draft.
+- An order: `Send the 120-case numbers when ready.`
+- A number that is not in the person's files or the answer.
+- Agreement with no change: no note back at all.

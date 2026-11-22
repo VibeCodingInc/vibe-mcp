@@ -707,7 +707,7 @@ function shownForLanding(messages, input, env = process.env) {
     if (shown.length === 0) return;
     const dir = path.join(require('./vibe-home').vibeHome(env), 'landing');
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const body = JSON.stringify({ at: Date.now(), ...(notice.on('landedAsDraft', env) ? { asDraft: true } : {}), shown });
+    const body = JSON.stringify({ at: Date.now(), ...(notice.on('landedAsDraft', env) ? { asDraft: true } : {}), ...(notice.on('landedReceipt', env) ? { receipt: true } : {}), shown });
     const session = String((input && input.session_id) || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
     const names = session ? [`start-${session}.json`]
       : [...new Set([env.CLAUDE_PROJECT_DIR, input && input.cwd].filter((d) => typeof d === 'string' && d.trim()))].map((d) => `start-dir-${require('./turns').key(d)}.json`);

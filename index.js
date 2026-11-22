@@ -103,6 +103,12 @@ const NOTICE_TEXT = {
   itLanded: 'Finishing work that used a reply includes saying so. When a reply the person received has been used in this session (a file changed, a plan or a number changed, or an action held because of it), then once that change has actually been made, end that reply of yours with one line offering to tell the sender it was used, and open that note with vibe_prepare: handle, message, reply_to (their reply\'s id), kind "landed" and asked: false. Exactly once per reply they received. The note is one line, at most about 100 characters, saying only what changed in the person\'s own terms, with no file paths, code, numbers they would not say aloud to that person, invented feelings or claimed savings, for example "That landed: I\'m keeping tool_choice on auto and dropping the retry wrapper."; if they declined one for that reply, do not offer it again, and never send it without their choice.',
 };
 
+// 21 landedReceipt (outside review of 11 real notes back): the same opening,
+// then what a note back is; the limit is the one vibe_prepare keeps (160).
+NOTICE_TEXT.itLandedReceipt = 'Finishing work that used a reply includes saying so. When a reply the person received has been used in this session (a file changed, a plan or a number changed, or an action held because of it), then once that change has actually been made, end that reply of yours with one line offering to tell the sender it was used, and open that note with vibe_prepare: handle, message, reply_to (their reply\'s id), kind "landed" and asked: false. Exactly once per reply they received. '
+  + notice.LANDED_RECEIPT
+  + ` It is at most 160 characters, for example "${notice.LANDED_RECEIPT_EXAMPLE}"; if they declined one for that reply, do not offer it again, and never send it without their choice.`;
+
 function serverInstructions(env = process.env) {
   const on = (name) => notice.on(name, env);
   return [
@@ -117,7 +123,7 @@ function serverInstructions(env = process.env) {
     on('quietArrival') ? NOTICE_TEXT.quietArrival : '',
     on('voiceCharter') ? NOTICE_TEXT.voiceCharter : '',
     on('noticingLine') ? NOTICE_TEXT.noticingLine : '',
-    on('itLanded') ? NOTICE_TEXT.itLanded : '',
+    on('itLanded') ? (on('landedReceipt') ? NOTICE_TEXT.itLandedReceipt : NOTICE_TEXT.itLanded) : '',
     on('replyFromProject')
       ? (on('lookBeforeNo')
         // 10 (BRIEF-10: six false "nothing in this session covers that", the answer in the receiver's own files).
