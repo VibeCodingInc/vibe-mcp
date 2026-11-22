@@ -305,7 +305,7 @@ function noteLine(message) {
   return noted ? `**Note:** this draft includes something from your private note about @${noted.handle} (kept on this machine). Send only if you want that to go.\n` : '';
 }
 
-function preview(d, person) {
+function preview(d, person, { boxy = false } = {}) {
   const where = person ? (isHereNow(person) ? 'here now' : (person.status === 'away' ? 'away' : 'not around — it waits for their next turn')) : 'presence unknown — it waits for their next turn';
   const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
   const message = compose(d);
@@ -316,12 +316,12 @@ function preview(d, person) {
     // The earlier Send did not confirm: it may already have reached them.
     // Only the two honest actions exist (codex P2).
     return {
-      display: `${head}the last Send did not confirm — it may or may not have reached @${d.to}. Send again retries exactly this text (delivers once) · Cancel. Editing is off for this draft.  _(draft ${d.id} · rev ${rev})_${boxNote(d)}`,
+      display: `${head}the last Send did not confirm — it may or may not have reached @${d.to}. Send again retries exactly this text (delivers once) · Cancel. Editing is off for this draft.  _(draft ${d.id} · rev ${rev})_${boxNote(d, boxy)}`,
       data: { draft: { id: d.id, to: d.to, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to} again`, tool: 'vibe_send', args: { id: d.id, rev } }, { label: 'Cancel', tool: 'vibe_discard', args: { id: d.id } }] },
     };
   }
   return {
-    display: `${head}Send to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_${boxNote(d)}`,
+    display: `${head}Send to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_${boxNote(d, boxy)}`,
     data: { draft: { id: d.id, to: d.to, body: d.body, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to}`, tool: 'vibe_send', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_prepare', args: { id: d.id, message: '<new body text — links are kept separately>' } }, { label: 'Cancel', tool: 'vibe_discard', args: { id: d.id } }] },
   };
 }
@@ -351,7 +351,7 @@ function tooManyBlankLines(text) {
   return false;
 }
 
-async function draftHandler(args) {
+async function draftHandler(args, ctx = {}) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
   const me = config.getHandle();
@@ -483,14 +483,16 @@ async function draftHandler(args) {
     // a new agent, unsent.js) must be seen there before it can go, so
     // reopening it and sending it inside one turn is refused.
     stampRev(d);
-    // Declined in a Send box: showing it again here is what lets it be
-    // offered in a box again (confirm-box.js).
-    delete d.declinedRev; delete d.declinedAt;
+    // Shown by vibe_prepare: what lets a box be opened again for this draft,
+    // after a person's turn (confirm-box.js, openBox).
+    d.preparedAt = d.revAt;
     return { draft: { ...d } };
   });
   if (out.display) return out;
-  if (out.draft.held) return heldPreview(out.draft);
-  return preview(out.draft, await findPerson(out.draft.to));
+  // Will this send be confirmed in a box the host shows (index.js says)?
+  const boxy = Boolean(ctx && ctx.box) && !isAgentIdentity();
+  if (out.draft.held) return heldPreview(out.draft, { boxy });
+  return preview(out.draft, await findPerson(out.draft.to), { boxy });
 }
 
 function stampRev(d) {
@@ -506,14 +508,14 @@ function revPreparedAt(d) {
   return d.edited ? Date.now() : (d.createdAt || Date.now());
 }
 
-function heldPreview(d) {
+function heldPreview(d, { boxy = false } = {}) {
   const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
   const message = compose(d);
   const rev = revOf(d);
   return {
     display: `**To:** @${d.to} (not on /vibe yet)\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n${noteLine(message)}\n`
       + `@${d.to} is not on /vibe yet. If you keep it, this exact message is held for the GitHub account ${d.to} for ${HELD_DAYS} days and arrives as your first message when they sign in to /vibe with that account. You get a link to pass on to them.\n\n`
-      + `Keep for @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_${boxNote(d)}`,
+      + `Keep for @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_${boxNote(d, boxy)}`,
     data: {
       draft: { id: d.id, to: d.to, body: d.body, message, refs: d.refs || [], status: d.status, rev, held: true, for_github: d.to },
       actions: [{ label: `Keep for @${d.to}`, tool: 'vibe_send', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_prepare', args: { id: d.id, message: '<new body text — links are kept separately>' } }, { label: 'Cancel', tool: 'vibe_discard', args: { id: d.id } }],
@@ -580,12 +582,17 @@ const sendDefinition = {
   },
 };
 /**
- * The MCP tool: an agent's call. Where the host can show a box (index.js
- * passes `box` when the client declared elicitation), the person confirms
- * there; otherwise it sends only a rev the person has had a turn to see.
- * `box` comes from the server, never from the call's arguments.
+ * The MCP tool: an agent's call. It sends only a rev the person has had a turn
+ * to see (turns.js) and, where the host can show a box, that the person also
+ * accepted in a box /vibe opened (confirm-box.js). `ctx` comes from the
+ * server (index.js), never from the call's arguments:
+ *   box     { mode: 'request', protocolVersion, request(params, {signal}) }
+ *           on a 2025-* connection, { mode: 'input_required' } on a
+ *           stateless (2026-07-28) request; null when no box can be shown
+ *   retry   { inputResponses, requestState } on a stateless retry
+ *   signal  aborted when the client cancels this call
  */
-async function sendHandler(args, ctx = {}) { return send(args, { byPerson: false, box: (ctx && ctx.box) || null }); }
+async function sendHandler(args, ctx = {}) { return send(args, { byPerson: false, ctx: ctx || {} }); }
 /**
  * The person's own Send from a surface they act in directly (draft-cli: Buddy,
  * or a terminal command they type). Their act IS the turn, so the turn check
@@ -641,16 +648,21 @@ function claimDraft(d, rev) {
 }
 
 // ── the Send box (confirm-box.js) ─────────────────────────────────────────────
-// Tool results on this path are short and plain: they name the recipient and
-// never repeat the box, its answer, or the rev.
+// On top of the turn check, never instead of it: a rev goes only after the
+// person typed after its last showing AND accepted it in a box /vibe opened.
+// One box per draft per showing: once a box has been opened for a draft,
+// another needs the draft shown again with vibe_prepare and a person's turn
+// after that (the turn check). Tool results on this path are short and plain:
+// they name the recipient and never repeat the box, its answer, or the rev;
+// every answer but Accept reads the same.
 
 const sha256 = (t) => crypto.createHash('sha256').update(String(t), 'utf8').digest('hex');
-const BOX_DECLINED = (to) => `Not sent: they chose not to send this to @${to}. Do not offer it again unless they ask.`;
-const BOX_DECLINED_BEFORE = (to) => `Not sent: they already chose not to send this to @${to}. If they ask for it again, show it to them with vibe_prepare first.`;
-const BOX_UNANSWERED = (to) => `Not sent: the confirmation box for @${to} was not answered. It is still a draft.`;
+const BOX_NOT_ACCEPTED = (to) => `Not sent. It is still a draft for @${to}. Do not send it again unless they ask.`;
 const BOX_BUSY = 'Not sent: another /vibe confirmation box is open. Wait until it is answered.';
 const BOX_CHANGED = (to) => `Not sent: the draft to @${to} changed while the confirmation box was open. Show it again with vibe_prepare.`;
 const BOX_HOOK = (file) => `Not sent: a hook on this machine is set to answer /vibe's confirmation box (${file}). Remove it to send.`;
+const BOX_ACCOUNT = 'Not sent: the /vibe account signed in here changed while the confirmation box was open.';
+
 /** The Send box's message for a draft as it stands (confirm-box.js). */
 function boxMessageFor(d) {
   return require('../confirm-box').message({ to: d.to, held: Boolean(d.held), retry: d.status === 'unknown', reply: Boolean(d.replyTo), text: compose(d).trim() });
@@ -661,18 +673,28 @@ function boxMessageFor(d) {
  * lines, so the full text is the preview above.
  */
 const BOX_PARTIAL = 'The confirmation box will show the first lines of this; the full text is above.';
-function boxNote(d) {
-  try {
-    const confirmBox = require('../confirm-box');
-    if (!confirmBox.available() || isAgentIdentity()) return '';
-    return confirmBox.fits(boxMessageFor(d)) ? '' : `\n${BOX_PARTIAL}`;
-  } catch { return ''; }
+function boxNote(d, boxy) {
+  if (!boxy) return '';
+  try { return require('../confirm-box').fits(compose(d).trim()) ? '' : `\n${BOX_PARTIAL}`; } catch { return ''; }
 }
 
-async function sendWithBox(id, rev, me, box) {
+const boxRefusal = (display, reason) => ({ display, data: { sent: false, definite: true, reason, turn_check: 'box' } });
+
+/** The hook scan, unless the lab's own hook is allowed (both conditions, confirm-box.js). */
+function answeringHookFile() {
+  const confirmBox = require('../confirm-box');
+  return confirmBox.labAllowsHook() ? null : confirmBox.answeringHook();
+}
+
+/**
+ * Open a box for this draft, under the lock: every check a send makes, the
+ * turn check, one box per showing, one box at a time. Marks the draft's box
+ * open (a random nonce, the rev and the sha of the exact text, the account).
+ */
+function openBox(id, rev, me) {
   const confirmBox = require('../confirm-box');
   const { firstHidden } = require('../showable');
-  const first = transact(drafts => {
+  return transact(drafts => {
     const d = drafts.find(x => x.id === id);
     if (!d) return { display: `No draft ${id} — nothing sent. Open it with vibe_prepare first.` };
     const no = cannotSend(d, rev, me);
@@ -680,48 +702,125 @@ async function sendWithBox(id, rev, me, box) {
     const message = compose(d).trim();
     const hidden = firstHidden(message);
     if (hidden) return { display: storedHidden(d.id, hidden) };
-    // Declined in a box: not offered in another until it is shown again.
-    if (d.declinedRev === rev) return { display: BOX_DECLINED_BEFORE(d.to) };
-    return { boxed: { id: d.id, to: d.to, text: boxMessageFor(d), message, held: Boolean(d.held), sha: sha256(message) } };
+    const turn = turnCheck(d, false);
+    if (turn.check === 'needs_turn') {
+      const reshown = Boolean(d.reshown);
+      stampRev(d);
+      return { unseen: { ...d, reshown }, why: turn.why || null };
+    }
+    // A box was opened for this draft since vibe_prepare last showed it.
+    if (Number.isFinite(d.boxAt) && !(Number.isFinite(d.preparedAt) && d.preparedAt > d.boxAt)) return { refused: boxRefusal(BOX_NOT_ACCEPTED(d.to), 'box_not_accepted') };
+    const now = Date.now();
+    const live = (x) => x.box && Number.isFinite(x.box.at) && now - x.box.at < confirmBox.TIMEOUT_MS + 5000;
+    if (confirmBox.isOpen() || drafts.some(live)) return { refused: boxRefusal(BOX_BUSY, 'box_busy') };
+    const nonce = crypto.randomBytes(16).toString('hex');
+    d.boxAt = now;
+    d.box = { nonce, at: now, rev, sha: sha256(message), me };
+    return { boxed: { id: d.id, to: d.to, nonce, text: boxMessageFor(d), turn } };
   });
-  if (first.display) return { display: first.display, data: { sent: false, definite: true } };
-  const b = first.boxed;
-  const refuse = (display, reason) => ({ display, data: { sent: false, definite: true, reason, turn_check: 'box' } });
-
-  // A hook that could answer the box would answer it without the person.
-  if (!confirmBox.labAllowsHook()) {
-    const file = confirmBox.answeringHook();
-    if (file) return refuse(BOX_HOOK(file), 'box_hook');
-  }
-  if (confirmBox.isOpen()) return refuse(BOX_BUSY, 'box_busy');
-
-  const answer = await confirmBox.ask(box, b.text, box.timeoutMs ? { timeoutMs: box.timeoutMs } : {});
-  if (answer === 'busy') return refuse(BOX_BUSY, 'box_busy');
-
-  if (answer === 'decline') {
-    transact(drafts => {
-      const d = drafts.find(x => x.id === b.id);
-      if (d && revOf(d) === rev) { d.declinedRev = rev; d.declinedAt = Date.now(); }
-    });
-    return refuse(BOX_DECLINED(b.to), 'declined');
-  }
-  if (answer !== 'accept') return refuse(BOX_UNANSWERED(b.to), 'box_unanswered');
-
-  // Accepted: send exactly the text that was in the box, or nothing.
-  const claim = transact(drafts => {
-    const d = drafts.find(x => x.id === b.id);
-    if (!d) return { display: `No draft ${b.id} — nothing sent. Open it with vibe_prepare first.` };
-    const message = compose(d).trim();
-    if (revOf(d) !== rev || message !== b.message || sha256(message) !== b.sha || Boolean(d.held) !== b.held) return { display: BOX_CHANGED(b.to), reason: 'changed_while_open' };
-    const no = cannotSend(d, rev, me);
-    if (no) return { display: no };
-    return { snapshot: claimDraft(d, rev) };
-  });
-  if (claim.display) return refuse(claim.display, claim.reason || 'not_sendable');
-  return deliverClaimed(claim.snapshot, me, { check: 'box' });
 }
 
-async function send(args, { byPerson, box = null }) {
+/**
+ * The person's answer to the box, under the lock. The box is closed whatever
+ * the answer. Only an Accept of the box still open for this draft, within the
+ * timeout, by the same account, for the same rev and exact text, with the call
+ * not cancelled, claims the draft for delivery.
+ */
+function closeBox(id, nonce, answer, { signal = null, rev = null } = {}) {
+  const confirmBox = require('../confirm-box');
+  return transact(drafts => {
+    const d = drafts.find(x => x.id === id);
+    if (!d) return { display: `No draft ${id} — nothing sent. Open it with vibe_prepare first.` };
+    const box = d.box;
+    if (!box || typeof nonce !== 'string' || box.nonce !== nonce) return { refused: boxRefusal(BOX_NOT_ACCEPTED(d.to), 'box_not_accepted') };
+    delete d.box;
+    d.boxAnsweredAt = Date.now();
+    if (answer !== 'accept' || (signal && signal.aborted) || Date.now() - box.at > confirmBox.TIMEOUT_MS) {
+      return { refused: boxRefusal(BOX_NOT_ACCEPTED(d.to), 'box_not_accepted') };
+    }
+    const me = config.getHandle();
+    if (me !== box.me) return { refused: boxRefusal(BOX_ACCOUNT, 'account_changed') };
+    const message = compose(d).trim();
+    if (revOf(d) !== box.rev || (rev !== null && rev !== box.rev) || sha256(message) !== box.sha || (Number.isFinite(d.preparedAt) && d.preparedAt > box.at)) {
+      return { refused: boxRefusal(BOX_CHANGED(d.to), 'changed_while_open') };
+    }
+    const no = cannotSend(d, box.rev, me);
+    if (no) return { display: no };
+    return { snapshot: claimDraft(d, box.rev), me };
+  });
+}
+
+async function afterClose(closed, turn) {
+  if (closed.display) return { display: closed.display, data: { sent: false, definite: true } };
+  if (closed.refused) return closed.refused;
+  return deliverClaimed(closed.snapshot, closed.me, { check: 'box', ...(turn && turn.check ? { turn: turn.check } : {}) });
+}
+
+/** A 2025-* connection: the server asks the client during this call and waits. */
+async function sendWithBox(id, rev, me, box, { signal = null } = {}) {
+  const confirmBox = require('../confirm-box');
+  const hook = answeringHookFile();
+  if (hook) return boxRefusal(BOX_HOOK(hook), 'box_hook');
+  const opened = openBox(id, rev, me);
+  if (opened.display) return { display: opened.display, data: { sent: false, definite: true } };
+  if (opened.unseen) return unseenRefusal(opened.unseen, opened.why, { boxy: true });
+  if (opened.refused) return opened.refused;
+  const b = opened.boxed;
+  const answer = await confirmBox.ask(box, b.text, { ...(box.timeoutMs ? { timeoutMs: box.timeoutMs } : {}), signal });
+  return afterClose(closeBox(b.id, b.nonce, answer, { signal, rev }), b.turn);
+}
+
+/** requestState for a stateless retry: which draft, and which box. Opaque to the client. */
+const packState = (id, nonce) => Buffer.from(JSON.stringify({ v: 1, id, n: nonce }), 'utf8').toString('base64url');
+function unpackState(s) {
+  try {
+    const o = JSON.parse(Buffer.from(String(s), 'base64url').toString('utf8'));
+    return o && o.v === 1 && typeof o.id === 'string' && typeof o.n === 'string' ? o : null;
+  } catch { return null; }
+}
+
+/**
+ * A stateless (2026-07-28) request: the first call opens the box and returns
+ * it as an input request; the client shows it and retries the call with the
+ * answer (inputResponses) and the echoed requestState. requestState is
+ * attacker-controlled input: it only names a box, which must be the one still
+ * open on disk for that draft (a random nonce), and is closed on first use.
+ */
+async function sendStateless(id, rev, me, ctx) {
+  const confirmBox = require('../confirm-box');
+  const retry = ctx.retry && typeof ctx.retry.requestState === 'string' ? ctx.retry : null;
+  if (retry) {
+    const state = unpackState(retry.requestState);
+    const responses = retry.inputResponses && typeof retry.inputResponses === 'object' ? retry.inputResponses : {};
+    const r = responses[confirmBox.INPUT_KEY];
+    let answer = r && typeof r === 'object' && r.action === 'accept' ? 'accept' : 'none';
+    const hook = answer === 'accept' ? answeringHookFile() : null;
+    if (hook) answer = 'none';
+    if (!state || state.id !== id) {
+      const to = loadDrafts().find(x => x.id === id);
+      return boxRefusal(BOX_NOT_ACCEPTED(to ? to.to : 'them'), 'box_not_accepted');
+    }
+    const closed = closeBox(id, state.n, answer, { signal: ctx.signal || null, rev });
+    if (hook) return boxRefusal(BOX_HOOK(hook), 'box_hook');
+    return afterClose(closed, null);
+  }
+  const hook = answeringHookFile();
+  if (hook) return boxRefusal(BOX_HOOK(hook), 'box_hook');
+  const opened = openBox(id, rev, me);
+  if (opened.display) return { display: opened.display, data: { sent: false, definite: true } };
+  if (opened.unseen) return unseenRefusal(opened.unseen, opened.why, { boxy: true });
+  if (opened.refused) return opened.refused;
+  const b = opened.boxed;
+  return {
+    inputRequired: {
+      inputRequests: { [confirmBox.INPUT_KEY]: { method: 'elicitation/create', params: confirmBox.request(b.text, '2026-07-28') } },
+      requestState: packState(b.id, b.nonce),
+    },
+  };
+}
+
+async function send(args, { byPerson, ctx = {} }) {
+  const box = ctx && ctx.box ? ctx.box : null;
   const initCheck = requireInit();
   if (initCheck) return initCheck;
   const id = args && args.id;
@@ -738,15 +837,19 @@ async function send(args, { byPerson, box = null }) {
   if (!id) {
     const asked = args && typeof args.handle === 'string' && args.handle.trim() && typeof args.message === 'string' && args.message.trim();
     if (!asked) return { display: 'Nothing sent. vibe_send sends only a draft the person approved: pass its id and rev. To write to someone, open a draft with vibe_prepare (handle + message).', data: { sent: false, definite: true } };
-    const p = await draftHandler({ handle: args.handle, message: args.message, reply_to: args.reply_to });
+    const p = await draftHandler({ handle: args.handle, message: args.message, reply_to: args.reply_to }, ctx);
     const lead = 'Nothing sent. vibe_send sends only a draft the person approved, so this opened one instead. Show the person this preview and send it only if they choose Send.';
     return { ...p, display: `${lead}\n\n${p.display}`, data: { ...(p.data || {}), sent: false, definite: true } };
   }
 
-  // The host shows a box the person answers: that is their choice, so the
-  // turn check does not apply. An agent signed in as itself has no person to
-  // ask and keeps its own rule (turnCheck: agent_identity).
-  if (!byPerson && box && !isAgentIdentity()) return sendWithBox(id, rev, me, box);
+  // Where the host can show a box, the person also accepts in one, on top of
+  // the turn check. An agent really signed in as itself has no person to ask
+  // and keeps its own rule (turnCheck: agent_identity).
+  if (!byPerson && !isAgentIdentity()) {
+    if (ctx && ctx.retry && typeof ctx.retry.requestState === 'string') return sendStateless(id, rev, me, ctx);
+    if (box && box.mode === 'input_required') return sendStateless(id, rev, me, ctx);
+    if (box && typeof box.request === 'function') return sendWithBox(id, rev, me, box, { signal: ctx.signal || null });
+  }
 
   // 1. Claim under the lock: nothing leaves the machine until this draft is
   //    marked 'sending' with a key derived from the exact text — and the
@@ -834,8 +937,9 @@ function turnCheck(d, byPerson) {
   if (isAgentIdentity()) return { check: 'agent_identity' };
   return require('../turns').judge(revPreparedAt(d));
 }
+/** Signed in as an agent with its own credential, and that agent is who sends (agent-auth.js). Not just VIBE_AGENT_HANDLE. */
 function isAgentIdentity() {
-  try { return Boolean(require('../agent-auth').isAgent()); } catch { return false; }
+  try { return Boolean(require('../agent-auth').signedInAsAgent()); } catch { return false; }
 }
 function withTurn(result, turn) {
   if (!result || !turn) return result;
@@ -846,9 +950,9 @@ function withTurn(result, turn) {
  * earlier session). Normal, not an error: the preview is shown again, and the
  * next Send after their answer goes. Nothing reached the network on this path.
  */
-async function unseenRefusal(d, why = null) {
+async function unseenRefusal(d, why = null, { boxy = false } = {}) {
   const changed = typeof d.firstRev === 'string' && d.firstRev !== revOf(d);
-  const p = d.held ? heldPreview(d) : preview(d, await findPerson(d.to));
+  const p = d.held ? heldPreview(d, { boxy }) : preview(d, await findPerson(d.to), { boxy });
   let lead; let reason;
   if (why === 'shown_in_earlier_session') {
     lead = 'Not sent yet: this draft was last shown in an earlier session, so the person has not seen it in this one. It can go after their next message.';

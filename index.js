@@ -47,6 +47,8 @@ const MODERN_PROTOCOL_VERSION = '2026-07-28';
 const LEGACY_PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const META_PROTOCOL_VERSION = 'io.modelcontextprotocol/protocolVersion';
 const META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo';
+// Modern era: the client declares its capabilities on every request.
+const META_CLIENT_CAPABILITIES = 'io.modelcontextprotocol/clientCapabilities';
 const SERVER_INFO = {
   name: 'vibe',
   version: pkg.version,
@@ -189,7 +191,7 @@ class VibeMCPServer {
       const onAbort = () => {
         if (!this.pending.has(id)) return;
         done();
-        this.notify('notifications/cancelled', { requestId: id, reason: 'timed out' });
+        this.notify('notifications/cancelled', { requestId: id, reason: 'withdrawn' });
         reject(new Error('cancelled'));
       };
       this.pending.set(id, {
@@ -204,6 +206,22 @@ class VibeMCPServer {
         process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
       } catch (e) { done(); reject(e); }
     });
+  }
+
+  /** Calls in flight, by request id, so the client can cancel one. */
+  trackCall(id) {
+    if (!this.calls) this.calls = new Map();
+    const ctl = new AbortController();
+    this.calls.set(JSON.stringify(id), ctl);
+    return ctl;
+  }
+  untrackCall(id, ctl) {
+    const k = JSON.stringify(id);
+    if (this.calls && this.calls.get(k) === ctl) this.calls.delete(k);
+  }
+  cancelCall(requestId) {
+    const ctl = this.calls && this.calls.get(JSON.stringify(requestId));
+    if (ctl) ctl.abort();
   }
 
   /** A response to one of this server's requests. True if it was one. */
@@ -231,7 +249,7 @@ class VibeMCPServer {
     try { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n'); } catch {}
   }
 
-  async handleRequest(request) {
+  async handleRequest(request, extra = {}) {
     const { params, id } = request;
     // Modern era: a request carrying a _meta protocol version is served
     // statelessly. An unsupported version gets -32022 whose `supported` list
@@ -244,7 +262,7 @@ class VibeMCPServer {
         error: { code: -32022, message: 'Unsupported protocol version', data: { supported: [MODERN_PROTOCOL_VERSION], requested: requestedVersion } },
       };
     }
-    const response = await this.dispatch(request);
+    const response = await this.dispatch(request, extra);
     if (isModern && response?.result) {
       response.result.resultType = response.result.resultType || 'complete';
       response.result._meta = { [META_SERVER_INFO]: SERVER_INFO, ...(response.result._meta || {}) };
@@ -252,7 +270,7 @@ class VibeMCPServer {
     return response;
   }
 
-  async dispatch(request) {
+  async dispatch(request, { signal = null } = {}) {
     const { method, params, id } = request;
     const ok = (result) => ({ jsonrpc: '2.0', id, result });
     const fail = (code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -342,14 +360,32 @@ class VibeMCPServer {
         try {
           const wasAuthed = isAuthed();
           presence.noteActivity(); // a tool call means the person is here: polls snap back to fast
-          // vibe_send asks the person in a box when the client can show one.
-          // Only on a connection opened with initialize: a stateless (modern)
-          // request has no session to send a request back on.
+          // The Send box (confirm-box.js), when the client can show one:
+          //   2025-* (initialize)   the server sends elicitation/create during
+          //                         the call (form elicitation declared at
+          //                         initialize);
+          //   2026-07-28            the call returns resultType
+          //                         "input_required" and the client retries
+          //                         with inputResponses + requestState (form
+          //                         elicitation declared in THIS request's _meta).
           const isModern = params?._meta?.[META_PROTOCOL_VERSION] !== undefined;
-          const result = params.name === 'vibe_send'
-            ? await tool.handler(params.arguments || {}, { box: !isModern && confirmBox.available() ? this.box() : null })
-            : await tool.handler(params.arguments || {});
+          let result;
+          if (params.name === 'vibe_send' || params.name === 'vibe_prepare') {
+            let box = null;
+            if (isModern) { if (confirmBox.declaresForm(params?._meta?.[META_CLIENT_CAPABILITIES])) box = { mode: 'input_required' }; }
+            else if (confirmBox.available()) box = this.box();
+            const retry = isModern && (params.requestState !== undefined || params.inputResponses !== undefined)
+              ? { requestState: params.requestState, inputResponses: params.inputResponses } : null;
+            result = await tool.handler(params.arguments || {}, { box, retry, signal });
+          } else {
+            result = await tool.handler(params.arguments || {});
+          }
           if (!wasAuthed && isAuthed()) this.notify('notifications/tools/list_changed');
+          if (result && result.inputRequired) {
+            // Only a stateless request may be answered this way.
+            if (!isModern) return fail(-32000, 'internal: input required on a connection without it');
+            return ok({ resultType: 'input_required', ...result.inputRequired });
+          }
           const callResult = { content: [{ type: 'text', text: result.display || JSON.stringify(result, null, 2) }] };
           if (result.structured) callResult.structuredContent = result.structured;
           return ok(callResult);
@@ -388,11 +424,20 @@ class VibeMCPServer {
         // The client's answer to a request of ours (the Send box) is never
         // queued behind the tool call that is waiting for it.
         if (this.takeResponse(msg)) continue;
+        // A notification gets no response. notifications/cancelled withdraws
+        // a call in flight: its box is withdrawn and nothing is sent.
+        if (msg && typeof msg === 'object' && (msg.id === undefined || msg.id === null)) {
+          if (msg.method === 'notifications/cancelled') this.cancelCall(msg.params && msg.params.requestId);
+          continue;
+        }
         // A tool call may wait on the person (the Send box): it is not
         // awaited here, so nothing else on the connection waits behind it.
-        const handled = this.handleRequest(msg).then((response) => {
-          if (response) process.stdout.write(JSON.stringify(response) + '\n');
-        }).catch((e) => { process.stderr.write(`Error: ${e.message}\n`); });
+        const ctl = msg.method === 'tools/call' ? this.trackCall(msg.id) : null;
+        const handled = this.handleRequest(msg, { signal: ctl ? ctl.signal : null }).then((response) => {
+          // A cancelled call is not answered (the client has stopped waiting).
+          if (response && !(ctl && ctl.signal.aborted)) process.stdout.write(JSON.stringify(response) + '\n');
+        }).catch((e) => { process.stderr.write(`Error: ${e.message}\n`); })
+          .finally(() => { if (ctl) this.untrackCall(msg.id, ctl); });
         if (msg.method !== 'tools/call') await handled;
       }
     });
