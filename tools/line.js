@@ -24,7 +24,7 @@ const line = require('../line');
 const arrival = require('../arrival');
 const { deliver } = require('./deliver');
 const { requireInit } = require('./_shared');
-const { neutralize, inertField, MSG_OPEN, MSG_CLOSE } = require('../incoming');
+const { neutralize, inertField, inertQuoted, MSG_OPEN, MSG_CLOSE } = require('../incoming');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const refuse = (display) => ({ display, data: { sent: false } });
@@ -95,7 +95,7 @@ async function askHandler(args = {}) {
     } catch { /* keep waiting; a failed read is not "no answer" */ }
   }
 
-  const askedLine = `Asked @${to} over the open line: "${inertField(question, 200)}"`;
+  const askedLine = `Asked @${to} over the open line: "${inertQuoted(question, 200)}"`;
   if (!answer) {
     return {
       display: `${askedLine}\nNo answer yet. It will reach this session when it comes; carry on, and tell the person the question is out.`,
@@ -183,7 +183,7 @@ async function answerHandler(args = {}) {
   // The person is shown the answer by the hook, not by the agent's memory.
   arrival.told({ me, to, said: message, id: sent.data.message_id });
   return {
-    display: `Answered @${to} over the open line. Now tell the person here, in one line: @${to} asked "${inertField(line.stripMark(row.text || ''), 120)}" and you told them "${inertField(message, 160)}". Then carry on with their task.`,
+    display: `Answered @${to} over the open line. Now tell the person here, in one line: @${to} asked "${inertQuoted(line.stripMark(row.text || ''), 120)}" and you told them "${inertQuoted(message, 160)}". Then carry on with their task.`,
     data: { sent: true, message_id: sent.data.message_id, to },
   };
 }

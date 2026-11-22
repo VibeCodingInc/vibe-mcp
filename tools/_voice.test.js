@@ -4,7 +4,7 @@
 //   voiceCharter   one sentence on how the agent speaks about /vibe matters
 //   noticingLine   an offer leads with one true line on why this person
 //   arrivalHeader  "Note from @x (2m ago), waiting at your pause:" (the person's line)
-//   emptyStates    "Nothing waiting." / "Just you in here right now; ..." only where the state was read
+//   emptyStates    "Nothing waiting." / "Nobody else shows as here right now; ..." only where the state was read
 //   itLanded       a one-line note back, as a draft, once per reply
 // None of them changes how a send is checked (tools/drafts.js send path,
 // confirm-box.js, turns.js).
@@ -237,14 +237,15 @@ function withStore(stubs, fn) {
 const nowMs = Date.now();
 const hereU = (h) => ({ handle: h, status: 'active', lastSeen: nowMs - MIN, heartbeat: nowMs - MIN, one_liner: 'x' });
 
-test('vibe_people: "Just you in here" only when presence was read and nobody else is in a session', withStore({
+test('vibe_people: "Nobody else shows as here" only when presence was read and nobody else is in a session', withStore({
   getActiveUsersResult: async () => ({ ok: true, users: [] }),
   getInboxResult: async () => ({ ok: true, threads: [] }),
 }, async () => {
   const people = require('./people');
   const r = await people.handler();
   assert.ok(r.display.startsWith(seen(people.JUST_YOU)), r.display);
-  assert.equal(people.JUST_YOU, "Just you in here right now; notes wait till they're back.");
+  assert.equal(people.JUST_YOU, "Nobody else shows as here right now; notes wait till they're back.");
+  assert.ok(!/just you/i.test(people.JUST_YOU), 'an invisible person may be in a session');
   await withOff('emptyStates', async () => {
     assert.ok((await people.handler()).display.startsWith('nobody else is in a session right now'));
   });
@@ -269,7 +270,7 @@ test('vibe_start: "Nothing waiting." only when the conversations were read and n
   assert.ok(r.display.includes(`\n\n${seen(start.NOTHING_WAITING)}\n${require('./people').JUST_YOU}`), r.display);
   await withOff('emptyStates', async () => {
     const off = await start.handler({});
-    assert.ok(!off.display.includes('Nothing waiting.') && !off.display.includes('Just you'));
+    assert.ok(!off.display.includes('Nothing waiting.') && !off.display.includes(require('./people').JUST_YOU));
   });
   // Unread: something is waiting.
   store.getInboxResult = async () => ({ ok: true, threads: [{ handle: 'mira', unread: 1, lastFrom: 'mira', lastTimestamp: nowMs - H, lastMessageId: 'm2' }] });
@@ -282,11 +283,11 @@ test('vibe_start: "Nothing waiting." only when the conversations were read and n
   store.getActiveUsersResult = async () => ({ ok: false, users: [] });
   const failed = await start.handler({});
   assert.ok(failed.display.includes("couldn't read your conversations") && failed.display.includes("couldn't see who's here"));
-  assert.ok(!failed.display.includes('Nothing waiting.') && !failed.display.includes('Just you'));
+  assert.ok(!failed.display.includes('Nothing waiting.') && !failed.display.includes(require('./people').JUST_YOU));
   // Someone else is here: not "just you".
   store.getInboxResult = async () => ({ ok: true, threads: [] });
   store.getActiveUsersResult = async () => ({ ok: true, users: [hereU('zed')] });
-  assert.ok(!(await start.handler({})).display.includes('Just you'));
+  assert.ok(!(await start.handler({})).display.includes(require('./people').JUST_YOU));
 }));
 
 test('session start: the wry line only when the inbox was read empty, at most once a day, and never beside something waiting', () => {

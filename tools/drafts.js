@@ -47,7 +47,7 @@ const config = require('../config');
 const store = require('../store');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
 const { canonicalHandle, isCanonicalHandle, storedRecipientHandle } = require('../protocol/handle');
-const { inertField } = require('../incoming');
+const { inertField, inertQuoted } = require('../incoming');
 const { deliver } = require('./deliver');
 const invite = require('../invite');
 
@@ -368,34 +368,54 @@ function noteLine(message) {
 
 /**
  * How the message will reach them (notice.js quietArrival), as the code does
- * it. In their session an arrival is shown by the arrival hook on their next
- * prompt or after a tool call (hooks/arrival-hook.cjs: UserPromptSubmit,
- * PostToolUse), or, where they launched with channels, pushed into an idle
- * open session (index.js); never over what they are typing. Not shown as in a
- * session: it waits, and their next session's SessionStart hook says it is
- * there (an invisible person's open session shows it at its next pause).
- * Only what happens in a session: other /vibe apps they may run are not this
- * package's to speak for. Empty when the change is off.
+ * it, from what this machine knows. The recipient's session shows a message
+ * mid-work (hooks/arrival-hook.cjs at a prompt or tool step; a channel push
+ * into an idle session) only from someone THEY know: someone they have
+ * written to, invited, or have an open line with (presence.js knows,
+ * knownByInvite). Anything else waits, unread, and their next session says at
+ * most that someone they have not written to is waiting, without who or what
+ * (session-start-hook.cjs). Muted, quiet, or no arrival hook: it just waits.
+ * So "at their next pause" is said only when this person's records show the
+ * recipient has written to them (a message of theirs in the conversation, or
+ * an open line), and even then as "can". Every other wording is true in all
+ * of those cases. Never the pause form beside "you have not written to @x".
+ *
+ *   reach: 'known'    an open line, or a message from them in the conversation
+ *          'first'    the person here has no record of them at all (the Check line)
+ *          'unknown'  anything else, including a conversation that could not be read
+ * Only what happens in a session: other /vibe apps are not this package's to
+ * speak for. Empty when the change is off.
  */
-function arrivalLine(to, person) {
+function localReach(to) {
+  try {
+    if (require('../line').isOpen(to)) return 'known';
+    if (!(require('../reach').isKnown(to) || getReturnBinding(to))) return 'first';
+  } catch {}
+  return 'unknown';
+}
+const REACH_FIRST = 'it waits for them, unread, until they open it. Unless they have written to you or invited you, their session does not show it mid-work, and a new session tells them at most that someone they have not written to is waiting, not who or what.';
+const REACH_UNKNOWN = 'it waits for them, unread, until they open it; if they have written to you before, their session can show it sooner, at a pause, never over what they are typing.';
+function arrivalLine(to, person, reach = localReach(to)) {
   if (!require('../notice').on('quietArrival')) return '';
-  if (person && isHereNow(person)) return `**How it reaches them:** @${to} is in a session now; it shows there at their next pause (a prompt or a tool step), never over what they are typing.\n`;
+  if (reach === 'first') return `**How it reaches them:** ${REACH_FIRST}\n`;
+  if (reach !== 'known') return `**How it reaches them:** ${REACH_UNKNOWN}\n`;
+  if (person && isHereNow(person)) return `**How it reaches them:** @${to} is in a session now and has written to you or shares an open line with you, so it can show there at their next pause (a prompt or a tool step), never over what they are typing.\n`;
   // Not shown as here (gone, away, invisible, or presence unread): it waits.
   // "Does not show as" because an invisible person may be in a session.
-  return `**How it reaches them:** ${person ? `@${to} does not show as in a session now; it` : `it`} waits for them, and they are told when they next open a session or pause in one, never over what they are typing.\n`;
+  return `**How it reaches them:** ${person ? `@${to} does not show as in a session now; it` : 'it'} waits for them, unread, and their next session or pause can show it, never over what they are typing.\n`;
 }
 
 /** What a note back is, in the preview (notice.js itLanded). */
 const LANDED_LABEL = 'A note back to say their answer was used.';
 
-function preview(d, person, { boxy = false, note = '', before = '' } = {}) {
+function preview(d, person, { boxy = false, note = '', before = '', reach } = {}) {
   const where = person ? (isHereNow(person) ? 'here now' : (person.status === 'away' ? 'away' : 'not around — it waits for their next turn')) : 'presence unknown — it waits for their next turn';
   const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
   const message = compose(d);
   const rev = revOf(d);
   const answers = d.replyTo ? `\n**Answers:** #${inertField(d.replyTo, 60)}` : '';
   const landed = d.kind === 'landed' ? `${LANDED_LABEL}\n` : '';
-  const head = `**To:** @${d.to} (${where})\n${landed}**Message (exact):**\n${message}\n**Attachments:** ${att}${answers}\n${noteLine(message)}${arrivalLine(d.to, person)}${note}\n`;
+  const head = `**To:** @${d.to} (${where})\n${landed}**Message (exact):**\n${message}\n**Attachments:** ${att}${answers}\n${noteLine(message)}${arrivalLine(d.to, person, reach || localReach(d.to))}${note}\n`;
   if (d.status === 'unknown') {
     // The earlier Send did not confirm: it may already have reached them.
     // Only the two honest actions exist (codex P2).
@@ -605,14 +625,18 @@ async function draftHandler(args, ctx = {}) {
   const boxy = Boolean(ctx && ctx.box) && !isAgentIdentity();
   const fresh = !wantId;
   const note = fresh ? recipientNote(out.draft.to, Boolean(out.draft.held)) : '';
-  return withAnswerFirst(await laidOut(), { fresh, asked: Boolean(args && args.asked === true) });
+  const asked = askedArg(args && args.asked);
+  return withAnswerFirst(await laidOut(), { fresh, asked });
   async function laidOut() {
   if (out.draft.held) return heldPreview(out.draft, { boxy, note });
-  const [person, already] = await Promise.all([findPerson(out.draft.to), fresh ? alreadySaid(me, out.draft.to) : '']);
-  const offered = fresh ? earlierOffer(out.draft) : null;
+  // The conversation is read for a new draft only; an edit keeps what that read found.
+  const [person, look] = await Promise.all([findPerson(out.draft.to), fresh ? lookThread(me, out.draft.to) : { thread: null, reach: REACH_SEEN.get(out.draft.id) || localReach(out.draft.to) }]);
+  if (fresh) { REACH_SEEN.set(out.draft.id, look.reach); if (REACH_SEEN.size > 200) REACH_SEEN.delete(REACH_SEEN.keys().next().value); }
+  const already = fresh ? alreadySaid(me, look.thread) : '';
+  const offered = fresh && !asked ? earlierOffer(out.draft) : null;
   // Above the choices, so Send / Edit / Cancel and the box line stay last.
   const before = `${already}${offered ? `${offered.text}\n\n` : ''}`;
-  const shown = preview(out.draft, person, { boxy, note, before });
+  const shown = preview(out.draft, person, { boxy, note, before, reach: look.reach });
   if (!before) return shown;
   return { ...shown, data: { ...shown.data, ...(already ? { already_said: true } : {}), ...(offered ? { earlier_offer: offered.data } : {}) } };
   }
@@ -628,6 +652,11 @@ async function draftHandler(args, ctx = {}) {
  */
 const UNPROMPTED = 'For you, the agent: you are offering this unprompted. In your reply, FIRST give the person everything their message asked for, in full. THEN show this draft below it. A reply that is only this draft is wrong. Never say something is "above" or "again" unless it is in this same reply.';
 const EDIT_REMINDER = 'For you, the agent: if their message also asked for something else, do that now, in this reply.';
+/** asked is a boolean in the schema; the strings "true" and "false" are read as those booleans. */
+function askedArg(v) {
+  if (v === true || v === 'true') return true;
+  return false;
+}
 function withAnswerFirst(r, { fresh, asked }) {
   if (!r || typeof r.display !== 'string' || !r.data || !r.data.draft) return r;
   if (!require('../notice').on('answerFirst')) return r;
@@ -665,18 +694,35 @@ const ALREADY_SAID_TIMEOUT_MS = 1500;
 const ALREADY_SAID_MAX = 400;
 /** Inert, one line, at most `max` characters, cut at a word boundary with "…" (never mid-word). */
 function clipWords(text, max) {
-  const flat = inertField(text, Number.MAX_SAFE_INTEGER);
+  const flat = inertQuoted(text, Number.MAX_SAFE_INTEGER);
   if (flat.length <= max) return flat;
   const cut = flat.slice(0, max - 1);
   const sp = cut.lastIndexOf(' ');
   return `${(sp > 0 ? cut.slice(0, sp) : cut).replace(/[\s,;:.\u2014-]+$/u, '')}\u2026`;
 }
-async function alreadySaid(me, to) {
+/**
+ * The conversation with them, read once per preview (bounded, no retry) and
+ * only for someone the person here knows (a stranger has no conversation to
+ * read): what "Already said" shows, and whether they have written to the
+ * person here (arrivalLine's reach). Any failure is "unknown" and says nothing.
+ */
+const REACH_SEEN = new Map();   // draft id -> reach found when it was opened (this process)
+async function lookThread(me, to) {
+  const reach = localReach(to);
+  if (reach === 'first') return { thread: null, reach };
+  const n = require('../notice');
+  if (!n.on('threadFirst') || typeof store.getThreadBounded !== 'function') return { thread: null, reach };
   try {
-    if (!require('../notice').on('threadFirst') || typeof store.getThreadBounded !== 'function') return '';
-    if (!(require('../reach').isKnown(to) || require('../line').isOpen(to) || getReturnBinding(to))) return '';
     const thread = await store.getThreadBounded(me, to, { timeoutMs: ALREADY_SAID_TIMEOUT_MS });
-    if (!Array.isArray(thread) || thread.readFailed || thread.length === 0) return '';
+    if (!Array.isArray(thread) || thread.readFailed) return { thread: null, reach };
+    const them = String(to || '').toLowerCase();
+    const wrote = thread.some((m) => m && String(m.from || '').toLowerCase() === them);
+    return { thread, reach: wrote ? 'known' : reach };
+  } catch { return { thread: null, reach }; }
+}
+function alreadySaid(me, thread) {
+  try {
+    if (!require('../notice').on('threadFirst') || !Array.isArray(thread) || thread.length === 0) return '';
     const mine = String(me || '').toLowerCase();
     const { whereFrom } = require('./thread');
     const all = [...thread].filter((m) => m && typeof m.body === 'string').sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
@@ -697,11 +743,11 @@ async function alreadySaid(me, to) {
 
 /**
  * An earlier draft to the same person that was cancelled or left unsent,
- * opened by this server process or from the same project directory in the
+ * opened from the same project directory (always: a draft from other work is
+ * not this offer, review SF-3) in the
  * last EARLIER_OFFER_WINDOW_MS (local draft state only; BRIEF-10: a draft
  * offered again after a decline). For the agent; it changes nothing.
  */
-const PROCESS_STARTED_AT = Date.now();
 /** 'agent': turns are recorded here and none came after the draft was last shown; 'person' otherwise (including where turns are not recorded). */
 function discardOrigin(d) {
   try {
@@ -717,7 +763,7 @@ function earlierOffer(d) {
     if (!require('../notice').on('answerFirst')) return null;
     const prior = loadDrafts().filter((x) => x && x.id !== d.id && x.from === d.from && x.to === d.to && !x.held &&
       Number.isFinite(x.createdAt) && x.createdAt <= d.createdAt &&
-      (x.createdAt >= PROCESS_STARTED_AT || (x.dir && x.dir === d.dir && d.createdAt - x.createdAt < EARLIER_OFFER_WINDOW_MS)) &&
+      x.dir && x.dir === d.dir && d.createdAt - x.createdAt < EARLIER_OFFER_WINDOW_MS &&
       ((x.status === 'cancelled' && !x.unconfirmed) || x.status === 'previewed'))
       .sort((a, b) => b.createdAt - a.createdAt)[0];
     if (!prior) return null;

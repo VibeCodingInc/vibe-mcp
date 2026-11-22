@@ -51,7 +51,8 @@ choice.
 - A message arriving mid-work: `Note from @maya_c (2m ago), waiting at your pause:`
 - Nothing waiting: `Nothing waiting.` At most once a day, at a clean session
   start: `Nothing waiting. Rare moment — enjoy it.`
-- Nobody else in a session at all (only when presence was actually read):
-  `Just you in here right now; notes wait till they're back.`
+- Nobody else shows as in a session (only when presence was actually read; an
+  invisible person may still be in one, so never "just you"):
+  `Nobody else shows as here right now; notes wait till they're back.`
 - A note back when a reply changed the work, as a draft the person chooses to
   send: `That landed: I'm keeping tool_choice on auto and dropping the retry wrapper.`

@@ -38,7 +38,7 @@ const NOTICE = {
   voiceCharter: true,       // 12. one sentence on how the agent speaks about /vibe matters
   noticingLine: true,       // 13. an offer leads with one true line on why this person, from their own words
   arrivalHeader: true,      // 14. the person's arrival line: "Note from @x (2m ago), waiting at your pause:"
-  emptyStates: true,        // 15. "Nothing waiting." / "Just you in here right now; ..." where the state is known
+  emptyStates: true,        // 15. "Nothing waiting." / "Nobody else shows as here right now; ..." where the state is known
   itLanded: true,           // 16. a one-line note back when a reply changed the work here, as a draft, once per reply
 };
 

@@ -13,7 +13,7 @@ const config = require('../config');
 const store = require('../store');
 const { requireInit } = require('./_shared');
 const { canonicalHandle } = require('../protocol/handle');
-const { neutralize, inertField, MSG_OPEN, MSG_CLOSE } = require('../incoming');
+const { neutralize, inertField, inertQuoted, MSG_OPEN, MSG_CLOSE } = require('../incoming');
 
 const definition = {
   name: 'vibe_thread',
@@ -89,7 +89,7 @@ function render(me, them, thread) {
       const rt = newest && newest.reply_to;
       const rtId = rt && typeof rt === 'object' ? (rt.id || rt.message_id) : rt;
       const from = b.project ? ` from ${inertField(b.project, 60)}` : '';
-      const yours = `"${inertField(b.firstLine || '', 80)}"`;
+      const yours = `"${inertQuoted(b.firstLine || '', 80)}"`;
       out += (b.messageId && rtId === b.messageId)
         ? `their reply to what you sent${from} ${store.formatTimeAgo(b.sentAt)}: ${yours}\n\n`
         : `context: you wrote them${from} ${store.formatTimeAgo(b.sentAt)}: ${yours}\n\n`;
@@ -108,7 +108,7 @@ function render(me, them, thread) {
     out += `**${who}** · ${store.formatTimeAgo(m.timestamp)}${m.id ? ` · #${m.id}` : ''}${isMe ? ` · ${whereFrom(m)}` : ''}\n`;
     if (m.reply_to) {
       out += (m.reply_to.from || m.reply_to.text)
-        ? `answering #${m.reply_to.id} @${m.reply_to.from}: "${inertField(m.reply_to.text || '', 48)}"\n`
+        ? `answering #${m.reply_to.id} @${m.reply_to.from}: "${inertQuoted(m.reply_to.text || '', 48)}"\n`
         : 'answering a message that is no longer available\n';
     }
     if (m.body) out += isMe ? `${m.body}\n` : `${MSG_OPEN} >>>\n${neutralize(m.body)}\n<<< ${MSG_CLOSE}\n`;

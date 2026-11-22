@@ -157,7 +157,8 @@ function shownLine(row, now = Date.now()) {
   const h = row && row.header;
   const ok = h && typeof h === 'object' && typeof h.from === 'string' && /^[A-Za-z0-9_.-]{1,40}$/.test(h.from) &&
     typeof h.said === 'string' && h.said.length <= 160 && !CTRL.test(h.said);
-  return ok ? headerLine(h, now) : row && row.line;
+  // The fallback is the server's own line; C1 controls are stripped all the same.
+  return ok ? headerLine(h, now) : (row && typeof row.line === 'string' ? row.line.replace(/[\u0080-\u009f]/g, ' ') : row && row.line);
 }
 
 // ── who wrote this prompt ───────────────────────────────────────────────────

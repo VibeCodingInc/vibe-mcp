@@ -26,7 +26,7 @@ const door = require('../door');
 const line = require('../line');
 const reach = require('../reach');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
-const { inertField } = require('../incoming');
+const { inertField, inertQuoted } = require('../incoming');
 const { pickHere } = require('../session-start-hook.cjs');
 
 const MAX_NAMES = 3;
@@ -100,7 +100,7 @@ async function handler(args) {
   const stuck = inertField(String((args && args.stuck_on) || ''), 120);
   const rows = near.map((p) => {
     const d = doors.get(p.handle) || null;
-    const doorBit = d ? ` · \u{1F6AA} door open${d.name ? `: "${inertField(d.name, door.MAX_NAME)}"` : ''}` : '';
+    const doorBit = d ? ` · \u{1F6AA} door open${d.name ? `: "${inertQuoted(d.name, door.MAX_NAME)}"` : ''}` : '';
     return `@${p.handle} — "${p.says}"${doorBit}`;
   });
   const anyDoor = doors.size > 0;
