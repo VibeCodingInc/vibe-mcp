@@ -50,9 +50,16 @@ function answerFor(typed, key = 'to') {
   return { action: 'decline', content: {} };
 }
 
-/** Who the box is for, from its fixed first line ("Send to @x? …", "Reply to", "Resend to", "Keep for"). */
+/**
+ * Who the box is for, from its fixed first line: "Confirm: send to @x? …"
+ * ("Confirm: reply to", "Confirm: resend to", "Confirm: keep for"), or the
+ * earlier leads ("Send to @x? …", "Reply to", "Resend to", "Keep for"), so old
+ * recordings still parse.
+ */
+const LEAD = /^(?:Confirm: (?:send to|reply to|resend to|keep for)|Send to|Reply to|Resend to|Keep for) @([a-z0-9_-]+)\?/;
+const KEPT = /^(?:Confirm: keep for|Keep for) /;
 function recipientOf(message) {
-  const m = String(message || '').match(/^(?:Send to|Reply to|Resend to|Keep for) @([a-z0-9_-]+)\?/);
+  const m = String(message || '').match(LEAD);
   return m ? m[1] : null;
 }
 
@@ -60,7 +67,7 @@ function recipientOf(message) {
 function serverSchema(message) {
   const to = recipientOf(message);
   if (!to) return null;
-  try { return require('../confirm-box').schemaFor(to, { held: /^Keep for /.test(String(message)) }); } catch { return null; }
+  try { return require('../confirm-box').schemaFor(to, { held: KEPT.test(String(message)) }); } catch { return null; }
 }
 
 /** Would the server send on this answer? Its own rule, on the recipient named on line 1. */
@@ -145,4 +152,4 @@ async function main() {
 
 if (require.main === module) main();
 
-module.exports = { boxMessage, boxSchema, serverSchema, answerFor, recipientOf, wouldSend };
+module.exports = { LEAD, KEPT, boxMessage, boxSchema, serverSchema, answerFor, recipientOf, wouldSend };

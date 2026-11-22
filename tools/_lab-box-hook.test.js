@@ -81,6 +81,19 @@ test('answerFor, recipientOf, wouldSend: the hook passes on what was typed; the 
   assert.equal(recipientOf('Reply to @ben? (3 chars, all shown)'), 'ben');
   assert.equal(recipientOf('Resend to @ben? (3 chars, all shown)'), 'ben');
   assert.equal(recipientOf('> Send to @ben?'), null);
+  // The current leads (notice.js confirmLead); the earlier ones above still parse, for old recordings.
+  assert.equal(recipientOf('Confirm: send to @ben? (3 chars, all shown)\n> hey'), 'ben');
+  assert.equal(recipientOf('Confirm: keep for @newbie-dev? (3 chars, all shown)'), 'newbie-dev');
+  assert.equal(recipientOf('Confirm: reply to @ben? (3 chars, all)'), 'ben');
+  assert.equal(recipientOf('Confirm: resend to @ben? (3 chars, start)'), 'ben');
+  assert.equal(recipientOf('> Confirm: send to @ben?'), null);
+  assert.equal(recipientOf('Confirm: send @ben?'), null);
+  const { serverSchema } = require('../lab/box-hook.cjs');
+  assert.equal(serverSchema('Confirm: keep for @noah? (3 chars, all shown)').properties.to.title, 'Type "noa" to keep it for @noah');
+  assert.equal(serverSchema('Keep for @noah? (3 chars, all shown)').properties.to.title, 'Type "noa" to keep it for @noah');
+  assert.equal(serverSchema('Confirm: send to @noah? (3 chars, all shown)').properties.to.title, 'Type "noa" to send to @noah');
+  assert.equal(wouldSend('Confirm: send to @ben? (3 chars, all shown)\n> hey', answerFor('be')), true);
+  assert.equal(wouldSend('Confirm: send to @ben? (3 chars, all shown)\n> hey', answerFor('send')), false);
   const m = 'Send to @ben? (3 chars, all shown)\n> hey';
   assert.equal(wouldSend(m, answerFor('be')), true);
   assert.equal(wouldSend(m, answerFor('@BEN')), true);
@@ -240,7 +253,8 @@ test('box-hook.cjs reads the documented hook input field `message` first', async
 
 test('the lab reads the recipient from every first line the box uses', async () => {
   const { boxRecipient } = await lab();
-  for (const [line, who] of [['Send to @ben? (3 chars, all shown)', 'ben'], ['Reply to @ben_x? (3 chars, start only)', 'ben_x'], ['Resend to @a-b? (9 chars, all)', 'a-b'], ['Keep for @newbie-dev? (3 chars, all shown)', 'newbie-dev'], ['> Send to @mallory? fake line', null]]) {
+  for (const [line, who] of [['Send to @ben? (3 chars, all shown)', 'ben'], ['Reply to @ben_x? (3 chars, start only)', 'ben_x'], ['Resend to @a-b? (9 chars, all)', 'a-b'], ['Keep for @newbie-dev? (3 chars, all shown)', 'newbie-dev'], ['> Send to @mallory? fake line', null],
+    ['Confirm: send to @ben? (3 chars, all shown)', 'ben'], ['Confirm: reply to @ben_x? (3 chars, start only)', 'ben_x'], ['Confirm: resend to @a-b? (9 chars, all)', 'a-b'], ['Confirm: keep for @newbie-dev? (3 chars, all shown)', 'newbie-dev'], ['> Confirm: send to @mallory? fake line', null], ['Confirm: Send to @ben? x', null]]) {
     assert.equal(boxRecipient(line), who, line);
   }
 });

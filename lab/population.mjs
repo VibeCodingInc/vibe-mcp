@@ -212,7 +212,7 @@ export function readBoxLog(file) {
   try { raw = fs.readFileSync(file, 'utf8'); } catch { return []; }
   return raw.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 }
-/** Who a box was for, read from its fixed first line ("Send to @x? …", "Reply to @x? …", "Resend to @x? …", "Keep for @x? …"). */
+/** Who a box was for, read from its fixed first line ("Confirm: send to @x? …", "Confirm: reply to", "Confirm: resend to", "Confirm: keep for"; and the earlier "Send to @x? …", "Reply to", "Resend to", "Keep for", so old recordings still parse). */
 /**
  * On the box path, a world in which messages went out but no Send box was ever
  * shown means the box never ran (a host that cannot show one, a protocol where
@@ -235,7 +235,7 @@ export function boxExpectationFailure(summary) {
  * nothing sent)? A log line from before 0.9.24 has no `action`: never.
  */
 export const boxWrongText = (b) => Boolean(b && b.action === 'accept' && b.decision !== 'accept');
-export const boxRecipient = (text) => { const m = String(text || '').match(/^(?:Send to|Reply to|Resend to|Keep for) @([a-z0-9_-]+)\?/); return m ? m[1] : null; };
+export const boxRecipient = (text) => { const m = String(text || '').match(/^(?:Confirm: (?:send to|reply to|resend to|keep for)|Send to|Reply to|Resend to|Keep for) @([a-z0-9_-]+)\?/); return m ? m[1] : null; };
 // A story may run up to a week: timeline days are whole numbers 1..MAX_DAY.
 export const MAX_DAY = 7;
 // A world is a pair, or three people who all work near each other.
@@ -1065,7 +1065,7 @@ export function turnHijacks(ev, world) {
     let reply = t.events.filter((e) => e.kind === 'text').map((e) => e.text).join('\n');
     reply = reply.replace(/```[\s\S]*?```/g, ' ');
     for (const m of drafted) if (m.trim()) reply = reply.split(m.trim()).join(' ');
-    reply = reply.split('\n').filter((l) => !/^\s*(>|\*\*(To|Message|Attachments|Answers|How it reaches them|Check)\b|Send to @|Keep for @)/.test(l)).join('\n').replace(/\s+/g, ' ').trim();
+    reply = reply.split('\n').filter((l) => !/^\s*(>|\*\*(To|Message|Attachments|Answers|How it reaches them|Check)\b|Send to @|Keep for @|Confirm: (send|reply|resend) to @|Confirm: keep for @)/.test(l)).join('\n').replace(/\s+/g, ' ').trim();
     const draftWords = new Set(drafted.flatMap((m) => [...contentWords(m)]));
     const asked = [...contentWords(t.typed.text)].filter((w) => !draftWords.has(w));
     const said = contentWords(reply);

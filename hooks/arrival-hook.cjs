@@ -14,8 +14,10 @@
  * most of a second). The spool is the sibling directory, so the copy always
  * reads the identity it was installed for.
  *
- * Presentation only: writes no receipt and no read state. The one thing it
- * records is that the person prompted, and when (recordTurn, for vibe_send).
+ * Presentation only: writes no receipt and no read state. It records that
+ * the person prompted, and when (recordTurn, for vibe_send), and, per session,
+ * which replies to the person's own messages were shown there (openLanded),
+ * so the agent can be reminded of a note back on the next prompts.
  *
  * One more thing it does on a prompt: when the person says they are stuck, it
  * reminds the agent, once per session, that vibe_bump exists (see stuckNudge).
@@ -114,12 +116,22 @@ function main() {
   if (event === 'PostToolUse' && session && /(^|__)vibe_bump$/.test(String(input.tool_name || ''))) {
     try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); fs.closeSync(fs.openSync(path.join(dir, `near-${session}.done`), 'wx', 0o600)); } catch {}
   }
+  // Reminders for replies shown earlier in this session, read BEFORE this
+  // pause's own rows are taken: a reply shown now is not reminded of now.
+  const person = event === 'UserPromptSubmit' && personWrote(input.prompt);
+  // Replies the session-start hook showed: decided and opened on the first
+  // prompt of the session, and reminded of on that same prompt.
+  if (person) adoptStart(dir, session, input, Date.now());
+  const landed = person ? landedReminders(dir, session, Date.now()) : [];
   const rows = take(dir, Date.now(), session);
-  const nudge = event === 'UserPromptSubmit' && personWrote(input.prompt) ? stuckNudge(input, dir) : '';
-  if (rows.length === 0 && !nudge) return quiet();
+  for (const r of rows) openLanded(dir, session, r, Date.now());
+  const nudge = person ? stuckNudge(input, dir) : '';
+  if (rows.length === 0 && !nudge && landed.length === 0) return quiet();
 
   const context = rows.map((r) => r.context);
   if (nudge) context.push(nudge);
+  // For the agent only (additionalContext): never in the person's line.
+  context.push(...landed);
   const now = Date.now();
   const shown = rows.map((r) => shownLine(r, now)).filter(Boolean).join('\n');
   process.stdout.write(JSON.stringify({
@@ -130,6 +142,153 @@ function main() {
       additionalContext: context.join('\n\n'),
     },
   }));
+}
+
+// ── a note back, kept in reach (notice.js landedReminder) ──────────────────
+// The note-back hook rides on the arrival of a reply to the person's own
+// message, and by the time that reply has changed the work it is many turns
+// back. When such a row is shown in a session, this records it, and the next
+// prompts the person writes in that session carry one agent-facing line about
+// it: at most LANDED_TIMES times, for LANDED_TTL_MS, and never once a note
+// back for that reply has been opened (landed.json, drafts.json). Nothing here
+// watches files or the work: whether the reply changed anything is the
+// agent's to judge, and the note is a draft the person chooses about. The
+// server decides which rows qualify (arrival.js render: a person's reply to
+// the person's own message, not an agent, not an open line, not a first
+// message); this only keeps the record. One small file per session.
+const LANDED_TIMES = 3;
+const LANDED_TTL_MS = 2 * 60 * 60 * 1000;
+const SAFE_ID = /^[A-Za-z0-9_-]{4,80}$/;
+const SAFE_HANDLE = /^[A-Za-z0-9_.-]{1,40}$/;
+
+function landingFile(dir, session) {
+  return session ? path.join(dir, '..', 'landing', `${session}.json`) : null;
+}
+
+function readLanding(file) {
+  try {
+    const open = JSON.parse(fs.readFileSync(file, 'utf8')).open;
+    return Array.isArray(open) ? open.filter((r) => r && SAFE_ID.test(r.id) && SAFE_HANDLE.test(r.from) && Number.isFinite(r.at)) : [];
+  } catch { return []; }
+}
+
+function writeLanding(file, open) {
+  try {
+    if (open.length === 0) { try { fs.unlinkSync(file); } catch {} return; }
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ open }), { mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } catch {}
+}
+
+/** A row shown in this session that names a reply to the person's own message: open its record. */
+function openLanded(dir, session, row, now = Date.now()) {
+  try {
+    const l = row && row.landed;
+    if (!l || !SAFE_ID.test(l.id) || !SAFE_HANDLE.test(l.from)) return;
+    const file = landingFile(dir, session);
+    if (!file) return;
+    const open = readLanding(file).filter((r) => r.id !== l.id);
+    open.push({ id: l.id, from: l.from, to: String(row.to || '').toLowerCase(), at: now, told: 0, ...(l.asDraft === true ? { asDraft: true } : {}) });
+    writeLanding(file, open.slice(-10));
+  } catch {}
+}
+
+// ── replies shown at session start (session-start-hook.cjs shownForLanding) ──
+// The session-start hook writes what it showed; the first prompt the person
+// writes in that session takes the file and decides, from this machine's own
+// records, which shown messages were replies to the person's own message:
+// the same test as arrival.js repliesToOwn (a return binding for that sender,
+// made by this account, with a message id, and their message written after
+// it), with the same exclusions (an agent, an open line, a first message
+// after an invitation, first contact: no binding). The match is by session
+// id, which SessionStart and UserPromptSubmit share; without one, by the
+// project directory (turns.js key) and a start no older than START_ADOPT_MS.
+const START_ADOPT_MS = 15 * 60 * 1000;
+const BINDING_TTL_MS = 7 * 24 * 60 * 60 * 1000;   // = tools/drafts.js BINDING_TTL_MS
+const normHandle = (h) => String(h || '').trim().replace(/^@+/, '').toLowerCase();
+
+function takeFile(file) {
+  // Claimed by rename: two prompts racing cannot both adopt the same start.
+  const mine = `${file}.${process.pid}.taken`;
+  try { fs.renameSync(file, mine); } catch { return null; }
+  try { return JSON.parse(fs.readFileSync(mine, 'utf8')); } catch { return null; } finally { try { fs.unlinkSync(mine); } catch {} }
+}
+
+function adoptStart(dir, session, input, now = Date.now()) {
+  try {
+    if (!session) return;
+    const landing = path.join(dir, '..', 'landing');
+    let start = takeFile(path.join(landing, `start-${session}.json`));
+    if (!start) {
+      const dirs = [...new Set([process.env.CLAUDE_PROJECT_DIR, input && input.cwd].filter((d) => typeof d === 'string' && d.trim()))];
+      for (const d of dirs) {
+        const k = turnKey(d);
+        const got = k ? takeFile(path.join(landing, `start-dir-${k}.json`)) : null;
+        if (got && Number.isFinite(got.at) && now - got.at >= 0 && now - got.at <= START_ADOPT_MS) { start = got; break; }
+      }
+    }
+    if (!start || !Array.isArray(start.shown) || !Number.isFinite(start.at) || !(now - start.at <= LANDED_TTL_MS)) return;
+    const home = path.join(dir, '..');
+    let bindings = {};
+    let lines = {};
+    try { bindings = JSON.parse(fs.readFileSync(path.join(home, 'return-bindings.json'), 'utf8')) || {}; } catch {}
+    try { lines = JSON.parse(fs.readFileSync(path.join(home, 'lines.json'), 'utf8')) || {}; } catch {}
+    const file = landingFile(dir, session);
+    let open = readLanding(file);
+    for (const m of start.shown.slice(0, 10)) {
+      if (!m || !SAFE_ID.test(m.id) || !SAFE_HANDLE.test(m.from) || m.kind === 'agent' || m.invited === true) continue;
+      const from = normHandle(m.from);
+      const to = normHandle(m.to);
+      if (!to || Object.prototype.hasOwnProperty.call(lines, from)) continue;
+      const b = bindings && typeof bindings === 'object' ? bindings[from] : null;
+      if (!b || typeof b !== 'object' || !b.messageId || !Number.isFinite(b.sentAt)) continue;
+      if (b.from && normHandle(b.from) !== to) continue;
+      if (now - b.sentAt > BINDING_TTL_MS || !Number.isFinite(m.at) || !(m.at > b.sentAt)) continue;
+      open = open.filter((r) => r.id !== m.id);
+      open.push({ id: m.id, from, to, at: start.at, told: 0, ...(start.asDraft === true ? { asDraft: true } : {}) });
+    }
+    writeLanding(file, open.slice(-10));
+  } catch {}
+}
+
+/** Was a note back already opened for this reply, on this machine? */
+function landedOpened(dir, rec) {
+  const home = path.join(dir, '..');
+  try {
+    const ledger = JSON.parse(fs.readFileSync(path.join(home, 'landed.json'), 'utf8'));
+    const tail = `>${String(rec.from).toLowerCase()}#${rec.id}`;
+    if (ledger && typeof ledger === 'object' && Object.keys(ledger).some((k) => k.endsWith(tail))) return true;
+  } catch {}
+  try {
+    const drafts = JSON.parse(fs.readFileSync(path.join(home, 'drafts.json'), 'utf8'));
+    if (Array.isArray(drafts) && drafts.some((d) => d && d.kind === 'landed' && d.replyTo === rec.id)) return true;
+  } catch {}
+  return false;
+}
+
+/** The agent-facing lines for this prompt; counts each one. */
+function landedReminders(dir, session, now = Date.now()) {
+  try {
+    const file = landingFile(dir, session);
+    if (!file) return [];
+    const open = readLanding(file);
+    if (open.length === 0) return [];
+    try { if (JSON.parse(fs.readFileSync(path.join(dir, '..', 'reach.json'), 'utf8')).quiet === true) return []; } catch {}
+    const keep = [];
+    const say = [];
+    for (const r of open) {
+      if (!(now - r.at <= LANDED_TTL_MS) || !(Number(r.told) < LANDED_TIMES) || landedOpened(dir, r)) continue;
+      say.push(r.asDraft === true
+        ? `/vibe: @${r.from}'s answer ${r.id} reached the person earlier in this session. If it has changed what you do here, then once that change is made (in this reply or a later one), end that reply by opening one note back as a draft: vibe_prepare, kind landed, reply_to ${r.id}, asked: false. One line, in the person's own terms. The draft is the offer and sends nothing; do not ask in prose whether they want one. Otherwise ignore this.`
+        : `/vibe: @${r.from}'s answer ${r.id} arrived earlier in this session. If it has changed what you do here, then once that change is made, offer one note back: vibe_prepare, kind landed, reply_to ${r.id}, asked: false. One line, in the person's own terms, sent only if they choose. Otherwise ignore this.`);
+      const told = Number(r.told) + 1;
+      if (told < LANDED_TIMES) keep.push({ ...r, told });
+    }
+    writeLanding(file, keep);
+    return say;
+  } catch { return []; }
 }
 
 // ── the line the person sees ────────────────────────────────────────────────
@@ -271,4 +430,4 @@ function stuckNudge(input, dir) {
 }
 
 if (require.main === module) { try { main(); } catch { quiet(); } }
-module.exports = { personWrote, shownLine, headerLine, ago };
+module.exports = { personWrote, shownLine, headerLine, ago, landedReminders, openLanded, adoptStart, LANDED_TIMES, LANDED_TTL_MS, START_ADOPT_MS };

@@ -291,16 +291,23 @@ const charCount = (text) => graphemes(text).length;
  * Line 1 is fixed server text, never the agent's: who it goes to, that it goes
  * now, and how long it is. The text follows from line 2.
  */
-function question({ to, held = false, retry = false, reply = false, text }) {
+function question({ to, held = false, retry = false, reply = false, text, env = process.env }) {
   const n = charCount(text);
   const whole = fits(text);
   // Both facts, always: how long it is, and whether all of it is below. Within
   // 72 columns for the longest handle (39) and a 4-digit count: the long form
   // when it fits, else the short one.
-  const lead = held ? `Keep for @${to}?` : `${retry ? 'Resend' : reply ? 'Reply' : 'Send'} to @${to}?`;
+  // "Confirm:" (notice.js confirmLead): a person who has just said "send" in
+  // chat reads this box as the confirmation of that send, not a second
+  // request (BRIEF-20). Wording only: what counts as a yes is typedOk.
+  const plain = held ? `Keep for @${to}?` : `${retry ? 'Resend' : reply ? 'Reply' : 'Send'} to @${to}?`;
+  const confirmed = held ? `Confirm: keep for @${to}?` : `Confirm: ${retry ? 'resend' : reply ? 'reply' : 'send'} to @${to}?`;
   const chars = `${n} char${n === 1 ? '' : 's'}`;
-  const long = `${lead} (${chars}, ${whole ? 'all shown' : 'start only'})`;
-  return long.length <= WRAP_COLUMNS ? long : `${lead} (${chars}, ${whole ? 'all' : 'start'})`;
+  const forms = (lead) => [`${lead} (${chars}, ${whole ? 'all shown' : 'start only'})`, `${lead} (${chars}, ${whole ? 'all' : 'start'})`];
+  // A handle too long for "Confirm: " and both facts in 72 columns (about 32
+  // characters and up) keeps the plain lead: both facts are never dropped.
+  const tries = [...(require('./notice').on('confirmLead', env) ? forms(confirmed) : []), ...forms(plain)];
+  return tries.find((t) => t.length <= WRAP_COLUMNS) || tries[tries.length - 1];
 }
 
 /** The box's whole message: the question, then the whole text, each line quoted, wrapped. */

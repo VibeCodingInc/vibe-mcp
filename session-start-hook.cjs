@@ -32,6 +32,11 @@ function normalizeMessages(value) {
       // they wrote it. Says "still waiting", never anything about reading.
       seen: row?.seen === true,
       at: Number.isFinite(row?.at) ? row.at : (Number.isFinite(Date.parse(row?.createdAt)) ? Date.parse(row.createdAt) : null),
+      // For the note-back record (shownForLanding): who it was to, whether an
+      // agent wrote it, whether the platform says they came by an invitation.
+      to: typeof row?.to === 'string' && HANDLE.test(row.to.toLowerCase()) ? row.to.toLowerCase() : null,
+      kind: row?.kind === 'agent' || row?.actorKind === 'agent' ? 'agent' : null,
+      invited: row?.invited === true || row?.invitedByYou === true,
     }))
     .filter((row) => row.from && row.text)
     .slice(0, MAX_MESSAGES);
@@ -675,6 +680,44 @@ async function main() {
   if (quietMoment) markMoment();
   claimShown(now.messages);
   markTold((said || []).map((id) => ({ id })), session);
+  shownForLanding(now.messages, input);
+}
+
+// ── a note back, for a reply shown at session start (notice.js landedReminder)
+// Most replies reach a person here, at the start of their next session (an
+// answer that came overnight), not mid-session through the arrival hook. The
+// arrival hook's note-back record was opened only for its own rows, so a
+// reply shown here never got a reminder (lab 2026-11-22: 15 of 26 used
+// replies). This writes what was shown, after the line was handed over, to
+// <VIBE_HOME>/landing/start-<session>.json; on the person's first prompt in
+// that session the arrival hook decides, from this machine's own records
+// (return-bindings.json, lines.json), which were replies to the person's own
+// message and opens the record there (hooks/arrival-hook.cjs adoptStart).
+// No session id: keyed by the project directory instead (start-dir-<key>,
+// key as turns.js), and adopted by the first prompt from that directory
+// within START_ADOPT_MS. Nothing here is shown to anyone.
+function shownForLanding(messages, input, env = process.env) {
+  try {
+    if (!notice.on('itLanded', env) || !notice.on('landedReminder', env)) return;
+    const path = require('node:path');
+    const arrival = require('./arrival');
+    const shown = (messages || [])
+      .filter((m) => m && arrival.safeId(m.id) && HANDLE.test(String(m.from || '').toLowerCase()) && m.to)
+      .map((m) => ({ id: m.id, from: String(m.from).toLowerCase(), to: m.to, at: Number.isFinite(m.at) ? m.at : null, ...(m.kind === 'agent' ? { kind: 'agent' } : {}), ...(m.invited ? { invited: true } : {}) }));
+    if (shown.length === 0) return;
+    const dir = path.join(require('./vibe-home').vibeHome(env), 'landing');
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const body = JSON.stringify({ at: Date.now(), ...(notice.on('landedAsDraft', env) ? { asDraft: true } : {}), shown });
+    const session = String((input && input.session_id) || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 80);
+    const names = session ? [`start-${session}.json`]
+      : [...new Set([env.CLAUDE_PROJECT_DIR, input && input.cwd].filter((d) => typeof d === 'string' && d.trim()))].map((d) => `start-dir-${require('./turns').key(d)}.json`);
+    for (const name of names) {
+      const file = path.join(dir, name);
+      const tmp = `${file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, body, { mode: 0o600 });
+      fs.renameSync(tmp, file);
+    }
+  } catch {}
 }
 
 /** Taken only after the line was handed over, like claimShown. */
@@ -756,4 +799,5 @@ module.exports = {
   noteSessionStart,
   fetchUnsent,
   within,
+  shownForLanding,
 };

@@ -484,7 +484,16 @@ test('vibe_prepare advertises kind with the one allowed value', () => {
 
 // ── 5b the note-back hook, at the moment it matters ─────────────────────────
 
-const HOOK_FOR = (id) => `If their answer changes what you do here, then once the change is made you can offer one note back (vibe_prepare, kind landed, reply_to ${id}, asked: false).`;
+// landedAsDraft (lab 2026-11-22): the draft is the offer; agents had asked in prose instead.
+const HOOK_FOR = (id) => `If their answer changes what you do here, then once the change is made (in this reply or a later one), end that reply by opening one note back as a draft: vibe_prepare, kind landed, reply_to ${id}, asked: false. The draft is the offer and sends nothing; do not ask in prose whether they want one.`;
+const HOOK_FOR_OLD = (id) => `If their answer changes what you do here, then once the change is made you can offer one note back (vibe_prepare, kind landed, reply_to ${id}, asked: false).`;
+
+test('landedAsDraft switched off (loopback only): the earlier hook line', () => withOff('landedAsDraft', () => {
+  assert.equal(arrival.landedHook('msg_abc123'), HOOK_FOR_OLD('msg_abc123'));
+}).then(() => {
+  assert.equal(arrival.landedHook('msg_abc123', PROD), HOOK_FOR('msg_abc123'));
+  assert.equal(arrival.landedHook('msg_abc123', { ...PROD, VIBE_NOTICE_OFF: 'landedAsDraft' }), HOOK_FOR('msg_abc123'), 'a real account always gets the current text');
+}));
 
 test('arrival: a reply to the person\'s own message carries the note-back hook, for the agent only', () => {
   const now = Date.now();
