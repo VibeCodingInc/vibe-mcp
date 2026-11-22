@@ -1,17 +1,13 @@
 {
-  "version": "0.9.25",
+  "version": "0.9.26",
   "updated": "2026-11-22",
-  "changelog": "Your agent is better at noticing when someone you know holds the answer, it does what you asked before it offers a draft, and /vibe has a quieter voice.",
+  "changelog": "Setup now ends by telling you to open a fresh session and whether a note is waiting, the Send box says it is the confirmation, and your agent offers a note back when an answer changed your work.",
   "features": [
-    "Your agent now sees each person's full line about what they are working on, and who you share an open line with, and may offer a message when your work plainly touches theirs",
-    "It asks the person who knows before guessing, and says in a few words what was already checked",
-    "It does what you asked first; a draft you did not ask for comes after, never instead",
-    "A new draft shows what was already said in that conversation, so follow-ups say only what is new",
-    "Before saying there is nothing to add to a question, it looks in the project, and says what it searched",
-    "The preview says how the message will reach the other person, and flags someone you have not written to before",
-    "A message arriving mid-work reads: Note from @name (2m ago), waiting at your pause",
-    "When a reply changes what you do, your agent can offer a one-line note back to say so; it goes only if you choose",
-    "Text written by other people is more thoroughly marked as theirs, so it cannot read as /vibe's own words"
+    "Setup ends with: open a fresh Claude Code session to load /vibe; sessions already open will not see it",
+    "If a note is already waiting when you finish setup, it says so and from whom (people you know by name; never the message text)",
+    "The Send box's first line now reads Confirm: send to @name?, so it reads as the confirmation of the send you just asked for",
+    "When someone's answer changed what you did, your agent offers a one-line note back as a draft; it goes only if you choose",
+    "That offer now also works for answers you first saw at the start of a session"
   ],
   "deprecated": [],
   "breaking": false,
