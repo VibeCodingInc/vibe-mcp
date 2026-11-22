@@ -27,6 +27,12 @@ const NOTICE = {
   // about bothering someone and about looking clueless.
   quietArrival: true,       // 6. the preview says, truthfully, how the message will reach them
   showYourWork: true,       // 7. a question says what was already checked, then asks one answerable thing
+  // Blind judging of 40 before/after cases (BRIEF-10): where the old texts won,
+  // it was for these.
+  answerFirst: true,        // 8. do what was asked first; an unasked draft never replaces the answer; no re-offer after a decline
+  threadFirst: true,        // 9. a new draft to someone shows the last lines of the conversation, so a follow-up says only what is new
+  lookBeforeNo: true,       // 10. search the project for the question's terms before saying there is nothing to add
+  knownRecipient: true,     // 11. only people listed or named; a guessed handle is made obvious in the preview
 };
 
 /** The agent's copy of someone's line about what they are working on. The person's copy stays at 48. */
