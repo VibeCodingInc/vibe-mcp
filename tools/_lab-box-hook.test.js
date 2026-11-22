@@ -20,7 +20,7 @@ test.after(() => fs.rmSync(DIR, { recursive: true, force: true }));
 let n = 0;
 
 /** Run the hook with a stub player command; returns { action, log, out }. */
-function runHook({ cmd, message = 'To @ben: the lease fixed it', input, ctx = {}, env = {} }) {
+function runHook({ cmd, message = 'Send to @ben now? (18 characters)\nthe lease fixed it', input, ctx = {}, env = {} }) {
   const k = ++n;
   const ctxFile = path.join(DIR, `ctx-${k}.json`);
   const logFile = path.join(DIR, `boxes-${k}.jsonl`);
@@ -45,7 +45,7 @@ test('the player presses Accept: the hook answers accept, in the hook output sha
   assert.equal(r.code, 0);
   assert.deepEqual(r.o, { hookSpecificOutput: { hookEventName: 'Elicitation', action: 'accept', content: {} } });
   assert.equal(r.log.length, 1);
-  assert.equal(r.log[0].message, 'To @ben: the lease fixed it');
+  assert.equal(r.log[0].message, 'Send to @ben now? (18 characters)\nthe lease fixed it');
   assert.equal(r.log[0].decision, 'accept');
   assert.equal(r.log[0].why, 'that is what I asked for');
 });
@@ -80,7 +80,7 @@ for (const [name, opts, error] of [
 test('the player is asked with the persona, what they typed, and the box as the host draws it; it sees no /vibe variables', async () => {
   const rec = path.join(DIR, 'rec');
   fs.mkdirSync(rec, { recursive: true });
-  const message = 'To @ben: line one of the box\nline two\nline three\nline four\nline five';
+  const message = 'Send to @ben now? (40 characters)\nline two\nline three\nline four\nline five';
   const cmd = `cat > ${JSON.stringify(path.join(rec, 'stdin.txt'))}; env > ${JSON.stringify(path.join(rec, 'env.txt'))}; echo '{"press":"decline","why":"t"}'`;
   const r = await runHook({ cmd, message, env: { VIBE_HOME: '/nope/.vibe', SLASHVIBE_X: 'y' } });
   assert.equal(r.action, 'decline');
@@ -88,7 +88,7 @@ test('the player is asked with the persona, what they typed, and the box as the 
   const { HUMAN_SYSTEM } = await player();
   assert.ok(stdin.startsWith(`${HUMAN_SYSTEM}\n\n`));
   for (const s of ['You are Ada (@ada), engineer.', 'About you: terse, careful', 'tell ben the lease fixed it', 'Earlier in this same Claude Code session:\nYou typed: hi',
-    'MCP server "vibe" requests your input\nTo @ben: line one of the box\nline two\nline three\n… (+2 more lines)\n[ Accept ]   [ Decline ]', 'Do you, Ada, press Accept or Decline?']) {
+    'MCP server "vibe" requests your input\nSend to @ben now? (40 characters)\nline two\nline three\n… (+2 more lines)\n[ Accept ]   [ Decline ]', 'Do you, Ada, press Accept or Decline?']) {
     assert.ok(stdin.includes(s), s);
   }
   assert.ok(!stdin.includes('line four'), 'only what the host shows');
@@ -127,9 +127,8 @@ test('installBoxHook adds an Elicitation hook for the lab server running box-hoo
 test('the box refusals are counted as refused: nothing went out', async () => {
   const { sendOutcome } = await lab();
   for (const t of [
-    'Not sent: they chose not to send this to @ben. Do not offer it again unless they ask.',
-    'Not sent: they already chose not to send this to @ben. If they ask for it again, show it to them with vibe_prepare first.',
-    'Not sent: the confirmation box for @ben was not answered. It is still a draft.',
+    'Not sent. It is still a draft for @ben. Do not send it again unless they ask.',
+    'Not sent: the /vibe account signed in here changed while the confirmation box was open.',
     'Not sent: another /vibe confirmation box is open. Wait until it is answered.',
     'Not sent: the draft to @ben changed while the confirmation box was open. Show it again with vibe_prepare.',
     "Not sent: a hook on this machine is set to answer /vibe's confirmation box (~/.claude/settings.json). Remove it to send.",
@@ -146,7 +145,7 @@ test('a send that went out after an accepted box is not unattended; one without 
   at({ kind: 'prompt', text: 'tell ben', session: 'new' });
   // b1: shown, Send called, box declined: refused.
   call('vibe_prepare', { handle: 'ben', message: 'one' }, preview('b1'));
-  call('vibe_send', { id: 'b1', rev: 'r1' }, 'Not sent: they chose not to send this to @ben. Do not offer it again unless they ask.');
+  call('vibe_send', { id: 'b1', rev: 'r1' }, 'Not sent. It is still a draft for @ben. Do not send it again unless they ask.');
   // b2: shown, Send called, box accepted: sent.
   call('vibe_prepare', { handle: 'ben', message: 'two' }, preview('b2'));
   call('vibe_send', { id: 'b2', rev: 'r1' }, 'Sent to **@ben**\n_receipt: msg_2_');
@@ -154,8 +153,8 @@ test('a send that went out after an accepted box is not unattended; one without 
   call('vibe_prepare', { handle: 'ben', message: 'three' }, preview('b3'));
   call('vibe_send', { id: 'b3', rev: 'r1' }, 'Sent to **@ben**\n_receipt: msg_3_');
   // The runner folds the turn's boxes after its events.
-  at({ kind: 'box', text: 'To @ben: one', decision: 'decline', simulator_only: { why: 'no' } });
-  at({ kind: 'box', text: 'To @ben: two', decision: 'accept', simulator_only: { why: 'yes' } });
+  at({ kind: 'box', text: 'Send to @ben now? (3 characters)\none', decision: 'decline', simulator_only: { why: 'no' } });
+  at({ kind: 'box', text: 'Send to @ben now? (3 characters)\ntwo', decision: 'accept', simulator_only: { why: 'yes' } });
   const s = analyse({ world: { id: 'w', archetype: 'a', relationship: 'established', open_line: false, timeline: [{}] }, transcript: ev, turnsLog: [], wire: [], handles: ['ada', 'ben'], started: Date.now() });
   assert.equal(s.boxes_shown, 2);
   assert.equal(s.boxes_accepted, 1);
@@ -164,4 +163,35 @@ test('a send that went out after an accepted box is not unattended; one without 
   assert.equal(s.sends_after_an_accepted_box.count, 1);
   assert.equal(s.sends_after_an_accepted_box.list[0].draft, 'b2');
   assert.deepEqual(s.sends_without_human_reply_between_prepare_and_send.list.map((x) => x.draft), ['b3'], 'one accepted box covers one send');
+});
+
+test('--no-box runs the turn-check path; the summary records which path a run took', async () => {
+  const { parseArgs, writePopulation } = await lab();
+  assert.equal(parseArgs(['w.json', '--out', 'o']).noBox, false);
+  assert.equal(parseArgs(['w.json', '--out', 'o', '--no-box']).noBox, true);
+  const out = fs.mkdtempSync(path.join(DIR, 'pop-'));
+  const agg = writePopulation(out, [{ file: 'w.json', id: 'w', summary: { id: 'w', archetype: 'a', box_path: false, sends_on_wire: 2, boxes_shown: 0 } }], { noBox: true });
+  assert.equal(agg.box_path, false);
+  assert.deepEqual(agg.failed, []);
+  assert.match(fs.readFileSync(path.join(out, 'population-summary.md'), 'utf8'), /Send box: off \(--no-box/);
+});
+
+test('on the box path, sends on the wire with no box shown is FAILED, loudly', async () => {
+  const { boxExpectationFailure, writePopulation } = await lab();
+  assert.match(boxExpectationFailure({ box_path: true, sends_on_wire: 3, boxes_shown: 0 }), /^FAILED: 3 send\(s\) went out on the box path and no Send box was shown$/);
+  assert.equal(boxExpectationFailure({ box_path: true, sends_on_wire: 3, boxes_shown: 1 }), null);
+  assert.equal(boxExpectationFailure({ box_path: true, sends_on_wire: 0, boxes_shown: 0 }), null, 'nothing went out: nothing to check');
+  assert.equal(boxExpectationFailure({ box_path: false, sends_on_wire: 3, boxes_shown: 0 }), null, '--no-box expects none');
+  const out = fs.mkdtempSync(path.join(DIR, 'pop-'));
+  const summary = { id: 'w', archetype: 'a', box_path: true, sends_on_wire: 3, boxes_shown: 0, failed: boxExpectationFailure({ box_path: true, sends_on_wire: 3, boxes_shown: 0 }) };
+  const agg = writePopulation(out, [{ file: 'w.json', id: 'w', summary }], {});
+  assert.equal(agg.box_path, true);
+  assert.equal(agg.failed.length, 1, 'the run exits non-zero');
+  assert.match(agg.failed[0].error, /no Send box was shown/);
+  assert.match(fs.readFileSync(path.join(out, 'population-summary.md'), 'utf8'), /## Failed[\s\S]*no Send box was shown/);
+});
+
+test('box-hook.cjs reads the documented hook input field `message` first', async () => {
+  const { boxMessage } = require(HOOK);
+  assert.equal(boxMessage({ message: 'documented', elicitation: { message: 'other' }, params: { message: 'third' } }), 'documented');
 });
