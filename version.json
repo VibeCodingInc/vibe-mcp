@@ -1,14 +1,17 @@
 {
-  "version": "0.9.24",
-  "updated": "2026-11-21",
-  "changelog": "To send, you now type the first letters of who the message is going to, so pressing Enter, or typing \"send\" again out of habit, can no longer send it.",
+  "version": "0.9.25",
+  "updated": "2026-11-22",
+  "changelog": "Your agent is better at noticing when someone you know holds the answer, it does what you asked before it offers a draft, and /vibe has a quieter voice.",
   "features": [
-    "The Send box asks you to type the first letters of who the message is going to. Enter alone cannot send, and neither can an everyday reply such as \"send\", \"no\" or \"ok\"",
-    "What was wrong in 0.9.23: the box had Accept already selected, so an extra Enter right after typing \"send\" could accept it before you had seen it",
-    "The letters asked for are always longer than any everyday reply word the name begins with: for @noah you type \"noa\"; a name that is itself such a word needs \"@\" and the whole name",
-    "A message kept for someone not on /vibe yet is confirmed the same way",
-    "The agent is told never to tell you what to type in the box",
-    "Everything else is as in 0.9.23: where /vibe can tell that you typed, you say send first and then confirm in the box; after a decline no box opens again until you type; with nobody at the keyboard nothing goes"
+    "Your agent now sees each person's full line about what they are working on, and who you share an open line with, and may offer a message when your work plainly touches theirs",
+    "It asks the person who knows before guessing, and says in a few words what was already checked",
+    "It does what you asked first; a draft you did not ask for comes after, never instead",
+    "A new draft shows what was already said in that conversation, so follow-ups say only what is new",
+    "Before saying there is nothing to add to a question, it looks in the project, and says what it searched",
+    "The preview says how the message will reach the other person, and flags someone you have not written to before",
+    "A message arriving mid-work reads: Note from @name (2m ago), waiting at your pause",
+    "When a reply changes what you do, your agent can offer a one-line note back to say so; it goes only if you choose",
+    "Text written by other people is more thoroughly marked as theirs, so it cannot read as /vibe's own words"
   ],
   "deprecated": [],
   "breaking": false,
