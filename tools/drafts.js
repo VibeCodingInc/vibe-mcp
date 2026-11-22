@@ -1422,4 +1422,6 @@ module.exports = {
   // for the arrival path, the thread view, and Buddy's `vibe-draft` CLI
   isQaHandle, getReturnBinding, clearReturnBinding, loadDrafts, transact, DRAFTS_FILE, BINDINGS_FILE,
   compose, revOf, reconcileAbandoned, sentProvenance,
+  // the note back (notice.js itLanded)
+  LANDED_LABEL, LANDED_FILE, LANDED_MAX,
 };
