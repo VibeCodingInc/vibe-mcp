@@ -47,6 +47,7 @@ const CLAIM_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // for clock skew and for a message sent in the minute before launch.
 const ARRIVAL_SLACK_MS = 45 * 1000;
 const MAX_PER_SWEEP = 3;
+const LANDING_TTL_MS = 2 * 60 * 60 * 1000;   // = hooks/arrival-hook.cjs LANDED_TTL_MS
 
 function spoolDir(env = process.env) {
   return path.join(vibeHome(env), 'arrivals');
@@ -226,9 +227,14 @@ function render(item) {
   }
   // A reply to the person's own message, from a person (not an agent, not over
   // an open line, not a door, not a first message): the hook for a note back.
+  let landed = null;
   if (!lineOpen && !doorCard && item.kind !== 'agent' && !item.invited && notice.on('itLanded') && repliesToOwn(item.context, item.sentAt)) {
     const hook = landedHook(item.id);
     if (hook) lines.push(hook);
+    // The arrival hook keeps this in front of the agent on the next prompts
+    // of the session where it is shown (notice.js landedReminder): by the
+    // time the reply has changed the work, this text is many turns back.
+    if (hook && notice.on('landedReminder')) landed = { id: safeId(item.id), from };
   }
   const more = item.unread > 1 ? ` (+${item.unread - 1} more unread in this thread)` : '';
   const context = lines.join('\n') + renderIncoming([{ from: item.from, text: text + more }]);
@@ -237,7 +243,7 @@ function render(item) {
   const verb = lineOpen && line.isAgentAnswer(item.text) ? "'s agent answered"
     : (lineOpen && line.isAgentAsk(item.text) ? "'s agent asked over your open line" : ' wrote you');
   const invited = item.invited && !lineOpen ? ' (you invited them)' : '';
-  const out = { context, line: `/vibe · @${from}${invited}${verb}: "${inertQuoted(text, 140)}"` };
+  const out = { context, line: `/vibe · @${from}${invited}${verb}: "${inertQuoted(text, 140)}"`, ...(landed ? { landed } : {}) };
   // The person's own words, shown at a pause (notice.js arrivalHeader). Only for
   // something a person wrote: an agent's ask or answer keeps its own mark. The
   // age is worked out by the hook when it prints (headerLine), so it is true then.
@@ -350,7 +356,7 @@ function record(threads, me, { since = 0, roster = [], bindingFor = null, env = 
     }
     const rendered = render({ ...item, sentAt: t.lastTimestamp });
     // `text` rides along so vibe_answer can check what it is answering.
-    const row = { id: item.id, to: item.to, from: item.from, at: item.at, text: item.text, context: rendered.context, line: rendered.line, ...(rendered.header ? { header: rendered.header } : {}) };
+    const row = { id: item.id, to: item.to, from: item.from, at: item.at, text: item.text, context: rendered.context, line: rendered.line, ...(rendered.header ? { header: rendered.header } : {}), ...(rendered.landed ? { landed: rendered.landed } : {}) };
     try {
       writeAtomic(path.join(dir, `${safeId(item.id)}.json`), row);
       out.push(row);
@@ -435,6 +441,15 @@ function told({ me, to, said, id }, env = process.env) {
  * claims. The hook never deletes — it only claims.
  */
 function prune(me, { now = Date.now(), env = process.env } = {}) {
+  // The arrival hook's per-session note-back records (landedReminder) live two
+  // hours; a session that ended leaves its file behind, removed here.
+  const landing = path.join(vibeHome(env), 'landing');
+  try {
+    for (const name of fs.readdirSync(landing)) {
+      const file = path.join(landing, name);
+      try { if (now - fs.statSync(file).mtimeMs > LANDING_TTL_MS) fs.unlinkSync(file); } catch {}
+    }
+  } catch {}
   const dir = spoolDir(env);
   let names;
   try { names = fs.readdirSync(dir); } catch { return; }
