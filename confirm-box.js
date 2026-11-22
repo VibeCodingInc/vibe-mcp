@@ -256,9 +256,10 @@ async function ask(box, text, { timeoutMs = TIMEOUT_MS, signal = null } = {}) {
 // file is parsed as JSON, and only a key `Elicitation` or `ElicitationResult`
 // under `hooks` (as the host reads it, case-sensitive) refuses. A settings
 // file that exists but does not parse refuses too, named: it cannot be
-// checked. Not covered: a file passed with `claude --settings`, hooks in
-// skill, agent or command frontmatter or plugin manifests if the host honours
-// them, and anything the host adds later.
+// checked. It reads the files on disk now, not what the host loaded. Not
+// covered: a file passed with `claude --settings`, plugin hooks, hooks in
+// skill, agent or command frontmatter if the host honours them, and anything
+// the host adds later.
 
 const HOOK_EVENTS = ['Elicitation', 'ElicitationResult'];
 
@@ -287,33 +288,10 @@ function managedSettingsFile(platform = process.platform) {
   return null;
 }
 
-const PLUGIN_MAX_DEPTH = 4;
-const PLUGIN_MAX_DIRS = 200;
-/** hooks/hooks.json files under <config dir>/plugins: a bounded walk that does not follow links or enter node_modules. */
-function pluginHookFiles(configDir) {
-  const out = [];
-  let visited = 0;
-  const walk = (dir, depth) => {
-    if (depth > PLUGIN_MAX_DEPTH || visited >= PLUGIN_MAX_DIRS) return;
-    visited += 1;
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries.sort((x, y) => (x.name < y.name ? -1 : 1))) {
-      if (!e.isDirectory() || e.name === 'node_modules') continue;   // a link is not followed
-      const sub = path.join(dir, e.name);
-      if (e.name === 'hooks') out.push(path.join(sub, 'hooks.json'));
-      else walk(sub, depth + 1);
-      if (visited >= PLUGIN_MAX_DIRS) return;
-    }
-  };
-  walk(path.join(configDir, 'plugins'), 0);
-  return out;
-}
-
 /**
- * The files the tripwire reads: the project's .claude/settings.json and
+ * The four files the tripwire reads: the project's .claude/settings.json and
  * settings.local.json, the user's settings.json (CLAUDE_CONFIG_DIR, or
- * ~/.claude), the managed settings file, and plugins' hooks/hooks.json.
+ * ~/.claude), and the managed settings file.
  */
 function settingsFiles(env = process.env, cwd = process.cwd, { platform = process.platform } = {}) {
   const files = [];
@@ -328,7 +306,6 @@ function settingsFiles(env = process.env, cwd = process.cwd, { platform = proces
   files.push(path.join(configDir, 'settings.json'));
   const managed = managedSettingsFile(platform);
   if (managed) files.push(managed);
-  files.push(...pluginHookFiles(configDir));
   return files;
 }
 
@@ -375,6 +352,6 @@ module.exports = {
   WRAP_COLUMNS, VISIBLE_LINES, NEWLINE_MARK, SCHEMA, TIMEOUT_MS, INPUT_KEY, ELICITATION_VERSIONS,
   declaresForm, noteClient, available, clientState,
   displayWidth, wrapLine, textLines, question, message, fits, request, ask, isOpen,
-  settingsAnswerBox, settingsFiles, answeringHook, labAllowsHook, managedSettingsFile, pluginHookFiles,
+  settingsAnswerBox, settingsFiles, answeringHook, labAllowsHook, managedSettingsFile,
   _resetForTest,
 };
