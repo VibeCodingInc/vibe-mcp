@@ -42,9 +42,14 @@ This policy covers the `slashvibe-mcp` npm package and the [VibeCodingInc/vibe-m
 How that choice is taken depends on the host.
 
 **Where the host can show a box** (it declares MCP elicitation when it connects,
-as Claude Code does), `vibe_send` opens one itself after all its other checks:
-"Send this to @handle?" and the whole text, with Accept and Decline. Only Accept
-sends, and only if the draft is still the one in the box. A decline, a box left
+as Claude Code does), `vibe_send` opens one itself after all its other checks.
+The box is opened by /vibe, not by the agent. It names the recipient ("To
+@handle: ") and shows the opening of the exact text, all of it when the text is
+short (Claude Code shows the first three lines, about 200 characters); for a
+longer message the rest is in the preview, which the agent relays, and the
+preview says the box will show only the first lines. Accept and Decline are the
+only choices. Only Accept sends, and only if the draft is still the one in the
+box. A decline, a box left
 unanswered for five minutes, a session with no keyboard (`claude -p`) or any
 error sends nothing and keeps the draft. A declined draft is not offered in a
 box again until it has been shown again with `vibe_prepare`. One box is open at
@@ -54,6 +59,10 @@ On those hosts the box closes the gaps of the turn check below: an unrelated
 prompt, or "no, don't send", no longer counts as a yes; one prompt no longer
 unlocks every draft that was shown; a draft swapped after it was shown is
 refused; and a wake-up the agent scheduled for itself cannot answer a box.
+
+The box guarantees that a person at the keyboard chose to send this draft to
+this person. It does not by itself prove they read every word of a long
+message: past the opening, they rely on the preview the agent showed them.
 
 What remains:
 
@@ -68,10 +77,11 @@ What remains:
   could catch /vibe's box. Claude Code asks the person before an agent may
   change those files; a person who grants that write lets the agent add a hook
   between one check and the next box. Hooks configured anywhere else (managed
-  policy settings, plugins) are not read.
-- The box shows the exact text, wrapped for display at 72 columns. Spacing and
-  word choice can still carry information the person will not notice, and a
-  line break added for display looks like one in the text.
+  policy settings, plugins, a file passed with `claude --settings`) are not
+  read.
+- The box shows the text wrapped for display at 72 columns, with each line
+  break in the text shown as "↵". Spacing and word choice can still carry
+  information the person will not notice.
 - Hosts without the box fall back to the turn check, with every gap listed
   below.
 

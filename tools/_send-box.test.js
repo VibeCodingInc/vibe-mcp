@@ -89,7 +89,7 @@ test('Accept sends exactly the text in the box, with no turn since it was shown'
     const r = await sendIn(p, box);
     assert.equal(box.asked.length, 1, 'one box');
     const { params } = box.asked[0];
-    assert.equal(params.message, 'Send this to @linus?\n\ncloud owns placement now');
+    assert.equal(params.message, 'To @linus: cloud owns placement now');
     assert.deepEqual(params.requestedSchema, { type: 'object', properties: {} });
     assert.equal(params.mode, 'form', '2025-11-25 names the form mode');
     assert.equal(r.data.sent, true);
@@ -371,20 +371,19 @@ test('with both lab conditions a lab hook is allowed; with a non-loopback API th
 
 // ── length and wrapping ──────────────────────────────────────────────────────
 
-test('a message too long to confirm in a box is refused before any box opens', async () => {
+test('a long message is not refused for the box: the box shows its opening, and the whole text is sent', async () => {
   await withWire(async (sends) => {
     const long = 'abcdefghi '.repeat(170).trim();
-    assert.ok(long.length > confirmBox.MAX_CHARS && long.length <= 2000);
     const p = await prepare({ message: long });
     const box = fakeBox(accept);
     const r = await sendIn(p, box);
-    assert.equal(r.display, `Not sent: the message to @linus is too long to confirm in a box (${long.length} characters; the most is 1500). Shorten it with vibe_prepare and show it again.`);
-    assert.equal(box.asked.length, 0);
-    assert.equal(sends.length, 0);
+    assert.equal(r.data.sent, true);
+    assert.equal(sends[0].body, long);
+    assert.equal(box.asked[0].params.message.replace(/\s+/g, ''), `To@linus:${long.replace(/\s+/g, '')}`, 'the whole text is in the box message');
   });
 });
 
-test('wrapping is for display only: the box wraps at 72 columns, the whole text is there, and what is sent is unchanged', async () => {
+test('wrapping and the newline mark are display only: lines of at most 72, " ↵ " for a line break, what is sent unchanged', async () => {
   await withWire(async (sends) => {
     const line = 'the retry loop was the culprit because every client backed off on the same schedule, so the herd came back together each time; jitter fixed it';
     const text = `${line}\n\nsee https://example.com/${'a'.repeat(90)}`;
@@ -392,36 +391,57 @@ test('wrapping is for display only: the box wraps at 72 columns, the whole text 
     const box = fakeBox(accept);
     await sendIn(p, box);
     const shown = box.asked[0].params.message;
-    const body = shown.split('\n\n').slice(1).join('\n\n');
-    for (const l of body.split('\n')) assert.ok(l.length <= confirmBox.WRAP_COLUMNS, `wrapped: ${l}`);
-    assert.equal(body.replace(/\s+/g, ''), text.replace(/\s+/g, ''), 'nothing cut');
+    for (const l of shown.split('\n')) assert.ok(l.length <= confirmBox.WRAP_COLUMNS, `wrapped: ${l}`);
+    assert.ok(shown.startsWith('To @linus: the retry loop'), 'the text starts on line 1');
+    assert.ok(shown.includes('jitter fixed it ↵  ↵ see'), 'each line break shown as a mark, not a line');
+    assert.equal(shown.replace(/\s+|↵/g, ''), `To@linus:${text.replace(/\s+/g, '')}`, 'nothing cut');
     assert.equal(sends[0].body, text, 'sent exactly as prepared');
   });
 });
 
-test('wrap() keeps every character but the spaces it breaks at', () => {
-  assert.equal(confirmBox.wrap('short line'), 'short line');
-  const w = confirmBox.wrap('aaa bbb ccc', 7);
-  assert.equal(w, 'aaa bbb\nccc');
-  assert.equal(confirmBox.wrap('x'.repeat(10), 4), 'xxxx\nxxxx\nxx');
-  assert.equal(confirmBox.wrap('a\n\nb', 4), 'a\n\nb');
+test('message(): the lead names the recipient, a reply, a retry or a keep, then the text on the same line', () => {
+  assert.equal(confirmBox.message({ to: 'sam', text: 'hi' }), 'To @sam: hi');
+  assert.equal(confirmBox.message({ to: 'sam', reply: true, text: 'yes' }), 'Reply to @sam: yes');
+  assert.equal(confirmBox.message({ to: 'sam', retry: true, text: 'yes' }), 'To @sam (again): yes');
+  assert.equal(confirmBox.message({ to: 'sam-x', held: true, text: 'yes' }), 'Keep for @sam-x: yes');
+  assert.equal(confirmBox.message({ to: 'sam', text: 'a\nb' }), 'To @sam: a ↵ b');
+});
+
+test('fits(): three wrapped lines show in full, a fourth does not', () => {
+  assert.equal(confirmBox.VISIBLE_LINES, 3);
+  const msg = (n) => confirmBox.message({ to: 'linus', text: Array(n).fill('word').join(' ') });
+  // "To @linus: " then 4-letter words: 40 words (199 characters) fill three lines.
+  assert.equal(msg(40).split('\n').length, 3);
+  assert.equal(confirmBox.fits(msg(40)), true, 'about 200 characters show whole');
+  assert.equal(msg(41).split('\n').length, 4);
+  assert.equal(confirmBox.fits(msg(41)), false);
+  assert.equal(confirmBox.fits(confirmBox.message({ to: 'linus', text: 'one\ntwo\nthree\nfour' })), true, 'line breaks do not use up lines');
+});
+
+test('the preview says so when the box will not show the whole text, only on a connection with a box', async () => {
+  const NOTE = 'The confirmation box will show the first lines of this; the full text is above.';
+  await withWire(async () => {
+    const shortText = 'short enough to show whole';
+    const longText = 'word '.repeat(60).trim();
+    const noBox = await prepare({ message: longText });
+    assert.ok(!noBox.display.includes(NOTE), 'no box on this connection: nothing to say');
+    confirmBox.noteClient({ protocolVersion: '2025-11-25', capabilities: { elicitation: {} } });
+    const fitting = await prepare({ message: shortText });
+    assert.ok(!fitting.display.includes(NOTE));
+    const long = await prepare({ message: longText });
+    assert.ok(long.display.endsWith(`\n${NOTE}`), long.display);
+    assert.ok(long.display.includes(longText), 'the full text is in the preview');
+  });
 });
 
 // ── what the box says, and what the model is told ────────────────────────────
 
-test('a reply names whose message it answers when this machine saw it arrive, else only the conversation', async () => {
+test('a reply says so in the lead', async () => {
   await withWire(async () => {
-    const dir = path.join(HOME, 'arrivals');
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'msg_arrived1.json'), JSON.stringify({ id: 'msg_arrived1', from: 'linus', text: 'did it work?' }));
     const p = await prepare({ message: 'yes it did', reply_to: 'msg_arrived1' });
     const box = fakeBox({ action: 'decline' });
     await sendIn(p, box);
-    assert.equal(box.asked[0].params.message, 'Send this to @linus?\nIt answers @linus\'s message.\n\nyes it did');
-    const q = await prepare({ message: 'also this', reply_to: 'msg_unknown9' });
-    const box2 = fakeBox({ action: 'decline' });
-    await sendIn(q, box2);
-    assert.equal(box2.asked[0].params.message, 'Send this to @linus?\nIt answers a message in your conversation with @linus.\n\nalso this');
+    assert.equal(box.asked[0].params.message, 'Reply to @linus: yes it did');
   });
 });
 
@@ -432,7 +452,7 @@ test('tool results never carry the box text, the message, or the rev', async () 
       const p = await prepare({ message: `${secret} ${answer.action}` });
       const r = await sendIn(p, fakeBox(answer));
       assert.ok(!r.display.includes('zebra'), r.display);
-      assert.ok(!r.display.includes('Send this to'), r.display);
+      assert.ok(!r.display.includes('To @linus:'), r.display);
       assert.ok(!r.display.includes(p.data.draft.rev), r.display);
       assert.ok(!/accept/i.test(r.display), 'never names the button');
     }
@@ -475,7 +495,7 @@ test('over stdio: a client that declared elicitation gets the box; its Decline c
     const id = prep.result.content[0].text.match(/draft (w[0-9a-f]+)/)[1];
     s.send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: { id, rev } } });
     const req = await s.waitFor((r) => r.method === 'elicitation/create');
-    assert.equal(req.params.message, 'Send this to @linus?\n\nover the wire');
+    assert.equal(req.params.message, 'To @linus: over the wire');
     assert.deepEqual(req.params.requestedSchema, { type: 'object', properties: {} });
     assert.equal(req.params.mode, 'form');
     // Another request is answered while the box is open.

@@ -314,12 +314,12 @@ function preview(d, person) {
     // The earlier Send did not confirm: it may already have reached them.
     // Only the two honest actions exist (codex P2).
     return {
-      display: `${head}the last Send did not confirm — it may or may not have reached @${d.to}. Send again retries exactly this text (delivers once) · Cancel. Editing is off for this draft.  _(draft ${d.id} · rev ${rev})_`,
+      display: `${head}the last Send did not confirm — it may or may not have reached @${d.to}. Send again retries exactly this text (delivers once) · Cancel. Editing is off for this draft.  _(draft ${d.id} · rev ${rev})_${boxNote(d)}`,
       data: { draft: { id: d.id, to: d.to, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to} again`, tool: 'vibe_send', args: { id: d.id, rev } }, { label: 'Cancel', tool: 'vibe_discard', args: { id: d.id } }] },
     };
   }
   return {
-    display: `${head}Send to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_`,
+    display: `${head}Send to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_${boxNote(d)}`,
     data: { draft: { id: d.id, to: d.to, body: d.body, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to}`, tool: 'vibe_send', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_prepare', args: { id: d.id, message: '<new body text — links are kept separately>' } }, { label: 'Cancel', tool: 'vibe_discard', args: { id: d.id } }] },
   };
 }
@@ -511,7 +511,7 @@ function heldPreview(d) {
   return {
     display: `**To:** @${d.to} (not on /vibe yet)\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n${noteLine(message)}\n`
       + `@${d.to} is not on /vibe yet. If you keep it, this exact message is held for the GitHub account ${d.to} for ${HELD_DAYS} days and arrives as your first message when they sign in to /vibe with that account. You get a link to pass on to them.\n\n`
-      + `Keep for @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_`,
+      + `Keep for @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_${boxNote(d)}`,
     data: {
       draft: { id: d.id, to: d.to, body: d.body, message, refs: d.refs || [], status: d.status, rev, held: true, for_github: d.to },
       actions: [{ label: `Keep for @${d.to}`, tool: 'vibe_send', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_prepare', args: { id: d.id, message: '<new body text — links are kept separately>' } }, { label: 'Cancel', tool: 'vibe_discard', args: { id: d.id } }],
@@ -649,25 +649,22 @@ const BOX_UNANSWERED = (to) => `Not sent: the confirmation box for @${to} was no
 const BOX_BUSY = 'Not sent: another /vibe confirmation box is open. Wait until it is answered.';
 const BOX_CHANGED = (to) => `Not sent: the draft to @${to} changed while the confirmation box was open. Show it again with vibe_prepare.`;
 const BOX_HOOK = (file) => `Not sent: a hook on this machine is set to answer /vibe's confirmation box (${file}). Remove it to send.`;
-const BOX_TOO_LONG = (to, n) => `Not sent: the message to @${to} is too long to confirm in a box (${n} characters; the most is ${require('../confirm-box').MAX_CHARS}). Shorten it with vibe_prepare and show it again.`;
-
+/** The Send box's message for a draft as it stands (confirm-box.js). */
+function boxMessageFor(d) {
+  return require('../confirm-box').message({ to: d.to, held: Boolean(d.held), retry: d.status === 'unknown', reply: Boolean(d.replyTo), text: compose(d).trim() });
+}
 /**
- * One short line on what a reply answers. The sender is named only when this
- * machine recorded that message's arrival (arrival.js spool) with a plain
- * handle; otherwise it says only where the message is.
+ * One plain line for the end of a preview, when this connection confirms in a
+ * box and the box will not show the whole text: the host shows only its first
+ * lines, so the full text is the preview above.
  */
-function replyLine(d) {
-  if (!d.replyTo) return null;
-  let from = null;
+const BOX_PARTIAL = 'The confirmation box will show the first lines of this; the full text is above.';
+function boxNote(d) {
   try {
-    const safe = /^[A-Za-z0-9_-]{4,80}$/.test(d.replyTo) ? d.replyTo : null;
-    if (safe) {
-      const row = readJson(path.join(config.VIBE_DIR, 'arrivals', `${safe}.json`), null);
-      const f = row && typeof row.from === 'string' ? row.from.trim().replace(/^@/, '').toLowerCase() : '';
-      if (f && isCanonicalHandle(f)) from = f;
-    }
-  } catch { from = null; }
-  return from ? `It answers @${from}'s message.` : `It answers a message in your conversation with @${d.to}.`;
+    const confirmBox = require('../confirm-box');
+    if (!confirmBox.available() || isAgentIdentity()) return '';
+    return confirmBox.fits(boxMessageFor(d)) ? '' : `\n${BOX_PARTIAL}`;
+  } catch { return ''; }
 }
 
 async function sendWithBox(id, rev, me, box) {
@@ -683,9 +680,7 @@ async function sendWithBox(id, rev, me, box) {
     if (hidden) return { display: storedHidden(d.id, hidden) };
     // Declined in a box: not offered in another until it is shown again.
     if (d.declinedRev === rev) return { display: BOX_DECLINED_BEFORE(d.to) };
-    const n = Array.from(message).length;
-    if (n > confirmBox.MAX_CHARS) return { display: BOX_TOO_LONG(d.to, n) };
-    return { boxed: { id: d.id, to: d.to, held: Boolean(d.held), retry: d.status === 'unknown', reply: replyLine(d), message, sha: sha256(message) } };
+    return { boxed: { id: d.id, to: d.to, text: boxMessageFor(d), message, held: Boolean(d.held), sha: sha256(message) } };
   });
   if (first.display) return { display: first.display, data: { sent: false, definite: true } };
   const b = first.boxed;
@@ -698,8 +693,7 @@ async function sendWithBox(id, rev, me, box) {
   }
   if (confirmBox.isOpen()) return refuse(BOX_BUSY, 'box_busy');
 
-  const text = confirmBox.message({ to: b.to, held: b.held, retry: b.retry, replyLine: b.reply, text: b.message });
-  const answer = await confirmBox.ask(box, text, box.timeoutMs ? { timeoutMs: box.timeoutMs } : {});
+  const answer = await confirmBox.ask(box, b.text, box.timeoutMs ? { timeoutMs: box.timeoutMs } : {});
   if (answer === 'busy') return refuse(BOX_BUSY, 'box_busy');
 
   if (answer === 'decline') {

@@ -29,8 +29,14 @@ const path = require('path');
 
 /** Display-only wrapping of the text in the box. 0 turns it off. Never changes what is sent. */
 const WRAP_COLUMNS = 72;
-/** A message longer than this (characters, as sent) is refused rather than shown in a box. */
-const MAX_CHARS = 1500;
+/**
+ * How many lines of the message the host's box shows before "… (+N more
+ * lines)" (Claude Code 2.1.330, tested by hand). The box message is laid out
+ * to put as much of the real text as possible in these.
+ */
+const VISIBLE_LINES = 3;
+/** A line break inside the text, as shown in the box: it does not use up a line. Display only. */
+const NEWLINE_MARK = ' \u21b5 ';
 /** The form asked for: no fields, so the box is Accept / Decline. */
 const SCHEMA = Object.freeze({ type: 'object', properties: Object.freeze({}) });
 /** How long a box may stay open before the send is given up. */
@@ -97,17 +103,21 @@ function wrap(text, width = WRAP_COLUMNS) {
 }
 
 /**
- * The box's message: a question naming the recipient, an optional short line
- * (what it answers, or that it retries), a blank line, then the whole text.
+ * The box's message. The host shows only its first VISIBLE_LINES lines, so
+ * there is no header line and no blank line: line 1 begins with who it is for
+ * ("To @handle: ", "Reply to @handle: ", "Keep for @handle: " for someone not
+ * on /vibe yet, "To @handle (again): " for a retry of an unconfirmed Send),
+ * followed directly by the text. A line break in the text is shown as " ↵ ".
+ * The whole text is always in the message; the host decides how much shows.
  */
-function message({ to, held = false, retry = false, replyLine = null, text }) {
-  const head = held
-    ? `Keep this for @${to} until they join /vibe?`
-    : `Send this to @${to}${retry ? ' again' : ''}?`;
-  const lines = [head];
-  if (retry && !held) lines.push('The last Send did not confirm; this one arrives once.');
-  if (replyLine) lines.push(replyLine);
-  return `${lines.join('\n')}\n\n${wrap(text)}`;
+function message({ to, held = false, retry = false, reply = false, text }) {
+  const lead = held ? `Keep for @${to}: ` : `${reply ? 'Reply to' : 'To'} @${to}${retry ? ' (again)' : ''}: `;
+  return wrap(lead + String(text).split('\n').join(NEWLINE_MARK));
+}
+
+/** Does the whole box message show in the lines the host displays? */
+function fits(boxMessage) {
+  return String(boxMessage).split('\n').length <= VISIBLE_LINES;
 }
 
 /** The params of elicitation/create for this connection. */
@@ -243,8 +253,8 @@ function labAllowsHook(env = process.env) {
 }
 
 module.exports = {
-  WRAP_COLUMNS, MAX_CHARS, SCHEMA, TIMEOUT_MS, ELICITATION_VERSIONS,
-  noteClient, available, clientState, wrap, message, request, ask, isOpen,
+  WRAP_COLUMNS, VISIBLE_LINES, NEWLINE_MARK, SCHEMA, TIMEOUT_MS, ELICITATION_VERSIONS,
+  noteClient, available, clientState, wrap, message, fits, request, ask, isOpen,
   matcherCatches, settingsAnswerBox, settingsFiles, answeringHook, labAllowsHook,
   _resetForTest,
 };
