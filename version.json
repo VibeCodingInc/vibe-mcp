@@ -1,17 +1,14 @@
 {
-  "version": "0.9.23",
+  "version": "0.9.24",
   "updated": "2026-11-21",
-  "changelog": "Send is now confirmed in a box that /vibe opens and the agent cannot answer, and your own earlier messages are labelled as yours.",
+  "changelog": "To send, you now type the first letters of who the message is going to, so pressing Enter, or typing \"send\" again out of habit, can no longer send it.",
   "features": [
-    "When the agent sends, /vibe opens its own confirmation box naming the person and showing the start of the message. Only Accept sends. The agent cannot see the box or answer it",
-    "Where /vibe can tell that you typed, sending needs both: you say send after seeing the preview, then you press Accept",
-    "After a Decline or Esc, no box opens again until you type, and the agent is told only that it was not sent",
-    "With nobody at the keyboard the box cannot be accepted, so nothing goes. Unattended sending needs an agent account",
-    "/vibe refuses to send if a hook is set up in your settings to answer its box for you",
-    "In a thread, each of your own messages says where it came from, so a new session no longer treats your earlier message as unexplained",
-    "Apps that cannot show the box keep the earlier check, and the preview says so",
-    "An agent account is exempt only when really signed in as that agent, not because a setting says so",
-    "Open-line questions can no longer exceed their hourly limit when asked in parallel"
+    "The Send box asks you to type the first letters of who the message is going to. Enter alone cannot send, and neither can an everyday reply such as \"send\", \"no\" or \"ok\"",
+    "What was wrong in 0.9.23: the box had Accept already selected, so an extra Enter right after typing \"send\" could accept it before you had seen it",
+    "The letters asked for are always longer than any everyday reply word the name begins with: for @noah you type \"noa\"; a name that is itself such a word needs \"@\" and the whole name",
+    "A message kept for someone not on /vibe yet is confirmed the same way",
+    "The agent is told never to tell you what to type in the box",
+    "Everything else is as in 0.9.23: where /vibe can tell that you typed, you say send first and then confirm in the box; after a decline no box opens again until you type; with nobody at the keyboard nothing goes"
   ],
   "deprecated": [],
   "breaking": false,
