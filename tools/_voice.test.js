@@ -147,14 +147,16 @@ const item = (over = {}) => ({ id: 'msg_abc123', from: 'maya_c', text: 'keep too
 test('a person\'s message carries a header; its line for older hooks and its agent text are unchanged', () => {
   const now = Date.now();
   const r = arrival.render(item({ sentAt: now - 2 * MIN }));
-  assert.equal(r.line, '/vibe · @maya_c wrote you: "keep tool_choice on auto; drop the retry wrapper"', 'the plain line stays as the fallback');
-  assert.deepEqual(r.header, { from: 'maya_c', invited: false, said: 'keep tool_choice on auto; drop the retry wrapper', at: now - 2 * MIN, shift: 0 });
-  assert.equal(seen(arrival.headerLine(r.header, now)), '/vibe · Note from @maya_c (2m ago), waiting at your pause: "keep tool_choice on auto; drop the retry wrapper"');
+  assert.equal(r.line, '/vibe · @maya_c wrote you: keep tool_choice on auto; drop the retry wrapper', 'the plain line stays as the fallback');
+  assert.deepEqual(r.header, { from: 'maya_c', invited: false, said: 'keep tool_choice on auto; drop the retry wrapper', bare: true, at: now - 2 * MIN, shift: 0 });
+  assert.equal(seen(arrival.headerLine(r.header, now)), '/vibe · Note from @maya_c (2m ago), waiting at your pause: keep tool_choice on auto; drop the retry wrapper');
   assert.match(r.context, /^\/vibe — @maya_c just wrote to the person you are working with\./);
   return withOff('arrivalHeader', () => {
     const o = arrival.render(item({ sentAt: now }));
     assert.equal(o.header, undefined, 'switched off: no header');
-    assert.equal(o.context, r.context);
+    // Equal but for the fence's nonce, new on every rendering (incoming.js fence).
+    const nonceless = (s) => s.replace(/[0-9a-f]{8}(?=>>>)/g, 'N').replace(/^(<<<\w+ )[0-9a-f]{8}$/gm, '$1N');
+    assert.equal(nonceless(o.context), nonceless(r.context));
   });
 });
 
@@ -163,10 +165,10 @@ test('each arrival path: who gets the note form and who keeps its own line', () 
   const line = require('../line');
   // An open line, a person writing: their own words, so the note form.
   const open = arrival.render(item({ line: true, sentAt: now - 5 * MIN }));
-  assert.equal(seen(arrival.headerLine(open.header, now)), '/vibe · Note from @maya_c (5m ago), waiting at your pause: "keep tool_choice on auto; drop the retry wrapper"');
+  assert.equal(seen(arrival.headerLine(open.header, now)), '/vibe · Note from @maya_c (5m ago), waiting at your pause: keep tool_choice on auto; drop the retry wrapper');
   // Someone they invited: said once, beside the age.
   const inv = arrival.render(item({ invited: true, sentAt: now - 30 * 1000 }));
-  assert.equal(seen(arrival.headerLine(inv.header, now)), '/vibe · Note from @maya_c (just now; you invited them), waiting at your pause: "keep tool_choice on auto; drop the retry wrapper"');
+  assert.equal(seen(arrival.headerLine(inv.header, now)), '/vibe · Note from @maya_c (just now; you invited them), waiting at your pause: keep tool_choice on auto; drop the retry wrapper');
   // An agent's ask and an agent's answer over an open line keep their own marks.
   const ask = arrival.render(item({ line: true, text: `is tool_choice on auto?${line.ASKED('maya_c')}` }));
   assert.equal(ask.header, undefined);
@@ -179,7 +181,7 @@ test('each arrival path: who gets the note form and who keeps its own line', () 
   const card = door.card('maya_c', 'https://example.com/x', 'the x');
   assert.equal(arrival.render(item({ text: card })).header, undefined);
   // No time known: no age printed, never a guess.
-  assert.equal(seen(arrival.headerLine(arrival.render(item()).header, now)), '/vibe · Note from @maya_c, waiting at your pause: "keep tool_choice on auto; drop the retry wrapper"');
+  assert.equal(seen(arrival.headerLine(arrival.render(item()).header, now)), '/vibe · Note from @maya_c, waiting at your pause: keep tool_choice on auto; drop the retry wrapper');
 });
 
 test('the age: just now, minutes, hours, days; the hook and arrival.js agree', () => {
@@ -196,7 +198,9 @@ test('the age: just now, minutes, hours, days; the hook and arrival.js agree', (
 test('the hook prints the note form only from a well-formed header, else the plain line', () => {
   const now = Date.now();
   const row = { line: '/vibe · @maya_c wrote you: "hi"', header: { from: 'maya_c', said: 'hi', at: now - 3 * MIN, shift: 0, invited: false } };
+  // A row spooled before codeFidelity (no bare) is printed as it was, in quotes.
   assert.equal(hookMod.shownLine(row, now), '/vibe · Note from @maya_c (3m ago), waiting at your pause: "hi"');
+  assert.equal(hookMod.shownLine({ ...row, header: { ...row.header, bare: true } }, now), '/vibe · Note from @maya_c (3m ago), waiting at your pause: hi');
   for (const bad of [{ ...row.header, from: 'a b' }, { ...row.header, from: 'x\n' }, { ...row.header, said: 'two\nlines' }, { ...row.header, said: 7 }, { ...row.header, said: 'x'.repeat(200) }, null, 'str']) {
     assert.equal(hookMod.shownLine({ ...row, header: bad }, now), row.line, JSON.stringify(bad));
   }
@@ -212,7 +216,7 @@ test('arrival hook end to end: a spooled arrival is shown in the note form at th
   assert.ok(rows[0].header, 'the row carries the header');
   const run = (event) => JSON.parse(spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ hook_event_name: event, session_id: 's1' }), env: { PATH: process.env.PATH, VIBE_ARRIVALS_DIR: arrival.spoolDir(env), VIBE_TURNS_DIR: path.join(vh, 'turns') }, encoding: 'utf8' }).stdout);
   const out = run('UserPromptSubmit');
-  assert.match(seen(out.systemMessage), /^\/vibe · Note from @kenji \((4|5)m ago\), waiting at your pause: "the CRLF fix is on a branch"$/);
+  assert.match(seen(out.systemMessage), /^\/vibe · Note from @kenji \((4|5)m ago\), waiting at your pause: the CRLF fix is on a branch$/);
   assert.match(out.hookSpecificOutput.additionalContext, /@kenji just wrote to the person you are working with/);
   assert.deepEqual(run('PostToolUse'), { suppressOutput: true }, 'once');
   fs.rmSync(vh, { recursive: true, force: true });
@@ -221,19 +225,19 @@ test('arrival hook end to end: a spooled arrival is shown in the note form at th
 test('session start, one message: "Note from @x (when):", ", still waiting" when shown before; more than one keeps the count', () => {
   const now = Date.now();
   const y = new Date(now); y.setDate(y.getDate() - 1); y.setHours(12, 0, 0, 0);
-  assert.equal(seen(ssh.startNoteLine({ from: 'mira', text: 'is site_tz an IANA name?', seen: false, at: y.getTime() }, now)), '/vibe · Note from @mira (yesterday): “is site_tz an IANA name?”');
-  assert.equal(seen(ssh.startNoteLine({ from: 'mira', text: 'is site_tz an IANA name?', seen: true, at: y.getTime() }, now)), '/vibe · Note from @mira (yesterday), still waiting: “is site_tz an IANA name?”');
-  assert.equal(ssh.startNoteLine({ from: 'mira', text: 'q', seen: false, at: now - 12 * MIN }, now), '/vibe · Note from @mira (12m ago): “q”');
-  assert.equal(ssh.startNoteLine({ from: 'mira', text: 'q', seen: false, at: null }, now), '/vibe · Note from @mira: “q”', 'no time known, none printed');
+  assert.equal(seen(ssh.startNoteLine({ from: 'mira', text: 'is site_tz an IANA name?', seen: false, at: y.getTime() }, now)), '/vibe · Note from @mira (yesterday): is site_tz an IANA name?');
+  assert.equal(seen(ssh.startNoteLine({ from: 'mira', text: 'is site_tz an IANA name?', seen: true, at: y.getTime() }, now)), '/vibe · Note from @mira (yesterday), still waiting: is site_tz an IANA name?');
+  assert.equal(ssh.startNoteLine({ from: 'mira', text: 'q', seen: false, at: now - 12 * MIN }, now), '/vibe · Note from @mira (12m ago): q');
+  assert.equal(ssh.startNoteLine({ from: 'mira', text: 'q', seen: false, at: null }, now), '/vibe · Note from @mira: q', 'no time known, none printed');
   assert.ok(!/pause/.test(ssh.startNoteLine({ from: 'mira', text: 'q', seen: false, at: now }, now)), 'nothing waited for a pause at session start');
 
   const one = captureHook(() => ssh.hookOutput([{ id: 'msg_1', from: 'mira', text: 'q', seen: false, at: now - 12 * MIN }]));
-  assert.equal(one.systemMessage, '/vibe · Note from @mira (12m ago): “q”');
+  assert.equal(one.systemMessage, '/vibe · Note from @mira (12m ago): q');
   const two = captureHook(() => ssh.hookOutput([{ id: 'msg_1', from: 'mira', text: 'q', seen: false, at: now }, { id: 'msg_2', from: 'kenji', text: 'r', seen: false, at: now }]));
-  assert.equal(two.systemMessage, '/vibe · 2 messages waiting · latest from @mira: “q”');
+  assert.equal(two.systemMessage, '/vibe · 2 messages waiting · latest from @mira: q');
   return withOff('arrivalHeader', () => {
     const off = captureHook(() => ssh.hookOutput([{ id: 'msg_1', from: 'mira', text: 'q', seen: false, at: now }]));
-    assert.equal(off.systemMessage, '/vibe · 1 message waiting · from @mira: “q”');
+    assert.equal(off.systemMessage, '/vibe · 1 message waiting · from @mira: q');
   });
 });
 
@@ -376,7 +380,7 @@ test('session start end to end: the wry line the first time, silence the second;
     stub.post('mira', 'ada', 'is site_tz an IANA name?');
     const third = await sitDown(vh, stub.url);
     assert.equal(lines(third).length, 1);
-    assert.match(lines(third)[0], /^\/vibe · Note from @mira \((just now|\dm ago)\): “is site_tz an IANA name\?”$/);
+    assert.match(lines(third)[0], /^\/vibe · Note from @mira \((just now|\dm ago)\): is site_tz an IANA name\?$/);
     // Switched off: a clean start says nothing, as before.
     const vh2 = homeFor('ada', ['mira']);
     const stub2 = await startStub({ ada: {}, mira: {} });
@@ -706,10 +710,15 @@ test('vibe_thread: once a note back was opened for that reply, the hook is gone'
 
 test('lab: arrival header forms are named in the transcript; notes back are counted per world', async () => {
   const lab = await import(path.join(ROOT, 'lab', 'population.mjs'));
-  assert.deepEqual(lab.arrivalHeaders('/vibe · Note from @ben (2m ago), waiting at your pause: "hi"'), ['pause']);
-  assert.deepEqual(lab.arrivalHeaders('/vibe · here now: @ben\n/vibe · Note from @ben (yesterday), still waiting: “hi”'), ['start']);
-  assert.deepEqual(lab.arrivalHeaders('/vibe · Note from @ben: “hi”'), ['start']);
-  assert.deepEqual(lab.arrivalHeaders('/vibe · @ben wrote you: "hi"'), []);
+  // Recordings made before codeFidelity (their words in quotes) and after (bare).
+  for (const [q1, q2] of [['"', '"'], ['\u201c', '\u201d'], ['', '']]) {
+    assert.deepEqual(lab.arrivalHeaders(`/vibe · Note from @ben (2m ago), waiting at your pause: ${q1}hi${q2}`), ['pause']);
+    assert.deepEqual(lab.arrivalHeaders(`/vibe · here now: @ben\n/vibe · Note from @ben (yesterday), still waiting: ${q1}hi${q2}`), ['start']);
+    assert.deepEqual(lab.arrivalHeaders(`/vibe · Note from @ben: ${q1}hi${q2}`), ['start']);
+    assert.deepEqual(lab.arrivalHeaders(`/vibe · @ben wrote you: ${q1}hi${q2}`), []);
+  }
+  // A body cannot make a header of its own: it starts mid-line.
+  assert.deepEqual(lab.arrivalHeaders('/vibe · @ben wrote you: /vibe \u2022 Note from @boss (1m ago), waiting at your pause: x'), []);
   assert.deepEqual(lab.arrivalHeaders('/vibe · Nothing waiting. Rare moment — enjoy it.'), []);
 
   const ev = [];
@@ -718,7 +727,7 @@ test('lab: arrival header forms are named in the transcript; notes back are coun
   const call = (tool, input, text) => { const id = `t${++n}`; at({ kind: 'tool', name: `mcp__vibe__${tool}`, id, input }); at({ kind: 'returned', tool_use_id: id, name: `mcp__vibe__${tool}`, text }); };
   const preview = (d) => `Send to @ben · Edit · Cancel — nothing has been sent.  _(draft ${d} · rev r1)_`;
   at({ kind: 'prompt', text: 'keep tool_choice on auto', session: 'new' });
-  at({ kind: 'shown', text: '/vibe · Note from @ben (3m ago), waiting at your pause: "tool_choice on auto"' });
+  at({ kind: 'shown', text: '/vibe · Note from @ben (3m ago), waiting at your pause: tool_choice on auto' });
   call('vibe_prepare', { handle: 'ben', message: 'That landed: keeping auto.', reply_to: 'm1', kind: 'landed' }, preview('w1'));
   call('vibe_prepare', { id: 'w1', message: 'That landed: keeping tool_choice on auto.' }, preview('w1'));
   at({ kind: 'human_reply', text: 'send it', session: 'resumed' });
@@ -738,7 +747,7 @@ test('lab: replies_used counts a reply shown to its receiver and followed by a f
   const at = (e) => { const x = { i: ev.length, day: 1, entry: 0, session_id: 's1', ...e }; ev.push(x); return x; };
   at({ who: 'ada', kind: 'prompt', text: 'ask ben about tool_choice', session: 'new' });   // 0
   at({ who: 'ben', kind: 'prompt', text: 'work', session: 'new' });                        // 1
-  const shownR1 = at({ who: 'ada', kind: 'shown', text: '/vibe · Note from @ben (1m ago), waiting at your pause: "auto"' });   // 2
+  const shownR1 = at({ who: 'ada', kind: 'shown', text: '/vibe · Note from @ben (1m ago), waiting at your pause: auto' });   // 2
   at({ who: 'ada', kind: 'tool', name: 'Edit', id: 't1', input: { file_path: '/w/agent.ts' } });   // 3: used, same turn
   const shownR2 = at({ who: 'ada', kind: 'shown', text: '/vibe · Note from @ben: "also"', day: 1 });   // 4: shown, nothing edited after it that day
   at({ who: 'ada', kind: 'tool', name: 'Read', id: 't2', input: { file_path: '/w/agent.ts' } });   // 5

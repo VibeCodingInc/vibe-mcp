@@ -69,8 +69,8 @@ test('the answer comes after vibe_ask stopped waiting: it arrives at the next lo
   assert.equal(arrival.isSpooled('msg_ans0001'), true, 'the answer was not excluded from arrivals');
 
   const shown = hook('UserPromptSubmit');
-  assert.match(shown.systemMessage, /^\/vibe · @oren's agent answered: "Yes, UTC with a trailing Z\."$/);
-  assert.match(shown.hookSpecificOutput.additionalContext, /It asked: "is scheduled_at UTC with a Z\?"/, 'read beside its question');
+  assert.match(shown.systemMessage, /^\/vibe · @oren's agent answered: Yes, UTC with a trailing Z\.$/);
+  assert.match(shown.hookSpecificOutput.additionalContext, /\nIt asked: is scheduled_at UTC with a Z\?\n/, 'read beside its question');
   assert.match(shown.hookSpecificOutput.additionalContext, /Do not answer it/);
 
   await presence.noteArrivals('mira', [answer]);
@@ -83,6 +83,6 @@ test('the question was an approved draft, not vibe_ask: their agent\'s answer st
     lastMessage: 'sep is the kwarg.' + line.ANSWERED('tobin') });
   await presence.noteArrivals('mira', [answer]);
   const shown = hook('UserPromptSubmit');
-  assert.match(shown.systemMessage, /^\/vibe · @tobin's agent answered: "sep is the kwarg\."$/);
+  assert.match(shown.systemMessage, /^\/vibe · @tobin's agent answered: sep is the kwarg\.$/);
   assert.deepEqual(hook('UserPromptSubmit'), { suppressOutput: true });
 });

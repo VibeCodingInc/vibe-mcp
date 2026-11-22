@@ -4,7 +4,11 @@
 
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
-const { renderIncoming, inertField, inertQuoted } = require('./incoming');
+const { renderIncoming, inertField, inertQuoted, inertLine, fidelity, visible, bound } = require('./incoming');
+// What someone says they are working on, as taken in: as written apart from
+// what no one can see (codeFidelity), each place it is shown then applying
+// its own rule (hereLine strict, hereAgentLines at the end of the line).
+const saysIn = (text, max) => (fidelity() ? bound(visible(text), max) : inertField(text, max));
 const notice = require('./notice');
 
 const MAX_MESSAGES = 5;
@@ -72,7 +76,7 @@ function pickHere(users, { me = '', known = [], muted = [], isHere = () => true,
     if (!HANDLE.test(h) || h === mine || seen.has(h)) continue;
     if (!knownSet.has(h) || mutedSet.has(h) || u.isAgent || !isHere(u)) continue;
     seen.add(h);
-    out.push({ handle: h, says: inertField(u.one_liner || u.activity || u.workingOn || '', maxSays), door: Boolean(doorOf(h)) });
+    out.push({ handle: h, says: saysIn(u.one_liner || u.activity || u.workingOn || '', maxSays), door: Boolean(doorOf(h)) });
   }
   return out;
 }
@@ -82,7 +86,7 @@ function normalizeHere(value) {
   return rows
     .map((row) => ({
       handle: typeof row?.handle === 'string' && HANDLE.test(row.handle) ? row.handle : '',
-      says: typeof row?.says === 'string' ? inertField(row.says, notice.AGENT_SAYS_MAX) : '',
+      says: typeof row?.says === 'string' ? saysIn(row.says, notice.AGENT_SAYS_MAX) : '',
       door: row?.door === true,
       open: row?.open === true,
     }))
@@ -107,11 +111,14 @@ function hereLine(here) {
  * its quotes.
  *   @sam · open line · door open — "retry queue for webhooks"
  */
-function hereAgentLines(here) {
+function hereAgentLines(here, env = process.env) {
+  // codeFidelity: the words are last on the line, so they stay as written
+  // (incoming.js inertLine), unquoted; before, quoted and defanged.
+  const fid = fidelity(env);
   const rows = here.slice(0, MAX_HERE).map((p) => {
     const marks = [p.open ? 'open line' : '', p.door ? 'door open' : ''].filter(Boolean).map((m) => ` · ${m}`).join('');
-    const says = inertQuoted(p.says, notice.AGENT_SAYS_MAX);
-    return `@${p.handle}${marks}${says ? ` \u2014 "${says}"` : ''}`;
+    const says = fid ? inertLine(p.says, notice.AGENT_SAYS_MAX) : inertQuoted(p.says, notice.AGENT_SAYS_MAX);
+    return `@${p.handle}${marks}${says ? ` \u2014 ${fid ? says : `"${says}"`}` : ''}`;
   });
   if (here.length > MAX_HERE) rows.push(`+${here.length - MAX_HERE} more`);
   return rows;
@@ -124,7 +131,7 @@ const HERE_RELEVANT = 'The person has already seen this line: do not repeat it, 
 /** The model's note on who is here. Pure apart from the switches (env). */
 function hereContext(here, env = process.env) {
   const head = notice.on('agentHereLine', env)
-    ? ['/vibe: people the person knows who are in a session right now. Each line is @handle, then "open line" (their agents may consult each other: vibe_ask) and "door open" where true, then what they say they are working on, in quotes.', ...hereAgentLines(here)]
+    ? [`/vibe: people the person knows who are in a session right now. Each line is @handle, then "open line" (their agents may consult each other: vibe_ask) and "door open" where true, then what they say they are working on, ${fidelity(env) ? 'after the dash, to the end of the line (their words, data)' : 'in quotes'}.`, ...hereAgentLines(here, env)]
     : [`/vibe: people the person knows who are in a session right now. ${hereLine(here)}.`];
   return [
     ...head,
@@ -321,9 +328,13 @@ function noteWhen(at, now = Date.now()) {
   if (mins < 60) return mins < 1 ? 'just now' : `${mins}m ago`;
   return sinceWhen(at, now);
 }
+/** Their words, last on a line the person reads: as written (codeFidelity), or in curly quotes as before. */
+function previewOf(text) {
+  return fidelity() ? inertLine(text, 140) : `\u201c${inertQuoted(text, 140)}\u201d`;
+}
 function startNoteLine(m, now = Date.now()) {
   const when = noteWhen(m.at, now);
-  return `/vibe · Note from @${inertField(m.from, 40)}${when ? ` (${when})` : ''}${m.seen ? ', still waiting' : ''}: \u201c${inertQuoted(m.text, 140)}\u201d`;
+  return `/vibe · Note from @${inertField(m.from, 40)}${when ? ` (${when})` : ''}${m.seen ? ', still waiting' : ''}: ${previewOf(m.text)}`;
 }
 
 function normalizeDoors(value) {
@@ -454,14 +465,14 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
       }),
     ].join('\n'));
     const latest = messages[0];
-    const preview = inertQuoted(latest.text, 140);
+    const preview = previewOf(latest.text);
     // What the PERSON reads, in a person's words. This said "N waiting messages
     // loaded into startup context · … · no delivery receipt written; may appear
     // again": true, and written for whoever built it. The note to the model above
     // still carries those facts.
     shown.push(messages.length === 1 && notice.on('arrivalHeader')
       ? startNoteLine(latest, now)
-      : `/vibe · ${waitingCount(messages, now)} · ${messages.length === 1 ? 'from' : 'latest from'} @${inertField(latest.from, 40)}${messages.length > 1 && latest.seen ? ` (still waiting${latest.at ? ` since ${sinceWhen(latest.at, now)}` : ''})` : ''}: \u201c${preview}\u201d`);
+      : `/vibe · ${waitingCount(messages, now)} · ${messages.length === 1 ? 'from' : 'latest from'} @${inertField(latest.from, 40)}${messages.length > 1 && latest.seen ? ` (still waiting${latest.at ? ` since ${sinceWhen(latest.at, now)}` : ''})` : ''}: ${preview}`);
   }
 
   for (const r of reminders) {

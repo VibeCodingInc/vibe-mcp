@@ -315,7 +315,8 @@ function ago(ms) {
 }
 function headerLine(h, now = Date.now()) {
   const bits = [Number.isFinite(h.at) ? ago(now + (Number.isFinite(h.shift) ? h.shift : 0) - h.at) : '', h.invited ? 'you invited them' : ''].filter(Boolean).join('; ');
-  return `/vibe · Note from @${h.from}${bits ? ` (${bits})` : ''}, waiting at your pause: "${h.said}"`;
+  // bare (arrival.js, codeFidelity): their words end the line as written.
+  return `/vibe · Note from @${h.from}${bits ? ` (${bits})` : ''}, waiting at your pause: ${h.bare === true ? h.said : `"${h.said}"`}`;
 }
 function shownLine(row, now = Date.now()) {
   const h = row && row.header;

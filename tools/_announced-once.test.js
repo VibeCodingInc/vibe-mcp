@@ -69,7 +69,7 @@ test('shown at session start, then not announced again by the arrival hook in th
     const vh = homeFor('maddy', ['oren']);
     const env = { VIBE_HOME: vh };
     const start = await sitDown(vh, stub.url);
-    assert.match(start.out.systemMessage, /Note from @oren \((just now|\d+m ago)\): “7 min, cut Nov 12\. Spec is stale\.”/);
+    assert.match(start.out.systemMessage, /Note from @oren \((just now|\d+m ago)\): 7 min, cut Nov 12\. Spec is stale\./);
 
     // The server's first look: the message is newer than the process (slack), so
     // it would be an arrival. It is already the session-start line's.
@@ -97,7 +97,7 @@ test('a message that comes after the session opened is still announced, once', a
     const spooled = arrival.record(await inboxRows(stub, 'maddy'), 'maddy', { since: Date.now() - 60_000, env });
     assert.deepEqual(spooled.map((r) => r.id), [later.id]);
     const shown = arrivalHook(vh, 'UserPromptSubmit');
-    assert.match(shown.systemMessage, /^\/vibe · Note from @oren \((just now|\d+m ago)\), waiting at your pause: "second: cut moved to Nov 14"$/);
+    assert.match(shown.systemMessage, /^\/vibe · Note from @oren \((just now|\d+m ago)\), waiting at your pause: second: cut moved to Nov 14$/);
     assert.deepEqual(arrivalHook(vh, 'PostToolUse'), { suppressOutput: true }, 'once');
   } finally { await stub.close(); }
 });

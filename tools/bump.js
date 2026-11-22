@@ -26,7 +26,7 @@ const door = require('../door');
 const line = require('../line');
 const reach = require('../reach');
 const { requireInit, normalizeHandle, isHereNow } = require('./_shared');
-const { inertField, inertQuoted } = require('../incoming');
+const { inertField, inertQuoted, fidelity } = require('../incoming');
 const { pickHere } = require('../session-start-hook.cjs');
 
 const MAX_NAMES = 3;
@@ -101,7 +101,9 @@ async function handler(args) {
   const rows = near.map((p) => {
     const d = doors.get(p.handle) || null;
     const doorBit = d ? ` · \u{1F6AA} door open${d.name ? `: "${inertQuoted(d.name, door.MAX_NAME)}"` : ''}` : '';
-    return `@${p.handle} — "${p.says}"${doorBit}`;
+    // Strict: their words sit in quotes with the door mark after them, so they
+    // keep inertQuoted (pickHere takes them in as written under codeFidelity).
+    return `@${p.handle} — "${fidelity() ? inertQuoted(p.says, 120) : p.says}"${doorBit}`;
   });
   const anyDoor = doors.size > 0;
   const display = [
