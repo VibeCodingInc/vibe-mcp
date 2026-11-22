@@ -49,6 +49,8 @@ const META_PROTOCOL_VERSION = 'io.modelcontextprotocol/protocolVersion';
 const META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo';
 // Modern era: the client declares its capabilities on every request.
 const META_CLIENT_CAPABILITIES = 'io.modelcontextprotocol/clientCapabilities';
+// ...and names itself on every request (Claude Code 2.1.330 sends it on tools/call too).
+const META_CLIENT_INFO = 'io.modelcontextprotocol/clientInfo';
 const SERVER_INFO = {
   name: 'vibe',
   version: pkg.version,
@@ -265,6 +267,10 @@ class VibeMCPServer {
         error: { code: -32022, message: 'Unsupported protocol version', data: { supported: [MODERN_PROTOCOL_VERSION], requested: requestedVersion } },
       };
     }
+    // The host, as this request names it: the turn check (turns.js) applies
+    // only inside Claude Code, and a stateless client may never call
+    // server/discover. server/discover and the environment still count.
+    if (isModern && params?._meta?.[META_CLIENT_INFO]) require('./host').setClientInfo(params._meta[META_CLIENT_INFO]);
     const response = await this.dispatch(request, extra);
     if (isModern && response?.result) {
       response.result.resultType = response.result.resultType || 'complete';
