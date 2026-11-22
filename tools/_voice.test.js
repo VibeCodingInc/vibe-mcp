@@ -81,7 +81,7 @@ test('the five voice switches exist, are on, and turn off by name only against a
 // ── 1 voiceCharter, 2 noticingLine, 5 itLanded: the guidance ───────────────
 
 const CHARTER = 'When you speak about /vibe matters, be brief and concrete, use names rather than roles ("Kenji", not "your teammate"), use no exclamation marks, and never say "quick question", "just checking in", "ping", "great question" or "nothing in this session covers that" (search first).';
-const NOTICING = 'When you offer a message because someone holds the answer, lead with one line on why this person, at most about 90 characters, saying only what their own status line, note or conversation actually says (quote or closely paraphrase it), for example "Kenji already has the cardamom steam test open. Faster than figuring it out twice."; never say someone solved or knows something unless their own words say so.';
+const NOTICING = 'When you offer a message because someone holds the answer, lead with one line on why this person, at most about 90 characters, saying only what their own status line, note or conversation actually says (quote or closely paraphrase it), for example "Jonas already has the CRLF fix on a branch. Faster than figuring it out twice."; never say someone solved or knows something unless their own words say so.';
 const LANDED_START = 'When a reply the person received leads to a concrete change in this session (they edit a file, change a plan or a number, or hold an action because of it), and only once that change has actually been made, you may offer one note back to the sender for that reply: vibe_prepare with handle, message, reply_to (their reply\'s id) and kind "landed".';
 
 test('SERVER_INSTRUCTIONS carries each guidance sentence, and each goes with its switch', () => {
@@ -90,7 +90,7 @@ test('SERVER_INSTRUCTIONS carries each guidance sentence, and each goes with its
   assert.ok(now.includes(CHARTER), 'voiceCharter');
   assert.ok(now.includes(NOTICING), 'noticingLine');
   assert.ok(now.includes(LANDED_START), 'itLanded');
-  assert.ok(now.includes('That landed: I\'m going with the 30s keepalive and calling off the Rev C return.'));
+  assert.ok(now.includes('That landed: I\'m keeping tool_choice on auto and dropping the retry wrapper.'));
   assert.ok(now.includes('never send it without their choice'));
   assert.ok(!serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'voiceCharter' }).includes(CHARTER));
   assert.ok(serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'voiceCharter' }).includes(NOTICING));
@@ -122,14 +122,14 @@ test('docs/VOICE.md: the three sentences, the never-use list, and print only wha
 
 // ── 3 arrivalHeader ─────────────────────────────────────────────────────────
 
-const item = (over = {}) => ({ id: 'msg_abc123', from: 'maya_c', text: 'use the 30s keepalive; Rev C is fine', unread: 1, kind: null, building: '', context: null, at: Date.now(), line: false, invited: false, note: null, ...over });
+const item = (over = {}) => ({ id: 'msg_abc123', from: 'maya_c', text: 'keep tool_choice on auto; drop the retry wrapper', unread: 1, kind: null, building: '', context: null, at: Date.now(), line: false, invited: false, note: null, ...over });
 
 test('a person\'s message carries a header; its line for older hooks and its agent text are unchanged', () => {
   const now = Date.now();
   const r = arrival.render(item({ sentAt: now - 2 * MIN }));
-  assert.equal(r.line, '/vibe · @maya_c wrote you: "use the 30s keepalive; Rev C is fine"', 'the plain line stays as the fallback');
-  assert.deepEqual(r.header, { from: 'maya_c', invited: false, said: 'use the 30s keepalive; Rev C is fine', at: now - 2 * MIN, shift: 0 });
-  assert.equal(seen(arrival.headerLine(r.header, now)), '/vibe · Note from @maya_c (2m ago), waiting at your pause: "use the 30s keepalive; Rev C is fine"');
+  assert.equal(r.line, '/vibe · @maya_c wrote you: "keep tool_choice on auto; drop the retry wrapper"', 'the plain line stays as the fallback');
+  assert.deepEqual(r.header, { from: 'maya_c', invited: false, said: 'keep tool_choice on auto; drop the retry wrapper', at: now - 2 * MIN, shift: 0 });
+  assert.equal(seen(arrival.headerLine(r.header, now)), '/vibe · Note from @maya_c (2m ago), waiting at your pause: "keep tool_choice on auto; drop the retry wrapper"');
   assert.match(r.context, /^\/vibe — @maya_c just wrote to the person you are working with\./);
   return withOff('arrivalHeader', () => {
     const o = arrival.render(item({ sentAt: now }));
@@ -143,15 +143,15 @@ test('each arrival path: who gets the note form and who keeps its own line', () 
   const line = require('../line');
   // An open line, a person writing: their own words, so the note form.
   const open = arrival.render(item({ line: true, sentAt: now - 5 * MIN }));
-  assert.equal(seen(arrival.headerLine(open.header, now)), '/vibe · Note from @maya_c (5m ago), waiting at your pause: "use the 30s keepalive; Rev C is fine"');
+  assert.equal(seen(arrival.headerLine(open.header, now)), '/vibe · Note from @maya_c (5m ago), waiting at your pause: "keep tool_choice on auto; drop the retry wrapper"');
   // Someone they invited: said once, beside the age.
   const inv = arrival.render(item({ invited: true, sentAt: now - 30 * 1000 }));
-  assert.equal(seen(arrival.headerLine(inv.header, now)), '/vibe · Note from @maya_c (just now; you invited them), waiting at your pause: "use the 30s keepalive; Rev C is fine"');
+  assert.equal(seen(arrival.headerLine(inv.header, now)), '/vibe · Note from @maya_c (just now; you invited them), waiting at your pause: "keep tool_choice on auto; drop the retry wrapper"');
   // An agent's ask and an agent's answer over an open line keep their own marks.
-  const ask = arrival.render(item({ line: true, text: `what is the keepalive?${line.ASKED('maya_c')}` }));
+  const ask = arrival.render(item({ line: true, text: `is tool_choice on auto?${line.ASKED('maya_c')}` }));
   assert.equal(ask.header, undefined);
   assert.match(ask.line, /@maya_c's agent asked over your open line/);
-  const ans = arrival.render(item({ line: true, text: `30s${line.ANSWERED('maya_c')}` }));
+  const ans = arrival.render(item({ line: true, text: `auto${line.ANSWERED('maya_c')}` }));
   assert.equal(ans.header, undefined);
   assert.match(ans.line, /@maya_c's agent answered/);
   // A door is somewhere to go, not a note.
@@ -159,7 +159,7 @@ test('each arrival path: who gets the note form and who keeps its own line', () 
   const card = door.card('maya_c', 'https://example.com/x', 'the x');
   assert.equal(arrival.render(item({ text: card })).header, undefined);
   // No time known: no age printed, never a guess.
-  assert.equal(seen(arrival.headerLine(arrival.render(item()).header, now)), '/vibe · Note from @maya_c, waiting at your pause: "use the 30s keepalive; Rev C is fine"');
+  assert.equal(seen(arrival.headerLine(arrival.render(item()).header, now)), '/vibe · Note from @maya_c, waiting at your pause: "keep tool_choice on auto; drop the retry wrapper"');
 });
 
 test('the age: just now, minutes, hours, days; the hook and arrival.js agree', () => {
@@ -167,7 +167,7 @@ test('the age: just now, minutes, hours, days; the hook and arrival.js agree', (
     assert.equal(arrival.ago(ms), want);
     assert.equal(hookMod.ago(ms), want);
   }
-  const h = { from: 'kenji', invited: true, said: 'try 1.2 bar', at: 1000, shift: 0 };
+  const h = { from: 'kenji', invited: true, said: 'try the CRLF fix', at: 1000, shift: 0 };
   assert.equal(hookMod.headerLine(h, 1000 + 7 * MIN), arrival.headerLine(h, 1000 + 7 * MIN));
   // A lab's shifted display clock rides along (labclock.js).
   assert.equal(hookMod.headerLine({ ...h, at: 1000 + 24 * H, shift: 24 * H }, 1000 + 7 * MIN), arrival.headerLine({ ...h, at: 1000 + 24 * H, shift: 24 * H }, 1000 + 7 * MIN));
@@ -187,12 +187,12 @@ test('arrival hook end to end: a spooled arrival is shown in the note form at th
   const vh = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-voice-hook-'));
   const env = { VIBE_HOME: vh };
   const sent = Date.now() - 4 * MIN;
-  const rows = arrival.record([{ handle: 'kenji', unread: 1, lastMessage: 'the steam test runs at 1.2 bar', lastMessageId: 'msg_kenji1', lastFrom: 'kenji', lastActorKind: 'human', muted: false, lastTimestamp: sent }], 'ada', { since: sent - 1000, env });
+  const rows = arrival.record([{ handle: 'kenji', unread: 1, lastMessage: 'the CRLF fix is on a branch', lastMessageId: 'msg_kenji1', lastFrom: 'kenji', lastActorKind: 'human', muted: false, lastTimestamp: sent }], 'ada', { since: sent - 1000, env });
   assert.equal(rows.length, 1);
   assert.ok(rows[0].header, 'the row carries the header');
   const run = (event) => JSON.parse(spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ hook_event_name: event, session_id: 's1' }), env: { PATH: process.env.PATH, VIBE_ARRIVALS_DIR: arrival.spoolDir(env), VIBE_TURNS_DIR: path.join(vh, 'turns') }, encoding: 'utf8' }).stdout);
   const out = run('UserPromptSubmit');
-  assert.match(seen(out.systemMessage), /^\/vibe · Note from @kenji \((4|5)m ago\), waiting at your pause: "the steam test runs at 1\.2 bar"$/);
+  assert.match(seen(out.systemMessage), /^\/vibe · Note from @kenji \((4|5)m ago\), waiting at your pause: "the CRLF fix is on a branch"$/);
   assert.match(out.hookSpecificOutput.additionalContext, /@kenji just wrote to the person you are working with/);
   assert.deepEqual(run('PostToolUse'), { suppressOutput: true }, 'once');
   fs.rmSync(vh, { recursive: true, force: true });
@@ -377,7 +377,7 @@ test('session start end to end: an API that cannot be reached is silence, never 
 // ── 5 itLanded ──────────────────────────────────────────────────────────────
 
 const prep = (args) => drafts.vibe_prepare.handler(args);
-const LINE = "That landed: I'm going with the 30s keepalive and calling off the Rev C return.";
+const LINE = "That landed: I'm keeping tool_choice on auto and dropping the retry wrapper.";
 
 test('kind "landed": validated before anything is drafted', async () => {
   const bad = await prep({ handle: 'mira', message: LINE, reply_to: 'msg_r1', kind: 'thanks' });
@@ -409,7 +409,7 @@ test('a note back is an ordinary draft with a label: same rev and same send path
 });
 
 test('once per reply: open, declined, or after the draft itself is gone; another reply is its own', async () => {
-  const first = await prep({ handle: 'kenji', message: 'That landed: steam test moved to 1.2 bar.', reply_to: 'msg_k1', kind: 'landed' });
+  const first = await prep({ handle: 'kenji', message: 'That landed: CRLF fix merged into the parser.', reply_to: 'msg_k1', kind: 'landed' });
   const id = first.data.draft.id;
   const again = await prep({ handle: 'kenji', message: 'That landed, again.', reply_to: 'msg_k1', kind: 'landed' });
   assert.equal(again.display, seen(`Not prepared: a note back for that reply is already open (draft ${id}). Edit it with vibe_prepare {id: "${id}", message: "..."} or leave it. Nothing was sent.`));
@@ -428,18 +428,18 @@ test('once per reply: open, declined, or after the draft itself is gone; another
   assert.equal(other.data.draft.kind, 'landed');
   await drafts.vibe_discard.handler({ id: other.data.draft.id });
   // An ordinary reply to the same message is not limited by any of this.
-  const plain = await prep({ handle: 'kenji', message: 'Also: what pressure for the second batch?', reply_to: 'msg_k1' });
+  const plain = await prep({ handle: 'kenji', message: 'Also: does the fix cover the Windows runner?', reply_to: 'msg_k1' });
   assert.equal(plain.data.draft.kind, undefined);
   await drafts.vibe_discard.handler({ id: plain.data.draft.id });
 });
 
 test('editing: a note back keeps its reply and stays one line; an ordinary draft cannot become one', async () => {
-  const r = await prep({ handle: 'mira', message: 'That landed: going with 30s.', reply_to: 'msg_m9', kind: 'landed' });
+  const r = await prep({ handle: 'mira', message: 'That landed: keeping auto.', reply_to: 'msg_m9', kind: 'landed' });
   const id = r.data.draft.id;
   const moved = await prep({ id, message: 'That landed.', reply_to: 'msg_other' });
   assert.equal(moved.display, seen(`Not changed: draft ${id} is a note back about one reply; it cannot be moved to another. Nothing was sent.`));
   assert.equal((await prep({ id, message: 'two\nlines' })).display, 'Not prepared: a note back ("landed") is one line. Nothing was sent.');
-  const edited = await prep({ id, message: 'That landed: going with the 30s keepalive.' });
+  const edited = await prep({ id, message: 'That landed: keeping tool_choice on auto.' });
   assert.ok(edited.display.includes(drafts.LANDED_LABEL));
   assert.equal(edited.data.draft.kind, 'landed');
   await drafts.vibe_discard.handler({ id });
@@ -488,10 +488,10 @@ test('lab: arrival header forms are named in the transcript; notes back are coun
   let n = 0;
   const call = (tool, input, text) => { const id = `t${++n}`; at({ kind: 'tool', name: `mcp__vibe__${tool}`, id, input }); at({ kind: 'returned', tool_use_id: id, name: `mcp__vibe__${tool}`, text }); };
   const preview = (d) => `Send to @ben · Edit · Cancel — nothing has been sent.  _(draft ${d} · rev r1)_`;
-  at({ kind: 'prompt', text: 'go with the 30s keepalive', session: 'new' });
-  at({ kind: 'shown', text: '/vibe · Note from @ben (3m ago), waiting at your pause: "30s keepalive"' });
-  call('vibe_prepare', { handle: 'ben', message: 'That landed: going with 30s.', reply_to: 'm1', kind: 'landed' }, preview('w1'));
-  call('vibe_prepare', { id: 'w1', message: 'That landed: going with the 30s keepalive.' }, preview('w1'));
+  at({ kind: 'prompt', text: 'keep tool_choice on auto', session: 'new' });
+  at({ kind: 'shown', text: '/vibe · Note from @ben (3m ago), waiting at your pause: "tool_choice on auto"' });
+  call('vibe_prepare', { handle: 'ben', message: 'That landed: keeping auto.', reply_to: 'm1', kind: 'landed' }, preview('w1'));
+  call('vibe_prepare', { id: 'w1', message: 'That landed: keeping tool_choice on auto.' }, preview('w1'));
   at({ kind: 'human_reply', text: 'send it', session: 'resumed' });
   call('vibe_send', { id: 'w1', rev: 'r1' }, 'Sent to **@ben**\n_receipt: msg_1_');
   call('vibe_prepare', { handle: 'ben', message: 'That landed too.', reply_to: 'm2', kind: 'landed' }, preview('w2'));

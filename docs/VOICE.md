@@ -47,11 +47,11 @@ choice.
 ## Examples in use
 
 - Why this person, before a draft (from their own status line or note, at most
-  about 90 characters): `Kenji already has the cardamom steam test open. Faster than figuring it out twice.`
+  about 90 characters): `Jonas already has the CRLF fix on a branch. Faster than figuring it out twice.`
 - A message arriving mid-work: `Note from @maya_c (2m ago), waiting at your pause:`
 - Nothing waiting: `Nothing waiting.` At most once a day, at a clean session
   start: `Nothing waiting. Rare moment — enjoy it.`
 - Nobody else in a session at all (only when presence was actually read):
   `Just you in here right now; notes wait till they're back.`
 - A note back when a reply changed the work, as a draft the person chooses to
-  send: `That landed: I'm going with the 30s keepalive and calling off the Rev C return.`
+  send: `That landed: I'm keeping tool_choice on auto and dropping the retry wrapper.`
