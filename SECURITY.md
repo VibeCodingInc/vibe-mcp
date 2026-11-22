@@ -51,13 +51,14 @@ depends on the host:
 
 What the box shows. The box is opened by /vibe, not by the agent. Its first
 line is fixed /vibe text: the recipient, the length, and whether all of the
-text is below ("Send to @handle? (N chars, all shown)" or "(N chars, start
-only)"; also "Reply to", "Resend to" and "Keep for"). Under it, the start of
+text is below ("Confirm: send to @handle? (N chars, all shown)" or "(N chars,
+start only)"; also "Confirm: reply to", "Confirm: resend to" and "Confirm: keep
+for"; a handle too long to fit that in 72 columns gets "Send to @handle?" and
+the like). Under it, the start of
 the text, each line starting with "> ". Then one required text field, empty,
-titled for example 'Type "be" to confirm: send to @ben' or 'Type "noa" to
-confirm: send to @noah' ('confirm: keep for' on a kept-for-later box; 'Type
-"ab" to confirm send' when the handle does not fit in 40 characters): the
-person types the first letters of who it is going to, then Accept / Decline. Enter alone cannot send
+titled for example 'Type "be" to send to @ben' or 'Type "noa" to send to
+@noah' ('to keep it for' on a kept-for-later box): the person types the first
+letters of who it is going to, then Accept / Decline. Enter alone cannot send
 (the host will not take an empty field), and typing "send" again cannot send
 either. The box does not show which message a
 reply answers, exact spacing (runs of spaces and blank characters show as one

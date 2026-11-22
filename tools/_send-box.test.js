@@ -108,8 +108,8 @@ test('a typed turn, then Accept: sends exactly the text in the box', async () =>
     const r = await sendIn(p, box);
     assert.equal(box.asked.length, 1, 'one box');
     const { params } = box.asked[0];
-    assert.equal(params.message, 'Send to @linus? (24 chars, all shown)\n> cloud owns placement now');
-    assert.deepEqual(params.requestedSchema, { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to confirm: send to @linus', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] });
+    assert.equal(params.message, 'Confirm: send to @linus? (24 chars, all shown)\n> cloud owns placement now');
+    assert.deepEqual(params.requestedSchema, { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to send to @linus', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] });
     assert.equal(params.mode, 'form', '2025-11-25 names the form mode');
     assert.equal(r.data.sent, true);
     assert.equal(r.data.turn_check, 'box');
@@ -479,7 +479,7 @@ test('a reply says so in line 1', async () => {
     const p = await shown({ message: 'yes it did', reply_to: 'msg_arrived1' });
     const box = fakeBox({ action: 'decline' });
     await sendIn(p, box);
-    assert.equal(box.asked[0].params.message, 'Reply to @linus? (10 chars, all shown)\n> yes it did');
+    assert.equal(box.asked[0].params.message, 'Confirm: reply to @linus? (10 chars, all shown)\n> yes it did');
   });
 });
 
@@ -539,7 +539,7 @@ test('a long message is not refused: the box shows its opening, and the whole te
     const r = await sendIn(p, box);
     assert.equal(r.data.sent, true);
     assert.equal(sends[0].body, long);
-    assert.ok(box.asked[0].params.message.startsWith(`Send to @linus? (${long.length} chars, start only)\n> abcdefghi`));
+    assert.ok(box.asked[0].params.message.startsWith(`Confirm: send to @linus? (${long.length} chars, start only)\n> abcdefghi`));
   });
 });
 
@@ -584,7 +584,7 @@ test('stateless: the first call returns the box as an input request; the retry w
     assert.ok(first.inputRequired, 'input required');
     const req = first.inputRequired.inputRequests[confirmBox.INPUT_KEY];
     assert.equal(req.method, 'elicitation/create');
-    assert.deepEqual(req.params, { message: 'Send to @linus? (23 chars, all shown)\n> over the stateless path', requestedSchema: { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to confirm: send to @linus', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] }, mode: 'form' });
+    assert.deepEqual(req.params, { message: 'Confirm: send to @linus? (23 chars, all shown)\n> over the stateless path', requestedSchema: { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to send to @linus', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] }, mode: 'form' });
     assert.equal(typeof first.inputRequired.requestState, 'string');
     assert.equal(sends.length, 0, 'nothing sent by the first call');
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(first, accept));
@@ -683,7 +683,7 @@ test('padding cannot push the text out of the visible lines: whitespace runs sho
     const p = await shown({ message: text });
     const box = fakeBox(accept);
     await sendIn(p, box);
-    assert.equal(box.asked[0].params.message, `Send to @linus? (${Array.from(text).length} chars, all shown)\n> hi the real text`, 'every word is shown');
+    assert.equal(box.asked[0].params.message, `Confirm: send to @linus? (${Array.from(text).length} chars, all shown)\n> hi the real text`, 'every word is shown');
     assert.equal(sends[0].body, text, 'sent exactly as prepared');
   });
 });
@@ -694,8 +694,8 @@ test('every kind of blank shows as one space in the box, whatever vibe_prepare w
 });
 
 test('the count is grapheme clusters: a family emoji is one character, a combining mark is part of its letter', () => {
-  assert.match(confirmBox.message({ to: 'sam', text: '\u{1F468}‍\u{1F469}‍\u{1F467}' }), /^Send to @sam\? \(1 char, all shown\)\n/);
-  assert.match(confirmBox.message({ to: 'sam', text: 'café' }), /^Send to @sam\? \(4 chars, all shown\)\n/);
+  assert.match(confirmBox.message({ to: 'sam', text: '\u{1F468}‍\u{1F469}‍\u{1F467}' }), /^Confirm: send to @sam\? \(1 char, all shown\)\n/);
+  assert.match(confirmBox.message({ to: 'sam', text: 'café' }), /^Confirm: send to @sam\? \(4 chars, all shown\)\n/);
 });
 
 test('an accepted box whose delivery did not confirm: "send it again" goes through the turn check and a new "again" box', async () => {
@@ -711,7 +711,7 @@ test('an accepted box whose delivery did not confirm: "send it again" goes throu
     const box = fakeBox(accept);
     const again = await sendIn(p, box);
     assert.equal(box.asked.length, 1, 'not the not-accepted refusal: a new box');
-    assert.equal(box.asked[0].params.message, 'Resend to @linus? (14 chars, all shown)\n> did it arrive?');
+    assert.equal(box.asked[0].params.message, 'Confirm: resend to @linus? (14 chars, all shown)\n> did it arrive?');
     assert.equal(again.data.sent, true);
     assert.deepEqual(sends.map((x) => x.body), ['did it arrive?']);
   });
@@ -789,8 +789,8 @@ test('Keep (a message held for someone not on /vibe yet) goes through the box to
     personTurn();
     const box = fakeBox(acceptFor('newbie-dev'));
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, { box });
-    assert.equal(box.asked[0].params.requestedSchema.properties.to.title, 'Type "ne" to confirm keep');
-    assert.equal(box.asked[0].params.message, 'Keep for @newbie-dev? (14 chars, all shown)\n> welcome aboard');
+    assert.equal(box.asked[0].params.requestedSchema.properties.to.title, 'Type "ne" to keep it for @newbie-dev');
+    assert.equal(box.asked[0].params.message, 'Confirm: keep for @newbie-dev? (14 chars, all shown)\n> welcome aboard');
     assert.equal(r.data.held, true);
     assert.equal(invites.filter((b) => !b.dry_run).length, 1);
   } finally { global.fetch = origFetch; store.createInvite = origInvite; }
@@ -807,7 +807,7 @@ test('does not fit: no box without a typed turn; with one, the box says only the
     assert.equal(box.asked.length, 0);
     personTurn();
     const ok = await sendIn(p, box);
-    assert.match(box.asked[0].params.message, /^Send to @linus\? \(\d+ chars, start only\)\n> too long for the box: /);
+    assert.match(box.asked[0].params.message, /^Confirm: send to @linus\? \(\d+ chars, start only\)\n> too long for the box: /);
     assert.equal(ok.data.sent, true);
     assert.equal(sends.length, 1);
   });
@@ -835,13 +835,34 @@ test('the managed settings file is in the scan, for macOS and Linux', () => {
 // ── fourth pass (review 2026-11-22): removed shortcuts stay removed ──────────
 
 test('line 1: compact leads, both facts, within 72 columns for the longest handle (39 characters)', () => {
-  assert.equal(confirmBox.message({ to: 'sam', text: 'hi' }), 'Send to @sam? (2 chars, all shown)\n> hi');
-  assert.equal(confirmBox.message({ to: 'sam', text: 'x' }), 'Send to @sam? (1 char, all shown)\n> x');
-  assert.equal(confirmBox.message({ to: 'sam', reply: true, text: 'yes' }), 'Reply to @sam? (3 chars, all shown)\n> yes');
-  assert.equal(confirmBox.message({ to: 'sam', retry: true, text: 'yes' }), 'Resend to @sam? (3 chars, all shown)\n> yes');
-  assert.equal(confirmBox.message({ to: 'sam-x', held: true, text: 'yes' }), 'Keep for @sam-x? (3 chars, all shown)\n> yes');
-  assert.match(confirmBox.message({ to: 'sam', text: 'word '.repeat(60).trim() }), /^Send to @sam\? \(299 chars, start only\)\n> word/);
+  assert.equal(confirmBox.message({ to: 'sam', text: 'hi' }), 'Confirm: send to @sam? (2 chars, all shown)\n> hi');
+  assert.equal(confirmBox.message({ to: 'sam', text: 'x' }), 'Confirm: send to @sam? (1 char, all shown)\n> x');
+  assert.equal(confirmBox.message({ to: 'sam', reply: true, text: 'yes' }), 'Confirm: reply to @sam? (3 chars, all shown)\n> yes');
+  assert.equal(confirmBox.message({ to: 'sam', retry: true, text: 'yes' }), 'Confirm: resend to @sam? (3 chars, all shown)\n> yes');
+  assert.equal(confirmBox.message({ to: 'sam-x', held: true, text: 'yes' }), 'Confirm: keep for @sam-x? (3 chars, all shown)\n> yes');
+  assert.match(confirmBox.message({ to: 'sam', text: 'word '.repeat(60).trim() }), /^Confirm: send to @sam\? \(299 chars, start only\)\n> word/);
   const h = 'a'.repeat(39);
+  // The four leads (notice.js confirmLead), exactly, for a short handle and a 39-character one.
+  // "Confirm: " and both facts do not fit 72 columns with a 39-character handle
+  // (even "Confirm: send to @<39>? (2 chars, all)" is 73), so it keeps the plain lead.
+  const q = (o) => confirmBox.question({ to: 'ben', text: 'x'.repeat(69), ...o });
+  assert.equal(q({}), 'Confirm: send to @ben? (69 chars, all shown)');
+  assert.equal(q({ reply: true }), 'Confirm: reply to @ben? (69 chars, all shown)');
+  assert.equal(q({ retry: true }), 'Confirm: resend to @ben? (69 chars, all shown)');
+  assert.equal(q({ held: true }), 'Confirm: keep for @ben? (69 chars, all shown)');
+  const q39 = (o) => confirmBox.question({ to: h, text: 'x'.repeat(69), ...o });
+  assert.equal(q39({}), `Send to @${h}? (69 chars, all shown)`);
+  assert.equal(q39({ reply: true }), `Reply to @${h}? (69 chars, all shown)`);
+  assert.equal(q39({ retry: true }), `Resend to @${h}? (69 chars, all)`);
+  assert.equal(q39({ held: true }), `Keep for @${h}? (69 chars, all shown)`);
+  // Where "Confirm:" still fits, the suffix is shortened first (as before), and the lead kept.
+  const h30 = 'b'.repeat(30);
+  assert.equal(confirmBox.question({ to: h30, retry: true, text: 'x'.repeat(69) }), `Confirm: resend to @${h30}? (69 chars, all)`);
+  // Switched off (loopback only): the earlier leads.
+  const off = { VIBE_API_URL: 'http://127.0.0.1:9', VIBE_NOTICE_OFF: 'confirmLead' };
+  assert.equal(q({ env: off }), 'Send to @ben? (69 chars, all shown)');
+  assert.equal(q({ held: true, env: off }), 'Keep for @ben? (69 chars, all shown)');
+  assert.equal(q({ env: { VIBE_API_URL: 'https://www.slashvibe.dev', VIBE_NOTICE_OFF: 'confirmLead' } }), 'Confirm: send to @ben? (69 chars, all shown)');
   for (const o of [{}, { reply: true }, { retry: true }, { held: true }]) {
     for (const text of ['x '.repeat(999) + 'x', 'hi']) {
       const q = confirmBox.question({ to: h, text, ...o });
@@ -873,7 +894,7 @@ test('a reply needs a typed turn AND Accept: the box does not show what it answe
     assert.equal(box.asked.length, 0);
     personTurn();
     const ok = await sendIn(p, box);
-    assert.equal(box.asked[0].params.message, 'Reply to @linus? (12 chars, all shown)\n> yes it works');
+    assert.equal(box.asked[0].params.message, 'Confirm: reply to @linus? (12 chars, all shown)\n> yes it works');
     assert.equal(ok.data.sent, true);
     assert.equal(sends.length, 1);
   });
@@ -1078,37 +1099,20 @@ test('non-ASCII typed input never passes: no folding beyond ASCII letters', () =
 
 test('titles: short handle, word-prefixed, word handle, one character, 39 characters, kept for later', () => {
   const t = (h, o) => confirmBox.fieldText(h, o).title;
-  assert.equal(t('ben'), 'Type "be" to confirm: send to @ben');
-  assert.equal(t('noah'), 'Type "noa" to confirm: send to @noah');
-  assert.equal(t('edith'), 'Type "edith" to confirm: send to @edith');
-  assert.equal(t('no'), 'Type "@no" to confirm: send to @no');
-  assert.equal(t('n'), 'Type "@n" to confirm: send to @n');
-  assert.equal(t(LONG39), 'Type "ab" to confirm send');
-  assert.equal(t('noah', { held: true }), 'Type "noa" to confirm: keep for @noah');
-  assert.equal(t('no', { held: true }), 'Type "@no" to confirm: keep for @no');
-  assert.equal(t(LONG39, { held: true }), 'Type "ab" to confirm keep');
+  assert.equal(t('ben'), 'Type "be" to send to @ben');
+  assert.equal(t('noah'), 'Type "noa" to send to @noah');
+  assert.equal(t('edith'), 'Type "edith" to send to @edith');
+  assert.equal(t('no'), 'Type "@no" to send to @no');
+  assert.equal(t('n'), 'Type "@n" to send to @n');
+  assert.equal(t(LONG39), 'Type "ab" to send');
+  assert.equal(t('noah', { held: true }), 'Type "noa" to keep it for @noah');
+  assert.equal(t('no', { held: true }), 'Type "@no" to keep it for @no');
+  assert.equal(t(LONG39, { held: true }), 'Type "ab" to keep it');
   assert.equal(confirmBox.fieldText('noah').description, DESC);
   assert.equal(confirmBox.fieldText('no').description, '"@" and the whole handle of who it is going to. Enter alone will not send; Esc cancels.');
   // The fallback for a required text too long for even the short title.
   const huge = `@${'q'.repeat(38)}`;
-  assert.ok(`Type "${huge}" to confirm send`.length > confirmBox.TITLE_MAX);
-  // Handles long enough that "@handle" no longer fits: the short form; the box's first line still names them.
-  assert.equal(t('newbie-dev'), 'Type "ne" to confirm send');
-  assert.equal(t('abcdefghi'), 'Type "ab" to confirm: send to @abcdefghi');
-});
-
-test('confirmTitle switched off (loopback only): the earlier titles, and the rule for a yes is the same either way', () => {
-  const LOCAL = { VIBE_API_URL: 'http://127.0.0.1:9' };
-  const off = { ...LOCAL, VIBE_NOTICE_OFF: 'confirmTitle' };
-  const t = (h, o = {}) => confirmBox.fieldText(h, o).title;
-  assert.equal(t('ben', { env: off }), 'Type "be" to send to @ben');
-  assert.equal(t('noah', { held: true, env: off }), 'Type "noa" to keep it for @noah');
-  assert.equal(t(LONG39, { env: off }), 'Type "ab" to send');
-  assert.equal(t(LONG39, { held: true, env: off }), 'Type "ab" to keep it');
-  assert.equal(t('ben', { env: LOCAL }), 'Type "be" to confirm: send to @ben');
-  // A real account always gets the current title.
-  assert.equal(t('ben', { env: { VIBE_API_URL: 'https://www.slashvibe.dev', VIBE_NOTICE_OFF: 'confirmTitle' } }), 'Type "be" to confirm: send to @ben');
-  for (const env of [off, LOCAL]) assert.equal(confirmBox.fieldText('ben', { env }).description, DESC);
+  assert.ok(`Type "${huge}" to send`.length > confirmBox.TITLE_MAX);
 });
 
 test('property: for thousands of handles, no reply word sends, the asked-for text sends, the title fits and starts with it', () => {
@@ -1132,17 +1136,14 @@ test('property: for thousands of handles, no reply word sends, the asked-for tex
       const { title } = confirmBox.fieldText(h, { held });
       if (title.length > confirmBox.TITLE_MAX) assert.fail(`title too long for @${h}: ${title}`);
       if (!(title.startsWith(`Type "${r.need}" `) || title === 'Type @ and the whole handle')) assert.fail(`title for @${h} does not lead with the text: ${title}`);
-      // It reads as the confirmation of the send the person already asked for (notice.js confirmTitle).
-      const verb = held ? 'keep' : 'send';
-      if (title !== 'Type @ and the whole handle' && title !== `Type "${r.need}" to confirm: ${verb} ${held ? 'for' : 'to'} @${h}` && title !== `Type "${r.need}" to confirm ${verb}`) assert.fail(`title for @${h} is not a confirmation: ${title}`);
     }
   }
 });
 
 test('the schema as sent, for @ben, @noah (kept for later) and a 39-character handle: one required string field, no default', () => {
-  assert.deepEqual(confirmBox.schemaFor('ben'), { type: 'object', properties: { to: { type: 'string', title: 'Type "be" to confirm: send to @ben', description: DESC, minLength: 1, maxLength: 40 } }, required: ['to'] });
-  assert.deepEqual(confirmBox.schemaFor('noah', { held: true }), { type: 'object', properties: { to: { type: 'string', title: 'Type "noa" to confirm: keep for @noah', description: DESC, minLength: 1, maxLength: 40 } }, required: ['to'] });
-  assert.deepEqual(confirmBox.schemaFor(LONG39), { type: 'object', properties: { to: { type: 'string', title: 'Type "ab" to confirm send', description: DESC, minLength: 1, maxLength: 40 } }, required: ['to'] });
+  assert.deepEqual(confirmBox.schemaFor('ben'), { type: 'object', properties: { to: { type: 'string', title: 'Type "be" to send to @ben', description: DESC, minLength: 1, maxLength: 40 } }, required: ['to'] });
+  assert.deepEqual(confirmBox.schemaFor('noah', { held: true }), { type: 'object', properties: { to: { type: 'string', title: 'Type "noa" to keep it for @noah', description: DESC, minLength: 1, maxLength: 40 } }, required: ['to'] });
+  assert.deepEqual(confirmBox.schemaFor(LONG39), { type: 'object', properties: { to: { type: 'string', title: 'Type "ab" to send', description: DESC, minLength: 1, maxLength: 40 } }, required: ['to'] });
   assert.equal(JSON.stringify(confirmBox.schemaFor('ben')).includes('default'), false);
   assert.deepEqual(confirmBox.request('x', '2025-11-25', 'ben').requestedSchema, confirmBox.schemaFor('ben'));
   assert.deepEqual(confirmBox.request('x', '2026-07-28', 'noah', { held: true }).requestedSchema, confirmBox.schemaFor('noah', { held: true }));
@@ -1238,14 +1239,14 @@ test('after "send" typed into the box, the next box needs vibe_prepare again and
 
 test('reply, resend and kept-for-later boxes use the same field: the recipient\'s letters', async () => {
   const forKeep = confirmBox.request(confirmBox.message({ to: 'newbie-dev', held: true, text: 'hi' }), '2025-11-25', 'newbie-dev');
-  assert.equal(forKeep.message.split('\n')[0], 'Keep for @newbie-dev? (2 chars, all shown)');
-  assert.equal(forKeep.requestedSchema.properties.to.title, 'Type "ne" to confirm send', 'request() without held: the send wording');
-  assert.equal(confirmBox.request('x', '2025-11-25', 'newbie-dev', { held: true }).requestedSchema.properties.to.title, 'Type "ne" to confirm keep');
+  assert.equal(forKeep.message.split('\n')[0], 'Confirm: keep for @newbie-dev? (2 chars, all shown)');
+  assert.equal(forKeep.requestedSchema.properties.to.title, 'Type "ne" to send to @newbie-dev', 'request() without held: the send wording');
+  assert.equal(confirmBox.request('x', '2025-11-25', 'newbie-dev', { held: true }).requestedSchema.properties.to.title, 'Type "ne" to keep it for @newbie-dev');
   const forReply = confirmBox.request(confirmBox.message({ to: 'ben', reply: true, text: 'hi' }), '2025-11-25', 'ben');
-  assert.equal(forReply.message.split('\n')[0], 'Reply to @ben? (2 chars, all shown)');
-  assert.equal(forReply.requestedSchema.properties.to.title, 'Type "be" to confirm: send to @ben');
+  assert.equal(forReply.message.split('\n')[0], 'Confirm: reply to @ben? (2 chars, all shown)');
+  assert.equal(forReply.requestedSchema.properties.to.title, 'Type "be" to send to @ben');
   const forResend = confirmBox.request(confirmBox.message({ to: 'ben', retry: true, text: 'hi' }), '2025-11-25', 'ben');
-  assert.equal(forResend.message.split('\n')[0], 'Resend to @ben? (2 chars, all shown)');
+  assert.equal(forResend.message.split('\n')[0], 'Confirm: resend to @ben? (2 chars, all shown)');
   assert.deepEqual(forResend.requestedSchema, confirmBox.schemaFor('ben'));
 });
 

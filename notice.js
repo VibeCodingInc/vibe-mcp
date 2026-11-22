@@ -43,7 +43,7 @@ const NOTICE = {
   // The first five minutes (BRIEF-20, outside walk-through of a newcomer).
   setupReceipt: true,       // 17. setup ends with notes already waiting (handles only, one bounded read) and "open a fresh session"
   landedReminder: true,     // 18. after a reply to the person's own message was shown, the next prompts in that session remind the agent (agent only, at most 3, 2 hours)
-  confirmTitle: true,       // 19. the Send box title reads as the confirmation of the send: 'Type "be" to confirm: send to @ben'
+  confirmLead: true,        // 19. the Send box's fixed first line reads as the confirmation of the send: "Confirm: send to @ben? (...)"
 };
 
 /** The agent's copy of someone's line about what they are working on. The person's copy stays at 48. */
