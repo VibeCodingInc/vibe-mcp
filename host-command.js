@@ -28,9 +28,10 @@ const NAMES = ['vibe.md', 'vibe-moves.md'];
 
 /**
  * The /vibe command exactly as earlier releases shipped it (sha256 of the file
- * as installed: setup wrote hosts/vibe-command.md byte for byte). Every one
- * tells the agent to offer Send in the host's question control. A pick there
- * is not counted as the person's choice, so a Send offered that way is refused.
+ * as installed: setup wrote hosts/vibe-command.md byte for byte). Up to
+ * v0.9.21 every one tells the agent to offer Send in the host's question
+ * control. A pick there is not counted as the person's choice, so a Send
+ * offered that way is refused.
  * Verified with `git show <tag>:hosts/vibe-command.md | shasum -a 256`; the file
  * did not exist before v0.8.27.
  */
@@ -40,6 +41,9 @@ const SHIPPED_COMMAND_SHA256 = new Set([
   'eb3f86ac1fcb074a17df920a35690db9dd3896b82215dc3d1eb632742727fa2f', // v0.9.1 - v0.9.8
   '84bfb3ae540ed900a8f0c3e08db244fc2ea1a8474591a968c47a1864f12d8ec4', // v0.9.9 - v0.9.16
   '5c1c767cf52eb6f5650f22f51d9a888c75d2c3a0dfe797cacb5c1fec41b0ea75', // v0.9.17 - v0.9.21
+  // v0.9.22 asked in words, but said nothing about a thread's "you": a new
+  // session read the person's own earlier message as unexplained.
+  '0d1de22e0c970a5ee750c5b5b38fe7e3f25730f00b51aa175ba875c44f5a78df', // v0.9.22
 ]);
 
 function claudeDir(env = process.env) {

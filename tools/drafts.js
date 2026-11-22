@@ -688,6 +688,7 @@ async function send(args, { byPerson }) {
     delete cur.claimedAt; delete cur.claimedBy;
     if (sent) { cur.sentAt = sentAt; cur.messageId = outcome.message_id || null; }
   });
+  if (sent && outcome.message_id) sentByThisProcess.set(String(outcome.message_id), sentAt);
   if (sent) {
     // The receipt is the fact; the binding is a convenience. A failure to
     // save it must never turn a confirmed delivery into an error (codex P2).
@@ -891,6 +892,50 @@ async function createHeld(s) {
   return { definite: false, display: 'The invitation could not be confirmed — it may or may not have been created.' };
 }
 
+// ── where one of the person's own messages came from (vibe_thread) ──────────
+// A fresh session reads "you" in a thread and did not send it; without a word
+// on where it came from, an agent called the person's own message unexplained
+// (lab 2026-11-21, twice). Only what this machine knows is said:
+//
+//   this_session     this server process sent it, and no session start has
+//                    been recorded for the project since (a /clear or another
+//                    session in the folder moves that record, and then this
+//                    is not claimed)
+//   this_machine     any other send with a record on this machine. Which
+//                    session is never claimed: "earlier" can be false (a host
+//                    that starts a server per turn, plus a second session in
+//                    the folder), so the wording is true either way
+//   null             no record here: another device, the app, a typed
+//                    command, or older than the local records (drafts are
+//                    kept a day, the latest send to each person a week)
+const sentByThisProcess = new Map();   // message id → sentAt
+
+function sentFromHere(messageId) {
+  const id = String(messageId || '');
+  if (!id) return null;
+  const me = config.getHandle();
+  const ours = (x) => x && typeof x === 'object' && x.messageId === id && Number.isFinite(x.sentAt) && (!x.from || x.from === me);
+  const drafts = readJson(DRAFTS_FILE, []);
+  const d = Array.isArray(drafts) ? drafts.find(x => ours(x) && x.status === 'sent') : null;
+  if (d) return d.sentAt;
+  const bindings = readJson(BINDINGS_FILE, {});
+  const b = bindings && typeof bindings === 'object' ? Object.values(bindings).find(ours) : null;
+  return b ? b.sentAt : null;
+}
+
+function sentProvenance(messageId, env = process.env) {
+  const id = String(messageId || '');
+  if (!id) return null;
+  let started = null;
+  try { const turns = require('../turns'); started = turns.lastSessionStart(turns.projectDir(env), env); } catch {}
+  const startAt = started && Number.isFinite(started.at) ? started.at : null;
+  const mine = sentByThisProcess.get(id);
+  if (mine !== undefined) return (startAt !== null && mine >= startAt) ? 'this_session' : 'this_machine';
+  let at = null;
+  try { at = sentFromHere(id); } catch {}
+  return at === null ? null : 'this_machine';
+}
+
 module.exports = {
   vibe_prepare: { definition: draftDefinition, handler: draftHandler },
   vibe_send: { definition: sendDefinition, handler: sendHandler },
@@ -899,5 +944,5 @@ module.exports = {
   sendByPerson,
   // for the arrival path, the thread view, and Buddy's `vibe-draft` CLI
   isQaHandle, getReturnBinding, clearReturnBinding, loadDrafts, transact, DRAFTS_FILE, BINDINGS_FILE,
-  compose, revOf, reconcileAbandoned,
+  compose, revOf, reconcileAbandoned, sentProvenance,
 };
