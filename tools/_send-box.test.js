@@ -66,7 +66,7 @@ function fakeBox(answer, { protocolVersion = '2025-11-25', timeoutMs } = {}) {
   if (timeoutMs) box.timeoutMs = timeoutMs;
   return box;
 }
-/** The person typed the recipient's first two letters and accepted: the answer that sends (to @linus). */
+/** The person typed the recipient's first letters and accepted: the answer that sends (to @linus). */
 const accept = { action: 'accept', content: { to: 'li' } };
 const acceptFor = (h) => ({ action: 'accept', content: { to: h.slice(0, 2) } });
 const NOT_ACCEPTED = 'Not sent. It is still a draft for @linus. Only if they ask again: show it with vibe_prepare and wait for them to say send.';
@@ -109,7 +109,7 @@ test('a typed turn, then Accept: sends exactly the text in the box', async () =>
     assert.equal(box.asked.length, 1, 'one box');
     const { params } = box.asked[0];
     assert.equal(params.message, 'Send to @linus? (24 chars, all shown)\n> cloud owns placement now');
-    assert.deepEqual(params.requestedSchema, { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to send to @linus', description: 'The first two letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] });
+    assert.deepEqual(params.requestedSchema, { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to send to @linus', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] });
     assert.equal(params.mode, 'form', '2025-11-25 names the form mode');
     assert.equal(r.data.sent, true);
     assert.equal(r.data.turn_check, 'box');
@@ -584,7 +584,7 @@ test('stateless: the first call returns the box as an input request; the retry w
     assert.ok(first.inputRequired, 'input required');
     const req = first.inputRequired.inputRequests[confirmBox.INPUT_KEY];
     assert.equal(req.method, 'elicitation/create');
-    assert.deepEqual(req.params, { message: 'Send to @linus? (23 chars, all shown)\n> over the stateless path', requestedSchema: { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to send to @linus', description: 'The first two letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] }, mode: 'form' });
+    assert.deepEqual(req.params, { message: 'Send to @linus? (23 chars, all shown)\n> over the stateless path', requestedSchema: { type: 'object', properties: { to: { type: 'string', title: 'Type "li" to send to @linus', description: 'The first letters of who it is going to. Enter alone will not send; Esc cancels.', minLength: 1, maxLength: 40 } }, required: ['to'] }, mode: 'form' });
     assert.equal(typeof first.inputRequired.requestState, 'string');
     assert.equal(sends.length, 0, 'nothing sent by the first call');
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(first, accept));
@@ -789,7 +789,7 @@ test('Keep (a message held for someone not on /vibe yet) goes through the box to
     personTurn();
     const box = fakeBox(acceptFor('newbie-dev'));
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, { box });
-    assert.equal(box.asked[0].params.requestedSchema.properties.to.title, 'Type "ne" to send to @newbie-dev');
+    assert.equal(box.asked[0].params.requestedSchema.properties.to.title, 'Type "ne" to keep it for @newbie-dev');
     assert.equal(box.asked[0].params.message, 'Keep for @newbie-dev? (14 chars, all shown)\n> welcome aboard');
     assert.equal(r.data.held, true);
     assert.equal(invites.filter((b) => !b.dry_run).length, 1);
@@ -1020,94 +1020,112 @@ test('another project is not held up by this project\'s outstanding box', async 
 
 // ── type the recipient's letters (0.9.24) ────────────────────────────────────
 // 0.9.23's box had no fields, so Accept was pre-selected and a stray Enter sent.
-// Now the person types the first two letters of who it is going to; only
-// action "accept" with those letters sends. Enter alone, and "send" typed out
-// of habit, cannot.
+// Now the person types the first letters of who it is going to: always more
+// letters than any ordinary reply word the handle begins with, so no reply
+// word ("send", "no", "edit", "ok", a digit) typed into the box ever sends.
 
 const LONG39 = 'abcdefghijklmnopqrstuvwxyz0123456789abc';
-const DESC2 = 'The first two letters of who it is going to. Enter alone will not send; Esc cancels.';
+const DESC = 'The first letters of who it is going to. Enter alone will not send; Esc cancels.';
+
+test('the reply words: one constant, lower-case, the agreed list', () => {
+  assert.deepEqual([...confirmBox.REPLY_WORDS], [
+    's', 'send', 'y', 'ye', 'yes', 'yea', 'yeah', 'yep', 'yup', 'ya', 'ok', 'okay', 'k', 'kk', 'sure', 'fine', 'good', 'go', 'do',
+    'n', 'no', 'nope', 'nah', 'not', 'don', 'dont', 'stop', 'wait', 'hold', 'later', 'cancel', 'edit', 'esc', 'x', 'q', 'nvm',
+    'hi', 'hey', 'hm', 'hmm', 'ah', 'oh', 'um', 'uh', 'er', 'lol', 'wow', 'thx', 'ty', 'pls', 'thanks', 'maybe',
+    'ja', 'si', 'da', 'oui', 'non', 'nein', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9']);
+  for (const w of confirmBox.REPLY_WORDS) assert.equal(w, w.toLowerCase());
+});
+
+test('the text to type: longer than any reply word the handle begins with; "@" + handle when that is longer than the handle', () => {
+  for (const [h, need] of [
+    ['ben', 'be'], ['linus', 'li'], ['noah', 'noa'], ['nora', 'nor'], ['gordon', 'gor'], ['david', 'dav'], ['edith', 'edith'],
+    ['sendhil', 'sendh'], ['suresh', 'sures'], ['okafor', 'oka'], ['yesenia', 'yese'], ['donna', 'donn'], ['waits', 'waits'],
+    ['simon', 'sim'], ['jason', 'jas'], ['dalia', 'dal'], ['newbie-dev', 'ne'], ['thanksgiving', 'thanksg'],
+    ['no', '@no'], ['stop', '@stop'], ['don', '@don'], ['n', '@n'], ['1', '@1'], ['a', '@a'], ['ok', '@ok'], ['send', '@send'], ['edi', 'ed'],
+    [LONG39, 'ab'],
+  ]) assert.equal(confirmBox.rule(h).need, need, `@${h}`);
+});
+
+test('the reviewer\'s cases: a reply word never sends; the letters asked for do', () => {
+  for (const [h, words] of [
+    ['noah', ['no', 'n']], ['nora', ['no', 'n']], ['edith', ['edit']], ['don', ['don', 'do']], ['donna', ['don', 'do']], ['waits', ['wait']],
+    ['stop', ['stop', 's']], ['gordon', ['go']], ['suresh', ['sure', 's']], ['simon', ['si', 's']], ['jason', ['ja']], ['david', ['da']],
+    ['n', ['n']], ['x', ['x']], ['q', ['q']], ['k', ['k']], ['1', ['1']], ['no', ['no', 'n']],
+  ]) {
+    for (const w of words) for (const t of [w, w.toUpperCase(), ` ${w} `, `@${w}`]) assert.equal(confirmBox.typedOk(h, t), w === h && t === `@${w}`, `@${h}: ${JSON.stringify(t)}`);
+    assert.equal(confirmBox.typedOk(h, confirmBox.rule(h).need), true, `@${h}`);
+  }
+});
 
 test('the rule for @ben: prefixes of at least two letters, any case, one optional "@", trimmed', () => {
   for (const t of ['be', 'ben', '@ben', 'Be', 'BEN', '@Be', '  be  ', '\tben\n']) assert.equal(confirmBox.typedOk('ben', t), true, JSON.stringify(t));
   for (const t of ['', ' ', 'b', '@b', 'e', 'en', 'bex', 'benn', 'ben ben', '@@be', '@', 'b e', 'send', 'yes', 'y', 'ok', 's', 'Send', 'SEND']) assert.equal(confirmBox.typedOk('ben', t), false, JSON.stringify(t));
   for (const t of [null, undefined, 1, true, ['be'], { to: 'be' }]) assert.equal(confirmBox.typedOk('ben', t), false, String(t));
+  // Word-prefixed: nothing shorter than the letters asked for.
+  assert.equal(confirmBox.typedOk('noah', 'noa'), true);
+  assert.equal(confirmBox.typedOk('noah', '@Noah'), true);
+  assert.equal(confirmBox.typedOk('noah', 'no'), false);
+  // "@" + whole handle: exactly that.
+  for (const t of ['@no', ' @NO ']) assert.equal(confirmBox.typedOk('no', t), true, t);
+  for (const t of ['no', '@n', '@no!', 'no@', '@@no']) assert.equal(confirmBox.typedOk('no', t), false, t);
 });
 
 test('non-ASCII typed input never passes: no folding beyond ASCII letters', () => {
-  for (const t of ['ｂｅ', 'bе' /* Cyrillic e */, 'be​', '​be', 'b́e', 'ＢＥ']) assert.equal(confirmBox.typedOk('ben', t), false, JSON.stringify(t));
+  for (const t of ['ｂｅ', 'bе' /* Cyrillic e */, 'be​', '​be', 'b́e', 'ＢＥ', '＠be']) assert.equal(confirmBox.typedOk('ben', t), false, JSON.stringify(t));
   assert.equal(confirmBox.typedOk('kai', 'Ka'), false, 'KELVIN SIGN is not k');
   assert.equal(confirmBox.typedOk('ivo', 'İv'), false, 'dotted capital I is not i');
 });
 
-test('a one-character handle needs the whole handle; one that is a habit word needs "@" too', () => {
-  assert.deepEqual(confirmBox.rule('a'), { need: 'a', min: 1, at: false });
-  for (const t of ['a', 'A', '@a', ' a ']) assert.equal(confirmBox.typedOk('a', t), true, t);
-  for (const t of ['', 'ab', 'b']) assert.equal(confirmBox.typedOk('a', t), false, t);
-  assert.equal(confirmBox.fieldText('a').title, 'Type "a" to send to @a');
-  for (const h of ['s', 'y']) {
-    assert.deepEqual(confirmBox.rule(h), { need: `@${h}`, min: 1, at: true });
-    assert.equal(confirmBox.typedOk(h, h), false, `${h} typed alone is the habit`);
-    assert.equal(confirmBox.typedOk(h, `@${h}`), true);
-    assert.equal(confirmBox.typedOk(h, ` @${h.toUpperCase()} `), true);
-    assert.equal(confirmBox.fieldText(h).title, `Type "@${h}" to send to @${h}`);
+test('titles: short handle, word-prefixed, word handle, one character, 39 characters, kept for later', () => {
+  const t = (h, o) => confirmBox.fieldText(h, o).title;
+  assert.equal(t('ben'), 'Type "be" to send to @ben');
+  assert.equal(t('noah'), 'Type "noa" to send to @noah');
+  assert.equal(t('edith'), 'Type "edith" to send to @edith');
+  assert.equal(t('no'), 'Type "@no" to send to @no');
+  assert.equal(t('n'), 'Type "@n" to send to @n');
+  assert.equal(t(LONG39), 'Type "ab" to send');
+  assert.equal(t('noah', { held: true }), 'Type "noa" to keep it for @noah');
+  assert.equal(t('no', { held: true }), 'Type "@no" to keep it for @no');
+  assert.equal(t(LONG39, { held: true }), 'Type "ab" to keep it');
+  assert.equal(confirmBox.fieldText('noah').description, DESC);
+  assert.equal(confirmBox.fieldText('no').description, '"@" and the whole handle of who it is going to. Enter alone will not send; Esc cancels.');
+  // The fallback for a required text too long for even the short title.
+  const huge = `@${'q'.repeat(38)}`;
+  assert.ok(`Type "${huge}" to send`.length > confirmBox.TITLE_MAX);
+});
+
+test('property: for thousands of handles, no reply word sends, the asked-for text sends, the title fits and starts with it', () => {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789_-';
+  const handles = new Set();
+  for (const a of chars) { handles.add(a); for (const b of chars) handles.add(a + b); }
+  for (const w of confirmBox.REPLY_WORDS) {
+    handles.add(w);
+    for (const a of chars) { handles.add(w + a); handles.add(w + a + chars[(chars.indexOf(a) * 7 + 3) % chars.length]); }
   }
-});
-
-test('a 39-character handle: the title is shortened to fit; the first two letters still send', () => {
-  assert.equal(LONG39.length, 39);
-  const { title, description } = confirmBox.fieldText(LONG39);
-  assert.equal(title, 'Type "ab" to send');
-  assert.ok(title.length <= confirmBox.TITLE_MAX);
-  assert.equal(description, DESC2);
-  assert.equal(confirmBox.typedOk(LONG39, 'ab'), true);
-  assert.equal(confirmBox.typedOk(LONG39, `@${LONG39}`), true);
-  assert.equal(confirmBox.typedOk(LONG39, 'a'), false);
-});
-
-test('habit words: one constant; none of them ever confirms a send, for any handle', () => {
-  assert.deepEqual([...confirmBox.HABIT_WORDS], ['send', 'yes', 'y', 'ok', 's']);
-  const handles = ['ben', 'linus', 'a', 's', 'y', 'o', 'se', 'sen', 'send', 'sends', 'sendhil', 'ye', 'yes', 'yesenia', 'ok', 'oka', 'okafor', 'sa', 'sam', LONG39, `send${'x'.repeat(35)}`, `ok${'z'.repeat(37)}`];
+  let seed = 20261121;
+  const rand = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  for (let i = 0; i < 2000; i++) { const n = 3 + rand(37); let h = ''; for (let j = 0; j < n; j++) h += chars[rand(chars.length)]; handles.add(h); }
+  assert.ok(handles.size > 4000, `${handles.size} handles`);
+  const words = confirmBox.REPLY_WORDS.flatMap((w) => [w, w.toUpperCase(), ` ${w} `]);
   for (const h of handles) {
-    for (const w of confirmBox.HABIT_WORDS) {
-      for (const typed of [w, w.toUpperCase(), ` ${w} `]) assert.equal(confirmBox.typedOk(h, typed), false, `@${h}: ${JSON.stringify(typed)}`);
+    for (const w of words) if (confirmBox.typedOk(h, w)) assert.fail(`a reply word sends: ${JSON.stringify(w)} to @${h}`);
+    const r = confirmBox.rule(h);
+    if (!confirmBox.typedOk(h, r.need)) assert.fail(`the asked-for text does not send: ${r.need} to @${h}`);
+    for (const held of [false, true]) {
+      const { title } = confirmBox.fieldText(h, { held });
+      if (title.length > confirmBox.TITLE_MAX) assert.fail(`title too long for @${h}: ${title}`);
+      if (!(title.startsWith(`Type "${r.need}" `) || title === 'Type @ and the whole handle')) assert.fail(`title for @${h} does not lead with the text: ${title}`);
     }
-    // ...and the person can always send by typing what the title asks for.
-    assert.equal(confirmBox.typedOk(h, confirmBox.rule(h).need), true, `@${h}: ${confirmBox.rule(h).need}`);
-    assert.ok(confirmBox.fieldText(h).title.length <= confirmBox.TITLE_MAX, `@${h}: ${confirmBox.fieldText(h).title}`);
   }
 });
 
-test('a habit-colliding handle needs the whole handle, and the title says so', () => {
-  for (const [h, w] of [['sendhil', 'send'], ['yesenia', 'yes'], ['okafor', 'ok'], ['sends', 'send']]) {
-    assert.deepEqual(confirmBox.rule(h), { need: h, min: h.length, at: false }, h);
-    assert.equal(confirmBox.typedOk(h, w), false);
-    assert.equal(confirmBox.typedOk(h, h.slice(0, 2)), false, 'two letters are not enough here');
-    assert.equal(confirmBox.typedOk(h, h), true);
-    assert.equal(confirmBox.typedOk(h, `@${h.toUpperCase()}`), true);
-    assert.equal(confirmBox.fieldText(h).title, `Type "${h}" to send to @${h}`);
-    assert.match(confirmBox.fieldText(h).description, /^The whole handle of who it is going to\. Enter alone will not send; Esc cancels\.$/);
-  }
-  for (const h of ['send', 'yes', 'ok']) {
-    assert.deepEqual(confirmBox.rule(h), { need: `@${h}`, min: h.length, at: true });
-    assert.equal(confirmBox.typedOk(h, h), false);
-    assert.equal(confirmBox.typedOk(h, `@${h}`), true);
-    assert.equal(confirmBox.fieldText(h).title, `Type "@${h}" to send to @${h}`);
-  }
-  const longCollide = `send${'x'.repeat(35)}`;
-  assert.equal(confirmBox.fieldText(longCollide).title, 'Type the whole handle to send');
-  assert.equal(confirmBox.fieldText(longCollide).description, 'The whole handle of who it is going to, as on the first line. Enter alone will not send; Esc cancels.');
-  assert.equal(confirmBox.typedOk(longCollide, 'se'), false);
-  assert.equal(confirmBox.typedOk(longCollide, longCollide), true);
-  // Not colliding: two letters do.
-  for (const h of ['sean', 'sen', 'se', 'yoko', 'olu']) assert.equal(confirmBox.rule(h).need, h.slice(0, 2), h);
-});
-
-test('the schema as sent, for @ben and for a 39-character handle: one required string field, no default', () => {
-  assert.deepEqual(confirmBox.schemaFor('ben'), { type: 'object', properties: { to: { type: 'string', title: 'Type "be" to send to @ben', description: DESC2, minLength: 1, maxLength: 40 } }, required: ['to'] });
-  assert.deepEqual(confirmBox.schemaFor(LONG39), { type: 'object', properties: { to: { type: 'string', title: 'Type "ab" to send', description: DESC2, minLength: 1, maxLength: 40 } }, required: ['to'] });
+test('the schema as sent, for @ben, @noah (kept for later) and a 39-character handle: one required string field, no default', () => {
+  assert.deepEqual(confirmBox.schemaFor('ben'), { type: 'object', properties: { to: { type: 'string', title: 'Type "be" to send to @ben', description: DESC, minLength: 1, maxLength: 40 } }, required: ['to'] });
+  assert.deepEqual(confirmBox.schemaFor('noah', { held: true }), { type: 'object', properties: { to: { type: 'string', title: 'Type "noa" to keep it for @noah', description: DESC, minLength: 1, maxLength: 40 } }, required: ['to'] });
+  assert.deepEqual(confirmBox.schemaFor(LONG39), { type: 'object', properties: { to: { type: 'string', title: 'Type "ab" to send', description: DESC, minLength: 1, maxLength: 40 } }, required: ['to'] });
   assert.equal(JSON.stringify(confirmBox.schemaFor('ben')).includes('default'), false);
   assert.deepEqual(confirmBox.request('x', '2025-11-25', 'ben').requestedSchema, confirmBox.schemaFor('ben'));
-  assert.deepEqual(confirmBox.request('x', '2026-07-28', 'ben').requestedSchema, confirmBox.schemaFor('ben'));
+  assert.deepEqual(confirmBox.request('x', '2026-07-28', 'noah', { held: true }).requestedSchema, confirmBox.schemaFor('noah', { held: true }));
 });
 
 test('answerOf: only accept with the letters is yes; decline is decline; an accept with other content is wrong', () => {
@@ -1201,7 +1219,8 @@ test('after "send" typed into the box, the next box needs vibe_prepare again and
 test('reply, resend and kept-for-later boxes use the same field: the recipient\'s letters', async () => {
   const forKeep = confirmBox.request(confirmBox.message({ to: 'newbie-dev', held: true, text: 'hi' }), '2025-11-25', 'newbie-dev');
   assert.equal(forKeep.message.split('\n')[0], 'Keep for @newbie-dev? (2 chars, all shown)');
-  assert.equal(forKeep.requestedSchema.properties.to.title, 'Type "ne" to send to @newbie-dev');
+  assert.equal(forKeep.requestedSchema.properties.to.title, 'Type "ne" to send to @newbie-dev', 'request() without held: the send wording');
+  assert.equal(confirmBox.request('x', '2025-11-25', 'newbie-dev', { held: true }).requestedSchema.properties.to.title, 'Type "ne" to keep it for @newbie-dev');
   const forReply = confirmBox.request(confirmBox.message({ to: 'ben', reply: true, text: 'hi' }), '2025-11-25', 'ben');
   assert.equal(forReply.message.split('\n')[0], 'Reply to @ben? (2 chars, all shown)');
   assert.equal(forReply.requestedSchema.properties.to.title, 'Type "be" to send to @ben');

@@ -732,7 +732,7 @@ function openBox(id, rev, me) {
     const nonce = crypto.randomBytes(16).toString('hex');
     d.boxAt = now;
     d.box = { nonce, at: now, rev, sha: sha256(message), to: d.to, me, turn: turn.check, project: here, pid: process.pid };
-    return { boxed: { id: d.id, to: d.to, nonce, text: boxMessageFor(d) } };
+    return { boxed: { id: d.id, to: d.to, held: Boolean(d.held), nonce, text: boxMessageFor(d) } };
   });
 }
 
@@ -844,7 +844,7 @@ async function sendWithBox(id, rev, me, box, { signal = null } = {}) {
   const o = tryOpen(id, rev, me);
   if (o.result) return o.result;
   if (o.unseen) return unseenRefusal(o.unseen.unseen, o.unseen.why, { boxy: true });
-  const answer = await confirmBox.ask(box, o.boxed.text, { to: o.boxed.to, ...(box.timeoutMs ? { timeoutMs: box.timeoutMs } : {}), signal });
+  const answer = await confirmBox.ask(box, o.boxed.text, { to: o.boxed.to, held: o.boxed.held, ...(box.timeoutMs ? { timeoutMs: box.timeoutMs } : {}), signal });
   return afterClose(closeBox(o.boxed.id, o.boxed.nonce, answer, { signal, rev }));
 }
 
@@ -892,7 +892,7 @@ async function sendStateless(id, rev, me, ctx) {
   if (o.unseen) return unseenRefusal(o.unseen.unseen, o.unseen.why, { boxy: true });
   return {
     inputRequired: {
-      inputRequests: { [confirmBox.INPUT_KEY]: { method: 'elicitation/create', params: confirmBox.request(o.boxed.text, '2026-07-28', o.boxed.to) } },
+      inputRequests: { [confirmBox.INPUT_KEY]: { method: 'elicitation/create', params: confirmBox.request(o.boxed.text, '2026-07-28', o.boxed.to, { held: o.boxed.held }) } },
       requestState: packState(o.boxed.id, o.boxed.nonce),
     },
   };

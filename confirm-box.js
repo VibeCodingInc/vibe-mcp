@@ -10,7 +10,7 @@
  * elicitation), vibe_send also asks the person directly: a box whose first
  * line is fixed /vibe wording (recipient, length, whether all of it is
  * shown), then the text, each line quoted with "> ", then one required text
- * field (type the first two letters of the recipient) and Accept / Decline.
+ * field (type the first letters of the recipient) and Accept / Decline.
  * The box shows the start of the text, not the reply target and not exact
  * spacing, so the preview is where the person reads the message:
  *   - wherever person turns are recorded, a send needs the turn check (a
@@ -54,26 +54,32 @@ const VISIBLE_LINES = 3;
 const NEWLINE_MARK = ' ↵ ';
 /**
  * The form asked for: one required text field, no default. The person types
- * the first two letters of who it is going to (the whole handle for a
- * one-letter handle). History:
+ * the first letters of who it is going to: always more letters than any
+ * ordinary reply word the handle begins with (rule, below). History:
  *   0.9.23  no fields: Accept was pre-selected, and a stray Enter (one still
  *           queued after the person typed "send") accepted the box before they
  *           saw it.
  * Live key tests on Claude Code 2.1.330 chose this field over the others: a
  * required text field with no default refuses Enter ("This field is
- * required"), typing goes straight into it, typing "send" + Enter submits a
- * value that is not the recipient's letters, and the message area still shows
+ * required"), typing goes straight into it, and the message area still shows
  * VISIBLE_LINES lines. A choice field was too hard to accept; a tick box and
  * a "type s" field were accepted by the very habit that caused the 0.9.23 bug.
+ * A first cut asked for two letters, so "no" sent to @noah and "edit" to
+ * @edith: a reply word typed into the box must never be the send key.
  */
 const FIELD = 'to';
 /**
- * Words a person types out of habit to mean "yes, send". If one of them would
- * itself pass for a recipient (@sendhil, @yesenia, @okafor), that recipient
- * needs the whole handle; if the handle IS one of them (@ok, @s), it needs
- * "@" and the handle.
+ * Ordinary replies a person types without reading the box: yes-words,
+ * refusals, fillers, a few other languages, and single digits. No word here,
+ * typed alone, ever sends (rule). Lower-case.
  */
-const HABIT_WORDS = Object.freeze(['send', 'yes', 'y', 'ok', 's']);
+const REPLY_WORDS = Object.freeze([
+  's', 'send', 'y', 'ye', 'yes', 'yea', 'yeah', 'yep', 'yup', 'ya', 'ok', 'okay', 'k', 'kk', 'sure', 'fine', 'good', 'go', 'do',
+  'n', 'no', 'nope', 'nah', 'not', 'don', 'dont', 'stop', 'wait', 'hold', 'later', 'cancel', 'edit', 'esc', 'x', 'q', 'nvm',
+  'hi', 'hey', 'hm', 'hmm', 'ah', 'oh', 'um', 'uh', 'er', 'lol', 'wow', 'thx', 'ty', 'pls', 'thanks', 'maybe',
+  'ja', 'si', 'da', 'oui', 'non', 'nein',
+  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+]);
 /**
  * Longest field title, in characters, that Claude Code shows uncut (2.1.330
  * cut a title at about 47: "Confirm send (Space to toggle Yes, then ↓ Accep…").
@@ -86,21 +92,24 @@ const ENTER_NOTE = 'Enter alone will not send; Esc cancels.';
 const fold = (v) => String(v).trim().replace(/[A-Z]/g, (c) => c.toLowerCase());
 
 /**
- * What the person must type to send to `to`: { need, min, at }. Normally the
- * first two letters (any longer prefix also counts, with or without "@");
- * the whole handle when a habit word would pass; "@" + handle (exactly) when
- * the handle is itself a habit word.
+ * What the person must type to send to `to`: { need, len, at }. The first
+ * `len` characters of the handle, where len = max(2, 1 + the longest reply
+ * word the handle starts with); when that is longer than the handle, "@" and
+ * the whole handle (at: true).
  */
 function rule(to) {
   const h = fold(to);
-  const min = Math.min(2, h.length);
-  const passes = (t) => t.length >= min && h.startsWith(t);
-  if (!HABIT_WORDS.some(passes)) return { need: h.slice(0, min), min, at: false };
-  if (!HABIT_WORDS.includes(h)) return { need: h, min: h.length, at: false };
-  return { need: `@${h}`, min: h.length, at: true };
+  const longest = REPLY_WORDS.reduce((m, w) => (h.startsWith(w) && w.length > m ? w.length : m), 0);
+  const len = Math.max(2, longest + 1);
+  if (len > h.length) return { need: `@${h}`, len, at: true };
+  return { need: h.slice(0, len), len, at: false };
 }
 
-/** Does the typed value confirm a send to `to`? */
+/**
+ * Does the typed value confirm a send to `to`? Trimmed, ASCII lower-cased: a
+ * prefix of the handle at least `len` long (one optional leading "@"), or, in
+ * the "@" case, exactly "@" + handle. Nothing shorter.
+ */
 function typedOk(to, value) {
   if (typeof value !== 'string') return false;
   const h = fold(to);
@@ -109,26 +118,27 @@ function typedOk(to, value) {
   const t = fold(value);
   if (r.at) return t === r.need;
   const bare = t.startsWith('@') ? t.slice(1) : t;
-  return bare.length >= r.min && h.startsWith(bare);
+  return bare.length >= r.len && h.startsWith(bare);
 }
 
-/** The field's title and description for a recipient, within TITLE_MAX. */
-function fieldText(to) {
+/** The field's title and description for a box to `to` (`held`: a kept-for-later box), within TITLE_MAX. */
+function fieldText(to, { held = false } = {}) {
   const h = fold(to);
   const r = rule(h);
-  const long = `Type "${r.need}" to send to @${h}`;
-  const short = `Type "${r.need}" to send`;
-  const whole = r.need === h || r.at;
-  const title = long.length <= TITLE_MAX ? long : short.length <= TITLE_MAX ? short : (r.at ? 'Type "@" and the handle to send' : 'Type the whole handle to send');
-  const what = r.at ? 'Its handle with the "@" in front, as on the first line.'
-    : whole ? `The whole handle of who it is going to${title === long ? '' : ', as on the first line'}.`
-      : 'The first two letters of who it is going to.';
+  const verb = held ? 'keep it' : 'send';
+  const long = `Type "${r.need}" to ${verb} ${held ? 'for' : 'to'} @${h}`;
+  const short = `Type "${r.need}" to ${verb}`;
+  const fits = (t) => t.length <= TITLE_MAX;
+  const title = fits(long) ? long : fits(short) ? short : 'Type @ and the whole handle';
+  const what = r.at
+    ? `"@" and the whole handle of who it is going to${title === long ? '' : ', as on the first line'}.`
+    : 'The first letters of who it is going to.';
   return { title, description: `${what} ${ENTER_NOTE}` };
 }
 
 /** The requestedSchema for a box to `to`. */
-function schemaFor(to) {
-  const { title, description } = fieldText(to);
+function schemaFor(to, opts = {}) {
+  const { title, description } = fieldText(to, opts);
   return {
     type: 'object',
     properties: { [FIELD]: { type: 'string', title, description, ...FIELD_LIMITS } },
@@ -304,8 +314,8 @@ function fits(text) {
 }
 
 /** The params of elicitation/create for a protocol version. */
-function request(text, protocolVersion, to) {
-  const params = { message: text, requestedSchema: schemaFor(to) };
+function request(text, protocolVersion, to, { held = false } = {}) {
+  const params = { message: text, requestedSchema: schemaFor(to, { held }) };
   if (MODE_VERSIONS.has(protocolVersion)) params.mode = 'form';
   return params;
 }
@@ -322,7 +332,7 @@ function isOpen() { return openNow; }
  * cancelled, an accept with the wrong text). Only action "accept" with the
  * recipient's letters typed is yes (answerOf).
  */
-async function ask(box, text, { to, timeoutMs = TIMEOUT_MS, signal = null } = {}) {
+async function ask(box, text, { to, held = false, timeoutMs = TIMEOUT_MS, signal = null } = {}) {
   if (openNow) return 'busy';
   if (signal && signal.aborted) return 'none';
   openNow = true;
@@ -336,7 +346,7 @@ async function ask(box, text, { to, timeoutMs = TIMEOUT_MS, signal = null } = {}
     });
     let result;
     try {
-      result = await Promise.race([Promise.resolve().then(() => box.request(request(text, box.protocolVersion, to), { signal: ctl.signal })), stop]);
+      result = await Promise.race([Promise.resolve().then(() => box.request(request(text, box.protocolVersion, to, { held }), { signal: ctl.signal })), stop]);
     } catch { return 'none'; }
     if (result && result.stopped) { ctl.abort(); return 'none'; }
     const answer = answerOf(result, to);
@@ -448,7 +458,7 @@ function labAllowsHook(env = process.env) {
 
 module.exports = {
   WRAP_COLUMNS, VISIBLE_LINES, NEWLINE_MARK, TIMEOUT_MS, INPUT_KEY, ELICITATION_VERSIONS,
-  FIELD, HABIT_WORDS, TITLE_MAX, rule, typedOk, fieldText, schemaFor, answerOf,
+  FIELD, REPLY_WORDS, TITLE_MAX, rule, typedOk, fieldText, schemaFor, answerOf,
   declaresForm, noteClient, available, clientState,
   displayWidth, wrapLine, textLines, question, message, fits, request, ask, isOpen,
   settingsAnswerBox, settingsFiles, answeringHook, labAllowsHook, managedSettingsFile,
