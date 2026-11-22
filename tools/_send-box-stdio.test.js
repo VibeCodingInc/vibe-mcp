@@ -47,6 +47,8 @@ function server(apiUrl, extraEnv = {}) {
   fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({ username: 'ada', authMethod: 'github', authToken: jwt('ada') }));
   const env = { ...process.env, HOME: home, VIBE_HOME: home, VIBE_API_URL: apiUrl, CLAUDE_CONFIG_DIR: claude, CLAUDE_PROJECT_DIR: project, ...extraEnv };
   delete env.VIBE_AGENT_HANDLE; delete env.VIBE_LAB_BOX_HOOK; delete env.VIBE_TURNS_DIR;
+  // The host is only what the requests say: no Claude Code environment leaks in from the test runner.
+  delete env.CLAUDECODE; delete env.CLAUDE_CODE_ENTRYPOINT; delete env.CODEX_SANDBOX; delete env.CODEX_HOME; delete env.CURSOR_TRACE_ID; delete env.CURSOR_CHANNEL;
   // The arrival hook has recorded turns here: the turn check is live.
   turns.record(project, Date.now() - 60_000, { VIBE_HOME: home });
   const child = spawn(process.execPath, [INDEX], { env, cwd: project, stdio: ['pipe', 'pipe', 'ignore'] });
@@ -246,4 +248,19 @@ test('a client without the capability, or on an older protocol, never gets a box
       assert.equal(a.sent('no box'), true);
     } finally { s.close(); await a.close(); }
   }
+});
+
+test('2026-07-28: the host is read from each request\'s _meta clientInfo (no discover, no env): prepare and send in one turn is refused, with no box', async () => {
+  const a = await api(); const s = server(a.url);
+  try {
+    const caps = { elicitation: { form: {} } };
+    const m = { ...meta(caps), 'io.modelcontextprotocol/clientInfo': { name: 'claude-code', version: '2.1.330' } };
+    s.send({ id: 2, method: 'tools/call', params: { name: 'vibe_prepare', arguments: { handle: 'linus', message: 'one agent turn only' }, _meta: m } });
+    const d = draftOf(await s.waitFor((r) => r.id === 2));
+    s.send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d, _meta: m } });
+    const res = (await s.waitFor((r) => r.id === 3)).result;
+    assert.equal(res.resultType, 'complete', 'no input request');
+    assert.match(res.content[0].text, /^Not sent yet:/);
+    assert.equal(a.sent('one agent turn only'), false);
+  } finally { s.close(); await a.close(); }
 });

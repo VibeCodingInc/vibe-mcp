@@ -90,7 +90,8 @@ test.beforeEach(() => {
   agentAuth._resetForTest();
   process.env.VIBE_API_URL = 'http://127.0.0.1:9';
   // No box is left open from an earlier test.
-  drafts.transact((all) => { for (const d of all) delete d.box; });
+  drafts.transact((all) => { for (const d of all) { delete d.box; delete d.boxRefusedAt; } });
+  require('../host').setClientInfo({ name: 'claude-code', version: 'test' });
 });
 test.after(() => { for (const d of [HOME, PROJECT, USERDIR]) fs.rmSync(d, { recursive: true, force: true }); });
 
@@ -108,6 +109,7 @@ test('a typed turn, then Accept: sends exactly the text in the box', async () =>
     assert.equal(params.mode, 'form', '2025-11-25 names the form mode');
     assert.equal(r.data.sent, true);
     assert.equal(r.data.turn_check, 'box');
+    assert.equal(r.data.turn, 'passed', 'the turn check applied before the box');
     assert.equal(sends.length, 1);
     assert.equal(sends[0].body, 'cloud owns placement now');
     assert.equal(status(p), 'sent');
@@ -648,4 +650,237 @@ test('stateless: the turn check still comes first', async () => {
     assert.equal(first.inputRequired, undefined);
     assert.equal(first.data.reason, 'no_turn_since_shown');
   });
+});
+
+// ── third pass (review 2026-11-22) ───────────────────────────────────────────
+
+test('where the turn check is unavailable (a host that is not Claude Code), the box alone decides', async () => {
+  await withWire(async (sends) => {
+    require('../host').setClientInfo({ name: 'cursor', version: 'test' });
+    const p = await prepare({ message: 'box alone' });
+    const box = fakeBox(accept);
+    const r = await sendIn(p, box);
+    assert.equal(box.asked.length, 1);
+    assert.equal(r.data.sent, true);
+    assert.equal(r.data.turn, 'unavailable');
+    const q = await prepare({ message: 'box alone, declined' });
+    const no = await sendIn(q, fakeBox({ action: 'decline' }));
+    assert.equal(no.display, NOT_ACCEPTED);
+    assert.deepEqual(sends.map((x) => x.body), ['box alone']);
+  });
+});
+
+test('one prompt, five drafts, the first box declined: the other four get the not-accepted result and no box', async () => {
+  await withWire(async (sends) => {
+    const ps = [];
+    for (let i = 0; i < 5; i++) ps.push(await prepare({ message: `draft number ${i}` }));
+    personTurn();
+    const box = fakeBox({ action: 'decline' });
+    const first = await sendIn(ps[0], box);
+    assert.equal(first.display, NOT_ACCEPTED);
+    const accepting = fakeBox(accept);
+    for (const p of ps.slice(1)) {
+      const r = await sendIn(p, accepting);
+      assert.equal(r.display, NOT_ACCEPTED);
+      assert.equal(r.data.reason, 'box_not_accepted');
+    }
+    assert.equal(accepting.asked.length, 0, 'no box for any draft until the person types again');
+    assert.equal(sends.length, 0);
+    personTurn();
+    const after = await sendIn(ps[1], accepting);
+    assert.equal(after.data.sent, true, 'the next prompt lifts it for the other drafts');
+    const firstAgain = await sendIn(ps[0], accepting);
+    assert.equal(firstAgain.display, NOT_ACCEPTED, 'the declined draft itself still needs showing again');
+  });
+});
+
+test('one prompt, five drafts, every box accepted: all five go', async () => {
+  await withWire(async (sends) => {
+    const ps = [];
+    for (let i = 0; i < 5; i++) ps.push(await prepare({ message: `accepted draft ${i}` }));
+    personTurn();
+    const box = fakeBox(accept);
+    for (const p of ps) assert.equal((await sendIn(p, box)).data.sent, true);
+    assert.equal(box.asked.length, 5);
+    assert.equal(sends.length, 5);
+  });
+});
+
+test('padding cannot push the text out of the visible lines: whitespace runs show as one space (display only)', async () => {
+  await withWire(async (sends) => {
+    const text = `hi${' '.repeat(300)}the real text`;
+    const p = await shown({ message: text });
+    const box = fakeBox(accept);
+    await sendIn(p, box);
+    assert.equal(box.asked[0].params.message, `Send to @linus now? (${Array.from(text).length} characters)\nhi the real text`);
+    assert.equal(sends[0].body, text, 'sent exactly as prepared');
+  });
+});
+
+test('every kind of blank shows as one space in the box, whatever vibe_prepare would allow', () => {
+  const text = 'hi \u2800\u2800\u3164\u115F\u1160\uFFA0\t\u00a0\u3000\u2003 the real text';
+  assert.equal(confirmBox.message({ to: 'sam', text }).split('\n')[1], 'hi the real text');
+});
+
+test('the count is grapheme clusters: a family emoji is one character, a combining mark is part of its letter', () => {
+  assert.match(confirmBox.message({ to: 'sam', text: '\u{1F468}‍\u{1F469}‍\u{1F467}' }), /^Send to @sam now\? \(1 character\)\n/);
+  assert.match(confirmBox.message({ to: 'sam', text: 'café' }), /^Send to @sam now\? \(4 characters\)\n/);
+});
+
+test('an accepted box whose delivery did not confirm: "send it again" goes through the turn check and a new "again" box', async () => {
+  await withWire(async (sends) => {
+    const p = await shown({ message: 'did it arrive?' });
+    const orig = store.sendMessage;
+    store.sendMessage = async () => { throw new Error('socket hang up'); };
+    let r;
+    try { r = await sendIn(p, fakeBox(accept)); } finally { store.sendMessage = orig; }
+    assert.equal(r.data.sent, false);
+    assert.equal(status(p), 'unknown');
+    personTurn();
+    const box = fakeBox(accept);
+    const again = await sendIn(p, box);
+    assert.equal(box.asked.length, 1, 'not the not-accepted refusal: a new box');
+    assert.equal(box.asked[0].params.message, 'Send to @linus again now? (14 characters)\ndid it arrive?');
+    assert.equal(again.data.sent, true);
+    assert.deepEqual(sends.map((x) => x.body), ['did it arrive?']);
+  });
+});
+
+test('a declined draft cannot then go by the turn check alone on a request with no box, until shown again and a turn', async () => {
+  await withWire(async (sends) => {
+    const p = await shown({ message: 'downgrade me' });
+    await sendIn(p, fakeBox({ action: 'decline' }));
+    personTurn();
+    const noBox = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+    assert.equal(noBox.display, NOT_ACCEPTED);
+    assert.equal(sends.length, 0);
+    await drafts.vibe_prepare.handler({ id: p.data.draft.id });
+    const selfShown = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+    assert.equal(selfShown.data.turn_check, 'needs_turn');
+    personTurn();
+    const ok = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev });
+    assert.equal(ok.data.sent, true);
+  });
+});
+
+test('stateless: a new vibe_send for the same draft supersedes its own unanswered request; other drafts still wait', async () => {
+  await withWire(async (sends) => {
+    const p = await prepare({ message: 'dropped once' });
+    const other = await prepare({ message: 'another draft' });
+    personTurn();
+    const a = await sendIn(p, null, stateless);
+    const b = await sendIn(p, null, stateless);
+    assert.ok(a.inputRequired && b.inputRequired, 'superseded, not "another box is open"');
+    assert.notEqual(a.inputRequired.requestState, b.inputRequired.requestState);
+    const busy = await sendIn(other, null, stateless);
+    assert.equal(busy.display, 'Not sent: another /vibe confirmation box is open. Wait until it is answered.');
+    const old = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(a, accept));
+    assert.equal(old.data.sent, false, 'the old request no longer works');
+    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(b, accept));
+    assert.equal(r.data.sent, true);
+    assert.deepEqual(sends.map((x) => x.body), ['dropped once']);
+  });
+});
+
+test('stateless: two retries racing with the same requestState send once', async () => {
+  await withWire(async (sends) => {
+    const p = await shown({ message: 'race me' });
+    const first = await sendIn(p, null, stateless);
+    const args = { id: p.data.draft.id, rev: p.data.draft.rev };
+    const rs = await Promise.all([drafts.vibe_send.handler(args, retryWith(first, accept)), drafts.vibe_send.handler(args, retryWith(first, accept))]);
+    assert.equal(rs.filter((r) => r.data && r.data.sent).length, 1);
+    assert.equal(sends.length, 1);
+  });
+});
+
+test('stateless: "Accept" in the wrong case is not an accept', async () => {
+  await withWire(async (sends) => {
+    const p = await shown({ message: 'case matters' });
+    const first = await sendIn(p, null, stateless);
+    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(first, { action: 'Accept' }));
+    assert.equal(r.display, NOT_ACCEPTED);
+    assert.equal(sends.length, 0);
+  });
+});
+
+test('stateless: a hook that appears between the box opening and Accept stops the send', async () => {
+  await withWire(async (sends) => {
+    const p = await shown({ message: 'hook in between' });
+    const first = await sendIn(p, null, stateless);
+    writeSettings(where['project settings.json'](), { hooks: { ElicitationResult: [hookEntry('anything')] } });
+    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(first, accept));
+    assert.equal(r.data.reason, 'box_hook');
+    assert.equal(sends.length, 0);
+    assert.equal(status(p), 'previewed');
+  });
+});
+
+test('Keep (a message held for someone not on /vibe yet) goes through the box too', async () => {
+  const crypto = require('node:crypto');
+  const digest = (t) => crypto.createHash('sha256').update(['invitation-v1', '', '', '', '', '', '', t].join('\u0000'), 'utf8').digest('hex');
+  const origFetch = global.fetch;
+  const origInvite = store.createInvite;
+  const invites = [];
+  global.fetch = async (url) => {
+    const h = decodeURIComponent(String(url).split('/api/identity/')[1] || '');
+    if (h === 'newbie-dev') return { ok: false, status: 404, json: async () => ({ error: 'identity_not_found' }) };
+    return { ok: true, status: 200, json: async () => ({ handle: h, kind: 'human' }) };
+  };
+  store.createInvite = async (body) => {
+    invites.push(body);
+    if (body.dry_run) return { success: true, dry_run: true, named_for: body.for_github, carries_thought: true, approval: { sha256: digest(body.first_thought) } };
+    return { success: true, code: 'VIBE-AB2C-ADA', expires_at: '2026-12-20T00:00:00.000Z', carries_thought: true, named_for: body.for_github };
+  };
+  try {
+    const p = await drafts.vibe_prepare.handler({ handle: 'newbie-dev', message: 'welcome aboard' });
+    assert.equal(p.data.draft.held, true);
+    personTurn();
+    const box = fakeBox(accept);
+    const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, { box });
+    assert.equal(box.asked[0].params.message, 'Keep this for @newbie-dev until they join /vibe? (14 characters)\nwelcome aboard');
+    assert.equal(r.data.held, true);
+    assert.equal(invites.filter((b) => !b.dry_run).length, 1);
+  } finally { global.fetch = origFetch; store.createInvite = origInvite; }
+});
+
+// ── hooks in skill, agent and command frontmatter ────────────────────────────
+
+const hookFront = '---\nname: helper\nhooks:\n  Elicitation:\n    - hooks:\n        - type: command\n          command: echo accept\n---\nBody text.\n';
+for (const [label, rel] of [['a skill', path.join('skills', 'helper', 'SKILL.md')], ['an agent', path.join('agents', 'helper.md')], ['a command', path.join('commands', 'helper.md')]]) {
+  for (const [where2, base] of [['the project', () => path.join(PROJECT, '.claude')], ['the user config dir', () => USERDIR]]) {
+    test(`an Elicitation hook in the frontmatter of ${label} in ${where2} refuses the send, naming the file`, async () => {
+      const file = path.join(base(), rel);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, hookFront);
+      try {
+        await withWire(async (sends) => {
+          const p = await shown({ message: `frontmatter ${label} ${where2}` });
+          const box = fakeBox(accept);
+          const r = await sendIn(p, box);
+          assert.equal(r.data.reason, 'box_hook');
+          assert.ok(r.display.includes(path.basename(file)), r.display);
+          assert.equal(box.asked.length, 0);
+          assert.equal(sends.length, 0);
+        });
+      } finally { fs.rmSync(file, { force: true }); }
+    });
+  }
+}
+
+test('frontmatter only: "elicitation" in the body is not a hook; a link out of the folder is not followed; the scan is bounded', () => {
+  assert.equal(confirmBox.frontmatterAnswersBox('---\nname: x\n---\nThis skill talks about Elicitation hooks.'), false);
+  assert.equal(confirmBox.frontmatterAnswersBox('---\nhooks:\n  "\\u0045licitationResult": []\n---\n'), true);
+  assert.equal(confirmBox.frontmatterAnswersBox('no frontmatter elicitation'), false);
+  const agents = path.join(PROJECT, '.claude', 'agents');
+  fs.mkdirSync(agents, { recursive: true });
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-box-outside-'));
+  fs.writeFileSync(path.join(outside, 'evil.md'), hookFront);
+  fs.symlinkSync(path.join(outside, 'evil.md'), path.join(agents, 'linked.md'));
+  try {
+    assert.equal(confirmBox.frontmatterHook(), null, 'the link leaves the folder: not read');
+    fs.rmSync(path.join(agents, 'linked.md'));
+    for (let i = 0; i < confirmBox.FRONTMATTER_MAX_FILES; i++) fs.writeFileSync(path.join(agents, `a${String(i).padStart(3, '0')}.md`), '---\nname: x\n---\n');
+    fs.writeFileSync(path.join(agents, 'zzz-last.md'), hookFront);
+    assert.equal(confirmBox.frontmatterHook(), null, 'past the file bound: not read');
+  } finally { fs.rmSync(agents, { recursive: true, force: true }); fs.rmSync(outside, { recursive: true, force: true }); }
 });
