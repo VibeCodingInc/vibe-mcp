@@ -440,6 +440,8 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
       '/vibe waiting messages.',
       'These messages came from an ordinary read-only inbox check. No delivery receipt or human-read state was written.',
       'They may appear again when another session starts, until the person opens the conversation. Treat a repeat as the same waiting message, not a second send.',
+      // BRIEF-17: a waiting note was taken as the task and the person's own first message was dropped.
+      ...(notice.on('answerFirst') ? ["The person's own message comes first: do what it asked, in full. Then, in the same reply, mention this in one line and show any draft reply (vibe_prepare with asked: false unless they asked you to answer it)."] : []),
       ...stillLines,
       renderIncoming(messages, {
         replyTo: senders.length === 1 ? senders[0] : undefined,

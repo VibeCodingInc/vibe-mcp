@@ -178,3 +178,64 @@ test('the lab clock: day d is 24*(d-1) hours, written to the server configs and 
   assert.equal(parseArgs(['w.json', '--out', 'o']).labClock, true);
   assert.equal(parseArgs(['w.json', '--out', 'o', '--no-lab-clock']).labClock, false);
 });
+
+// ── turn hijacks and false "above" claims (BRIEF-17 N4) ─────────────────────
+// Three small recordings in the runner's shape, from the round-two
+// transcripts (world-04, Camille): a real hijack, an answer then a draft, and
+// a draft the person asked for.
+const bakery = { id: 'b', archetype: 'a', relationship: 'established', open_line: false, people: { camille: person('Camille Roux'), tariq: person('Tariq Haddad') }, timeline: [] };
+const DRAFT = "Yes, it changes things: Meadowlark's 84% cultured delivery is delayed to Mon 11/23, and Saturday's lamination block was swapped to Clover Ridge 82%.";
+const PREVIEW = `**To:** @tariq (here now)\n**Message (exact):**\n${DRAFT}\n**Attachments:** none\n\nSend to @tariq · Edit · Cancel — nothing has been sent.  _(draft wf8c82692 · rev d93f5171)_`;
+function recording(steps) {
+  const ev = [];
+  for (const s of steps) ev.push({ i: ev.length, who: 'camille', day: 3, entry: 4, session_id: 's5', ...s });
+  return ev;
+}
+const ASK = 'Picking up the week. Summarize the oven #2 repair items still open from ops/oven_maintenance_log.md and the pie rack counts for Thanksgiving.';
+const hijack = () => recording([
+  { kind: 'prompt', text: ASK },
+  { kind: 'tool', name: 'Read', id: 'r1', input: {} },
+  { kind: 'tool', name: 'mcp__vibe__vibe_prepare', id: 'p1', input: { handle: 'tariq', message: DRAFT } },
+  { kind: 'returned', tool_use_id: 'p1', name: 'mcp__vibe__vibe_prepare', text: PREVIEW },
+  { kind: 'text', text: "I've drafted the reply to Tariq but haven't sent it. Do you want me to send it, edit it, or cancel it?" },
+  { kind: 'human_reply', text: 'send it, but add one line: calling Valley Fold now. then back to the oven summary' },
+  { kind: 'tool', name: 'mcp__vibe__vibe_prepare', id: 'p2', input: { id: 'wf8c82692', handle: 'tariq', message: `${DRAFT} Calling Valley Fold now.` } },
+  { kind: 'returned', tool_use_id: 'p2', name: 'mcp__vibe__vibe_prepare', text: PREVIEW },
+  { kind: 'text', text: 'I added your line. Nothing has been sent. Say "send" and I\'ll send this version.\n\nThe oven #2 summary is above. The one open item is the Deck B steam solenoid, quoted at $525.' },
+]);
+
+test('a real hijack is counted with its turn, and its false "summary is above" claim', async () => {
+  const { turnHijacks, falseAboveClaims, analyse } = await lab();
+  const ev = hijack();
+  const h = turnHijacks(ev, bakery);
+  assert.equal(h.length, 1, JSON.stringify(h));
+  assert.deepEqual([h[0].turn, h[0].typed_event, h[0].prepare_event], [1, 0, 2]);
+  const a = falseAboveClaims(ev);
+  assert.deepEqual(a.map((x) => [x.turn, x.event, x.sentence]), [[2, 8, 'The oven #2 summary is above.']]);
+  const s = analyse({ world: bakery, transcript: ev, turnsLog: [], wire: [], handles: ['camille', 'tariq'], started: Date.now() });
+  assert.equal(s.turn_hijacks.count, 1);
+  assert.equal(s.false_above_claims.count, 1);
+});
+
+test('an answer first, then the draft: no hijack, and "the draft above" is grounded', async () => {
+  const { turnHijacks, falseAboveClaims } = await lab();
+  const ev = recording([
+    { kind: 'prompt', text: ASK },
+    { kind: 'tool', name: 'mcp__vibe__vibe_prepare', id: 'p1', input: { handle: 'tariq', message: DRAFT } },
+    { kind: 'returned', tool_use_id: 'p1', name: 'mcp__vibe__vibe_prepare', text: PREVIEW },
+    { kind: 'text', text: "Oven #2 repair items still open: the Deck B steam solenoid ($525, Monday visit) and the door gasket. Pie rack counts for Thanksgiving: 14 racks of apple, 9 pecan, 6 pumpkin.\n\nSeparately, Tariq's note about the tasting butter is waiting; I drafted a reply below.\n\n" + PREVIEW + '\n\nSend it, edit it, or leave it? The draft above is the exact text.' },
+  ]);
+  assert.deepEqual(turnHijacks(ev, bakery), []);
+  assert.deepEqual(falseAboveClaims(ev), []);
+});
+
+test('a draft the person asked for, answered with only the preview: not a hijack', async () => {
+  const { turnHijacks } = await lab();
+  const ev = recording([
+    { kind: 'prompt', text: 'reply to tariq: tell him the butter swapped to 82% for Saturday' },
+    { kind: 'tool', name: 'mcp__vibe__vibe_prepare', id: 'p1', input: { handle: 'tariq', message: DRAFT } },
+    { kind: 'returned', tool_use_id: 'p1', name: 'mcp__vibe__vibe_prepare', text: PREVIEW },
+    { kind: 'text', text: 'Drafted. Send, edit or cancel?' },
+  ]);
+  assert.deepEqual(turnHijacks(ev, bakery), []);
+});
