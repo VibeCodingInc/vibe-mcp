@@ -97,6 +97,10 @@ const NOTICE_TEXT = {
   // SessionStart hook says what is waiting. Nothing here can speak for other
   // /vibe apps the person may run, so this says only what happens in a session.
   quietArrival: 'If the person hesitates to bother someone, you may tell them how a message reaches the other person: in their session it shows at a pause (their next prompt or tool step), never over what they are typing, and if they are not in a session it waits for them. The preview says which.',
+  // 12-16: the voice (BRIEF-15; docs/VOICE.md).
+  voiceCharter: 'When you speak about /vibe matters, be brief and concrete, use names rather than roles ("Kenji", not "your teammate"), use no exclamation marks, and never say "quick question", "just checking in", "ping", "great question" or "nothing in this session covers that" (search first).',
+  noticingLine: 'When you offer a message because someone holds the answer, lead with one line on why this person, at most about 90 characters, saying only what their own status line, note or conversation actually says (quote or closely paraphrase it), for example "Kenji already has the cardamom steam test open. Faster than figuring it out twice."; never say someone solved or knows something unless their own words say so.',
+  itLanded: 'When a reply the person received leads to a concrete change in this session (they edit a file, change a plan or a number, or hold an action because of it), and only once that change has actually been made, you may offer one note back to the sender for that reply: vibe_prepare with handle, message, reply_to (their reply\'s id) and kind "landed". One line, at most about 100 characters, saying only what changed in the person\'s own terms, with no file paths, code, numbers they would not say aloud to that person, invented feelings or claimed savings, for example "That landed: I\'m going with the 30s keepalive and calling off the Rev C return."; if they declined one for that reply, do not offer it again, and never send it without their choice.',
 };
 
 function serverInstructions(env = process.env) {
@@ -111,6 +115,9 @@ function serverInstructions(env = process.env) {
     on('knownRecipient') ? NOTICE_TEXT.knownRecipient : '',
     on('showYourWork') ? NOTICE_TEXT.showYourWork : '',
     on('quietArrival') ? NOTICE_TEXT.quietArrival : '',
+    on('voiceCharter') ? NOTICE_TEXT.voiceCharter : '',
+    on('noticingLine') ? NOTICE_TEXT.noticingLine : '',
+    on('itLanded') ? NOTICE_TEXT.itLanded : '',
     on('replyFromProject')
       ? (on('lookBeforeNo')
         // 10 (BRIEF-10: six false "nothing in this session covers that", the answer in the receiver's own files).

@@ -33,6 +33,13 @@ const NOTICE = {
   threadFirst: true,        // 9. a new draft to someone shows the last lines of the conversation, so a follow-up says only what is new
   lookBeforeNo: true,       // 10. search the project for the question's terms before saying there is nothing to add
   knownRecipient: true,     // 11. only people listed or named; a guessed handle is made obvious in the preview
+  // The voice (BRIEF-15, outside design read, with the owner's rulings): quiet,
+  // dry, true. docs/VOICE.md holds the rules.
+  voiceCharter: true,       // 12. one sentence on how the agent speaks about /vibe matters
+  noticingLine: true,       // 13. an offer leads with one true line on why this person, from their own words
+  arrivalHeader: true,      // 14. the person's arrival line: "Note from @x (2m ago), waiting at your pause:"
+  emptyStates: true,        // 15. "Nothing waiting." / "Just you in here right now; ..." where the state is known
+  itLanded: true,           // 16. a one-line note back when a reply changed the work here, as a draft, once per reply
 };
 
 /** The agent's copy of someone's line about what they are working on. The person's copy stays at 48. */
