@@ -94,6 +94,13 @@ test('the bump names only people you know, once, and sends nothing', async (t) =
   // And it cannot be called in a loop to fish for names.
   for (let i = 0; i < 5; i++) r = await bump.handler({ stuck_on: STUCK });
   assert.equal(r.data.used, true);
+  // Two calls at once cannot each name people: the second is refused while
+  // the first is still looking.
+  bump._resetForTest();
+  fs.writeFileSync(reachFile, JSON.stringify({ quiet: false, muted: {}, known: known('sam', 'ben') }));
+  const both = await Promise.all([bump.handler({ stuck_on: STUCK }), bump.handler({ stuck_on: STUCK })]);
+  assert.equal(both.filter((x) => x.data.people.length > 0).length, 1, 'only one call named anyone');
+  assert.equal(both.filter((x) => x.data.used === true).length, 1);
 });
 
 test('the bump is a read-only tool with one input, and the agent is told its limits', () => {

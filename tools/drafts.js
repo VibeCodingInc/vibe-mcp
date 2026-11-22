@@ -21,7 +21,10 @@
  *    person saw; a draft changed since is refused.
  *  - Shown, then a typed turn: Send goes only if the person has had a turn (a
  *    prompt, recorded by the arrival hook) after the rev was last shown, so an
- *    agent cannot show and send in one turn (turns.js).
+ *    agent cannot show and send in one turn (turns.js). Where the host can
+ *    show a box (confirm-box.js), the person must ALSO press Accept in a box
+ *    /vibe opens, bound to the id, rev and text in it: a typed turn AND
+ *    Accept wherever turns are recorded; the box alone where they are not.
  *  - Exactly once: Send claims the draft under a whole-file lock, sends with
  *    an idempotency key derived from the exact text, and finalizes against
  *    the latest stored state. A draft whose delivery could not be confirmed
@@ -303,7 +306,7 @@ function noteLine(message) {
   return noted ? `**Note:** this draft includes something from your private note about @${noted.handle} (kept on this machine). Send only if you want that to go.\n` : '';
 }
 
-function preview(d, person) {
+function preview(d, person, { boxy = false } = {}) {
   const where = person ? (isHereNow(person) ? 'here now' : (person.status === 'away' ? 'away' : 'not around — it waits for their next turn')) : 'presence unknown — it waits for their next turn';
   const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
   const message = compose(d);
@@ -314,12 +317,12 @@ function preview(d, person) {
     // The earlier Send did not confirm: it may already have reached them.
     // Only the two honest actions exist (codex P2).
     return {
-      display: `${head}the last Send did not confirm — it may or may not have reached @${d.to}. Send again retries exactly this text (delivers once) · Cancel. Editing is off for this draft.  _(draft ${d.id} · rev ${rev})_`,
+      display: `${head}the last Send did not confirm — it may or may not have reached @${d.to}. Send again retries exactly this text (delivers once) · Cancel. Editing is off for this draft.  _(draft ${d.id} · rev ${rev})_${boxNote(d, boxy)}`,
       data: { draft: { id: d.id, to: d.to, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to} again`, tool: 'vibe_send', args: { id: d.id, rev } }, { label: 'Cancel', tool: 'vibe_discard', args: { id: d.id } }] },
     };
   }
   return {
-    display: `${head}Send to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_`,
+    display: `${head}Send to @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_${boxNote(d, boxy)}`,
     data: { draft: { id: d.id, to: d.to, body: d.body, message, refs: d.refs || [], status: d.status, rev }, actions: [{ label: `Send to @${d.to}`, tool: 'vibe_send', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_prepare', args: { id: d.id, message: '<new body text — links are kept separately>' } }, { label: 'Cancel', tool: 'vibe_discard', args: { id: d.id } }] },
   };
 }
@@ -349,7 +352,7 @@ function tooManyBlankLines(text) {
   return false;
 }
 
-async function draftHandler(args) {
+async function draftHandler(args, ctx = {}) {
   const initCheck = requireInit();
   if (initCheck) return initCheck;
   const me = config.getHandle();
@@ -481,11 +484,16 @@ async function draftHandler(args) {
     // a new agent, unsent.js) must be seen there before it can go, so
     // reopening it and sending it inside one turn is refused.
     stampRev(d);
+    // Shown by vibe_prepare: what lets a box be opened again for this draft,
+    // after a person's turn (confirm-box.js, openBox).
+    d.preparedAt = d.revAt;
     return { draft: { ...d } };
   });
   if (out.display) return out;
-  if (out.draft.held) return heldPreview(out.draft);
-  return preview(out.draft, await findPerson(out.draft.to));
+  // Will this send be confirmed in a box the host shows (index.js says)?
+  const boxy = Boolean(ctx && ctx.box) && !isAgentIdentity();
+  if (out.draft.held) return heldPreview(out.draft, { boxy });
+  return preview(out.draft, await findPerson(out.draft.to), { boxy });
 }
 
 function stampRev(d) {
@@ -501,14 +509,14 @@ function revPreparedAt(d) {
   return d.edited ? Date.now() : (d.createdAt || Date.now());
 }
 
-function heldPreview(d) {
+function heldPreview(d, { boxy = false } = {}) {
   const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
   const message = compose(d);
   const rev = revOf(d);
   return {
     display: `**To:** @${d.to} (not on /vibe yet)\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n${noteLine(message)}\n`
       + `@${d.to} is not on /vibe yet. If you keep it, this exact message is held for the GitHub account ${d.to} for ${HELD_DAYS} days and arrives as your first message when they sign in to /vibe with that account. You get a link to pass on to them.\n\n`
-      + `Keep for @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_`,
+      + `Keep for @${d.to} · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_${boxNote(d, boxy)}`,
     data: {
       draft: { id: d.id, to: d.to, body: d.body, message, refs: d.refs || [], status: d.status, rev, held: true, for_github: d.to },
       actions: [{ label: `Keep for @${d.to}`, tool: 'vibe_send', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_prepare', args: { id: d.id, message: '<new body text — links are kept separately>' } }, { label: 'Cancel', tool: 'vibe_discard', args: { id: d.id } }],
@@ -565,7 +573,7 @@ async function discardHandler(args) {
 
 const sendDefinition = {
   name: 'vibe_send',
-  description: "Send a prepared draft: pass id AND rev from the preview vibe_prepare showed. Call this only when the person chose Send; that choice is the approval, do not ask again. It sends exactly the previewed text, once. A changed draft must be shown again before it can be sent: a rev prepared after the person's last message is not sent, and the preview comes back to show them. There is no other way to send: to write to someone, even in words the person dictated, open a draft with vibe_prepare first.",
+  description: "Send a prepared draft: pass id AND rev from the preview vibe_prepare showed. Call this only when the person chose Send; that choice is the approval, do not ask again. It sends exactly the previewed text, once. A changed draft must be shown again before it can be sent: a rev prepared after the person's last message is not sent, and the preview comes back to show them. Where the host supports it, a box opens for the person to confirm; you cannot answer it. After a not-sent result, only if they ask again: show it with vibe_prepare and wait for them to say send. There is no other way to send: to write to someone, even in words the person dictated, open a draft with vibe_prepare first.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -574,8 +582,18 @@ const sendDefinition = {
     },
   },
 };
-/** The MCP tool: an agent's call. Sends only a rev the person has had a turn to see. */
-async function sendHandler(args) { return send(args, { byPerson: false }); }
+/**
+ * The MCP tool: an agent's call. It sends only a rev the person has had a turn
+ * to see (turns.js) and, where the host can show a box, that the person also
+ * accepted in a box /vibe opened (confirm-box.js). `ctx` comes from the
+ * server (index.js), never from the call's arguments:
+ *   box     { mode: 'request', protocolVersion, request(params, {signal}) }
+ *           on a 2025-* connection, { mode: 'input_required' } on a
+ *           stateless (2026-07-28) request; null when no box can be shown
+ *   retry   { inputResponses, requestState } on a stateless retry
+ *   signal  aborted when the client cancels this call
+ */
+async function sendHandler(args, ctx = {}) { return send(args, { byPerson: false, ctx: ctx || {} }); }
 /**
  * The person's own Send from a surface they act in directly (draft-cli: Buddy,
  * or a terminal command they type). Their act IS the turn, so the turn check
@@ -583,7 +601,298 @@ async function sendHandler(args) { return send(args, { byPerson: false }); }
  */
 async function sendByPerson(args) { return send(args, { byPerson: true }); }
 
-async function send(args, { byPerson }) {
+/**
+ * Why a draft cannot be sent with this rev, whatever confirms it: the checks
+ * every send path makes under the lock, in order. null when none applies.
+ * May reconcile an abandoned 'sending' claim (the caller writes it back).
+ */
+function cannotSend(d, rev, me) {
+  // The approval was given as one account; it is not transferable to
+  // whoever is signed in now (codex P1).
+  if (d.from && d.from !== me) return `Draft ${d.id} was prepared as @${d.from}; you are signed in as @${me}. Nothing sent — open a new draft as yourself.`;
+  if (d.status === 'held') return heldAlready(d);
+  if (d.status === 'sent') return `Draft ${d.id} was already sent to @${d.to} — not sending it twice.`;
+  if (d.status === 'cancelled') return `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.`;
+  if (!rev) return `Send needs the rev shown in the preview of draft ${d.id} — open it with vibe_prepare and send with that rev. Nothing sent.`;
+  // The current rev is not named here, but that is not what protects the
+  // person: a rev is a hash of the text, so an agent can compute it. The
+  // control is the shown-time stamp plus the turn check (or the box): a rev
+  // goes only after the person's own act that came after its last showing
+  // (review 2026-11-21: probe a wrong rev, read the right one, send).
+  if (rev !== revOf(d)) return `Draft ${d.id} is not the version that rev names. Show it again with vibe_prepare {id: "${d.id}"}, and send only what the person approves after seeing it. Nothing sent.`;
+  if (d.status === 'sending') {
+    // The claiming process died mid-send: the SAME text under the SAME key
+    // is what a retry would send. Uncertainty is recorded BEFORE the retry
+    // so a later definite refusal cannot erase it.
+    if (!reconcileAbandoned(d)) return `Draft ${d.id} is already being sent — not sending it twice.`;
+  }
+  // POST /api/invites has no idempotency key: an unconfirmed Keep is never
+  // retried, because a retry could create a second invitation.
+  if (d.held && d.status === 'unknown') return heldUnknown(d);
+  if (d.status === 'unknown' && !transportDedupes()) {
+    // Without server-side deduplication a retry could deliver twice; the
+    // honest options are to cancel (with the warning) or write anew.
+    return `Draft ${d.id}: the earlier Send to @${d.to} did not confirm, and this transport cannot deduplicate a retry. Cancel it (the earlier attempt may have reached them) and open a new draft if you still want to say it. Nothing sent.`;
+  }
+  return null;
+}
+
+/** Mark the draft 'sending' under the lock and take the snapshot that is delivered. */
+function claimDraft(d, rev) {
+  d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
+  d.idempotencyKey = sendKey(d);
+  const message = compose(d).trim();
+  d.approvedSha256 = d.held ? heldDigest(message) : approvedDigest(d.to, message);
+  // Sent exactly as first previewed? Unknown (null) for a draft with no first rev on record.
+  const unchanged = typeof d.firstRev === 'string' ? d.firstRev === rev : null;
+  return { id: d.id, to: d.to, body: d.body, refs: d.refs, context: d.context, replyTo: d.replyTo || null, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, held: Boolean(d.held), unchanged };
+}
+
+// ── the Send box (confirm-box.js) ─────────────────────────────────────────────
+// Wherever person turns are recorded (Claude Code with the arrival hook), a
+// send needs BOTH the turn check (a typed message after the preview) AND an
+// Accept in a box /vibe opens, for every draft, whatever its length. Where
+// turns cannot be recorded, the box alone decides. One box at a time; a draft
+// whose box was not accepted needs showing again and a typed turn; after any
+// answer but Accept, no box for any draft until the person types again.
+// Tool results never repeat the box, its answer, or the rev; every outcome
+// after the box but a send reads the same, except: another box open, a hook
+// found, the account changed.
+
+const sha256 = (t) => crypto.createHash('sha256').update(String(t), 'utf8').digest('hex');
+const BOX_NOT_ACCEPTED = (to) => `Not sent. It is still a draft for @${to}. Only if they ask again: show it with vibe_prepare and wait for them to say send.`;
+const BOX_BUSY = 'Not sent: another /vibe confirmation box is open. Wait until it is answered.';
+const BOX_HOOK = (file) => `Not sent: a hook on this machine is set to answer /vibe's confirmation box (${file}). Remove it to send.`;
+const BOX_JSON = (file) => `Not sent: a settings file on this machine cannot be read as JSON (${file}), so /vibe cannot check it for a hook that would answer its confirmation box. Fix the file to send.`;
+const BOX_ACCOUNT = 'Not sent: the /vibe account signed in here changed while the confirmation box was open.';
+
+/** The Send box's message for a draft as it stands (confirm-box.js). */
+function boxMessageFor(d) {
+  return require('../confirm-box').message({ to: d.to, held: Boolean(d.held), retry: d.status === 'unknown', reply: Boolean(d.replyTo), text: compose(d).trim() });
+}
+/**
+ * One plain line for the end of a preview. Where a box will be shown and it
+ * cannot show the whole text: the full text is the preview. Where no box can
+ * be shown: what sending then rests on, true for this host.
+ */
+const BOX_PARTIAL = 'The confirmation box will show the first lines of this; the full text is above.';
+const BOX_NONE_TRACKED = "This app cannot show /vibe's confirmation box, so sending relies on your typed reply.";
+const BOX_NONE_UNTRACKED = "This app cannot show /vibe's confirmation box or record your reply; a message goes when the agent sends it after you say so.";
+function boxNote(d, boxy) {
+  if (isAgentIdentity()) return '';
+  if (!boxy) return `\n${turnsTracked() ? BOX_NONE_TRACKED : BOX_NONE_UNTRACKED}`;
+  try { return require('../confirm-box').fits(compose(d).trim()) ? '' : `\n${BOX_PARTIAL}`; } catch { return ''; }
+}
+
+const boxRefusal = (display, reason) => ({ display, data: { sent: false, definite: true, reason, turn_check: 'box' } });
+const notAccepted = (to) => boxRefusal(BOX_NOT_ACCEPTED(to), 'box_not_accepted');
+
+/** The hook tripwire, unless the lab's own hook is allowed (both conditions, confirm-box.js). A refusal, or null. */
+function hookRefusal() {
+  const confirmBox = require('../confirm-box');
+  if (confirmBox.labAllowsHook()) return null;
+  const found = confirmBox.answeringHook();
+  if (!found) return null;
+  return found.why === 'json' ? boxRefusal(BOX_JSON(found.file), 'settings_unreadable') : boxRefusal(BOX_HOOK(found.file), 'box_hook');
+}
+
+/**
+ * Open a box for this draft, under the lock: every check a send makes, the
+ * turn check, the not-accepted rules, one box at a time. Marks the draft's box
+ * open (a random nonce, the rev and the sha of the exact text, the account).
+ */
+function openBox(id, rev, me) {
+  const confirmBox = require('../confirm-box');
+  const { firstHidden } = require('../showable');
+  return transact(drafts => {
+    const d = drafts.find(x => x.id === id);
+    if (!d) return { display: `No draft ${id} — nothing sent. Open it with vibe_prepare first.` };
+    const no = cannotSend(d, rev, me);
+    if (no) return { display: no };
+    const message = compose(d).trim();
+    const hidden = firstHidden(message);
+    if (hidden) return { display: storedHidden(d.id, hidden) };
+    const turn = turnCheck(d, false);
+    if (turn.check === 'needs_turn') {
+      const reshown = Boolean(d.reshown);
+      stampRev(d);
+      return { unseen: { ...d, reshown }, why: turn.why || null };
+    }
+    const now = Date.now();
+    // A box nobody will answer any more (past its window, or left by a server
+    // that exited) is closed first, as a non-accept at this moment: the
+    // per-draft and cross-draft rules then apply to it.
+    closeAbandoned(drafts, now);
+    // One box at a time per project folder, this draft's own outstanding
+    // request included. Another project is not held up by it.
+    const here = projectKey();
+    if (confirmBox.isOpen() || drafts.some((x) => x.box && (!x.box.project || x.box.project === here))) return { refused: boxRefusal(BOX_BUSY, 'box_busy') };
+    if (boxBlocked(d) || blockedAfterNonAccept(drafts, now)) return { refused: notAccepted(d.to) };
+    const nonce = crypto.randomBytes(16).toString('hex');
+    d.boxAt = now;
+    d.box = { nonce, at: now, rev, sha: sha256(message), me, turn: turn.check, project: here, pid: process.pid };
+    return { boxed: { id: d.id, to: d.to, nonce, text: boxMessageFor(d) } };
+  });
+}
+
+/** How long after it opened a box counts as abandoned. */
+const BOX_WINDOW_SLACK_MS = 5000;
+function projectKey() {
+  try { const turns = require('../turns'); return turns.key(turns.projectDir()); } catch { return null; }
+}
+/**
+ * Close every recorded box that will not be answered: past its window, or
+ * opened by a server process that is gone. Each is recorded as a non-accept
+ * now. Returns how many were closed.
+ */
+function closeAbandoned(drafts, now = Date.now()) {
+  const confirmBox = require('../confirm-box');
+  let n = 0;
+  for (const x of drafts) {
+    if (!x.box) continue;
+    const expired = !Number.isFinite(x.box.at) || now - x.box.at >= confirmBox.TIMEOUT_MS + BOX_WINDOW_SLACK_MS;
+    const orphaned = Number.isFinite(x.box.pid) && x.box.pid !== process.pid && !pidAlive(x.box.pid);
+    if (!expired && !orphaned) continue;
+    delete x.box;
+    x.boxAnsweredAt = now;
+    x.boxRefusedAt = now;
+    n += 1;
+  }
+  return n;
+}
+
+/** A box was opened for this draft (and not accepted) since vibe_prepare last showed it. */
+function boxBlocked(d) {
+  return Number.isFinite(d.boxAt) && !(Number.isFinite(d.preparedAt) && d.preparedAt > d.boxAt);
+}
+/** How long a non-accept blocks boxes for other drafts where turns cannot be recorded. */
+const NON_ACCEPT_COOLDOWN_MS = 5 * 60 * 1000;
+/** Does this host record person turns (Claude Code, with the hook)? Every use of a turn record is gated on it. */
+function turnsTracked() {
+  try { return require('../turns').judge(0).check !== 'unavailable'; } catch { return false; }
+}
+/**
+ * The latest answer but Accept, for any draft, blocks every box until a
+ * person's turn recorded after it; where turns are not recorded, for
+ * NON_ACCEPT_COOLDOWN_MS.
+ */
+function blockedAfterNonAccept(drafts, now = Date.now()) {
+  const last = drafts.reduce((m, x) => (Number.isFinite(x.boxRefusedAt) && x.boxRefusedAt > m ? x.boxRefusedAt : m), 0);
+  if (!last) return false;
+  if (!turnsTracked()) return now - last < NON_ACCEPT_COOLDOWN_MS;
+  let at = null;
+  try { const turns = require('../turns'); at = turns.lastTurn(turns.projectDir()); } catch {}
+  return !(at !== null && at > last);
+}
+
+/**
+ * The person's answer to the box, under the lock. Only the box that is open
+ * for this draft is answered (an answer naming another is ignored and sends
+ * nothing); it is closed whatever the answer. Only an Accept within the
+ * timeout, by the same account, of the same rev and exact text, with the call
+ * not withdrawn and the draft still sendable, claims the draft. Everything
+ * else but a changed account reads, and is recorded, as not accepted, so the
+ * agent cannot tell a decline from an Accept it undid by editing or
+ * discarding the draft while the box was open.
+ */
+function closeBox(id, nonce, answer, { signal = null, rev = null } = {}) {
+  const confirmBox = require('../confirm-box');
+  return transact(drafts => {
+    const d = drafts.find(x => x.id === id);
+    if (!d) return { display: `No draft ${id} — nothing sent. Open it with vibe_prepare first.` };
+    const box = d.box;
+    if (!box || typeof nonce !== 'string' || box.nonce !== nonce) return { refused: notAccepted(d.to) };
+    delete d.box;
+    const now = Date.now();
+    d.boxAnsweredAt = now;
+    const refuse = () => { d.boxRefusedAt = now; return { refused: notAccepted(d.to) }; };
+    if (answer !== 'accept' || (signal && signal.aborted) || now - box.at > confirmBox.TIMEOUT_MS) return refuse();
+    const me = config.getHandle();
+    if (me !== box.me) return { refused: boxRefusal(BOX_ACCOUNT, 'account_changed') };
+    const message = compose(d).trim();
+    if (revOf(d) !== box.rev || (rev !== null && rev !== box.rev) || sha256(message) !== box.sha || (Number.isFinite(d.preparedAt) && d.preparedAt > box.at)) return refuse();
+    if (cannotSend(d, box.rev, me)) return refuse();
+    // Accepted: this box is spent. A Send whose delivery does not confirm can
+    // be tried again through the ordinary path (turn check, a new box).
+    delete d.boxAt;
+    return { snapshot: claimDraft(d, box.rev), me, turn: box.turn || null };
+  });
+}
+
+async function afterClose(closed) {
+  if (closed.display) return { display: closed.display, data: { sent: false, definite: true } };
+  if (closed.refused) return closed.refused;
+  // Which turn check applied before the box: 'passed', or 'unavailable'.
+  return deliverClaimed(closed.snapshot, closed.me, { check: 'box', ...(closed.turn ? { turn: closed.turn } : {}) });
+}
+
+/** Open the box for a send, or say why not (hook tripwire first). */
+function tryOpen(id, rev, me) {
+  const hook = hookRefusal();
+  if (hook) return { result: hook };
+  const opened = openBox(id, rev, me);
+  if (opened.display) return { result: { display: opened.display, data: { sent: false, definite: true } } };
+  if (opened.unseen) return { unseen: opened };
+  if (opened.refused) return { result: opened.refused };
+  return { boxed: opened.boxed };
+}
+
+/** A 2025-* connection: the server asks the client during this call and waits. */
+async function sendWithBox(id, rev, me, box, { signal = null } = {}) {
+  const confirmBox = require('../confirm-box');
+  const o = tryOpen(id, rev, me);
+  if (o.result) return o.result;
+  if (o.unseen) return unseenRefusal(o.unseen.unseen, o.unseen.why, { boxy: true });
+  const answer = await confirmBox.ask(box, o.boxed.text, { ...(box.timeoutMs ? { timeoutMs: box.timeoutMs } : {}), signal });
+  return afterClose(closeBox(o.boxed.id, o.boxed.nonce, answer, { signal, rev }));
+}
+
+/** requestState for a stateless retry: which draft, and which box. Opaque to the client. */
+const packState = (id, nonce) => Buffer.from(JSON.stringify({ v: 1, id, n: nonce }), 'utf8').toString('base64url');
+function unpackState(s) {
+  try {
+    const o = JSON.parse(Buffer.from(String(s), 'base64url').toString('utf8'));
+    return o && o.v === 1 && typeof o.id === 'string' && typeof o.n === 'string' ? o : null;
+  } catch { return null; }
+}
+
+/**
+ * A stateless (2026-07-28) request: the first call opens the box and returns
+ * it as an input request; the client shows it and retries the call with the
+ * answer (inputResponses) and the echoed requestState. requestState is
+ * attacker-controlled input: it only names a box, which must be the one still
+ * open on disk for that draft (a random nonce), and is closed on first use.
+ */
+async function sendStateless(id, rev, me, ctx) {
+  const confirmBox = require('../confirm-box');
+  const retry = ctx.retry && typeof ctx.retry.requestState === 'string' ? ctx.retry : null;
+  if (retry) {
+    const state = unpackState(retry.requestState);
+    const responses = retry.inputResponses && typeof retry.inputResponses === 'object' ? retry.inputResponses : {};
+    const r = responses[confirmBox.INPUT_KEY];
+    if (!state || state.id !== id) {
+      const d = loadDrafts().find(x => x.id === id);
+      return notAccepted(d ? d.to : 'them');
+    }
+    // A hook that appeared while the box was open: the box is closed unanswered.
+    const hook = r && typeof r === 'object' && r.action === 'accept' ? hookRefusal() : null;
+    const closed = closeBox(id, state.n, !hook && r && typeof r === 'object' && r.action === 'accept' ? 'accept' : 'none', { signal: ctx.signal || null, rev });
+    if (hook && !closed.display) return hook;
+    return afterClose(closed);
+  }
+  const o = tryOpen(id, rev, me);
+  if (o.result) return o.result;
+  if (o.unseen) return unseenRefusal(o.unseen.unseen, o.unseen.why, { boxy: true });
+  return {
+    inputRequired: {
+      inputRequests: { [confirmBox.INPUT_KEY]: { method: 'elicitation/create', params: confirmBox.request(o.boxed.text, '2026-07-28') } },
+      requestState: packState(o.boxed.id, o.boxed.nonce),
+    },
+  };
+}
+
+async function send(args, { byPerson, ctx = {} }) {
+  const box = ctx && ctx.box ? ctx.box : null;
   const initCheck = requireInit();
   if (initCheck) return initCheck;
   const id = args && args.id;
@@ -600,9 +909,19 @@ async function send(args, { byPerson }) {
   if (!id) {
     const asked = args && typeof args.handle === 'string' && args.handle.trim() && typeof args.message === 'string' && args.message.trim();
     if (!asked) return { display: 'Nothing sent. vibe_send sends only a draft the person approved: pass its id and rev. To write to someone, open a draft with vibe_prepare (handle + message).', data: { sent: false, definite: true } };
-    const p = await draftHandler({ handle: args.handle, message: args.message, reply_to: args.reply_to });
+    const p = await draftHandler({ handle: args.handle, message: args.message, reply_to: args.reply_to }, ctx);
     const lead = 'Nothing sent. vibe_send sends only a draft the person approved, so this opened one instead. Show the person this preview and send it only if they choose Send.';
     return { ...p, display: `${lead}\n\n${p.display}`, data: { ...(p.data || {}), sent: false, definite: true } };
+  }
+
+  // Where the host can show a box, the person accepts in one: on top of the
+  // turn check wherever turns are recorded (openBox), alone where they are
+  // not. An agent really signed in as itself has no person to ask
+  // and keeps its own rule (turnCheck: agent_identity).
+  if (!byPerson && !isAgentIdentity()) {
+    if (ctx && ctx.retry && typeof ctx.retry.requestState === 'string') return sendStateless(id, rev, me, ctx);
+    if (box && box.mode === 'input_required') return sendStateless(id, rev, me, ctx);
+    if (box && typeof box.request === 'function') return sendWithBox(id, rev, me, box, { signal: ctx.signal || null });
   }
 
   // 1. Claim under the lock: nothing leaves the machine until this draft is
@@ -612,33 +931,11 @@ async function send(args, { byPerson }) {
   const claim = transact(drafts => {
     const d = drafts.find(x => x.id === id);
     if (!d) return { display: `No draft ${id} — nothing sent. Open it with vibe_prepare first.` };
-    // The approval was given as one account; it is not transferable to
-    // whoever is signed in now (codex P1).
-    if (d.from && d.from !== me) return { display: `Draft ${d.id} was prepared as @${d.from}; you are signed in as @${me}. Nothing sent — open a new draft as yourself.` };
-    if (d.status === 'held') return { display: heldAlready(d) };
-    if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — not sending it twice.` };
-    if (d.status === 'cancelled') return { display: `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.` };
-    if (!rev) return { display: `Send needs the rev shown in the preview of draft ${d.id} — open it with vibe_prepare and send with that rev. Nothing sent.` };
-    // The current rev is not named here, but that is not what protects the
-    // person: a rev is a hash of the text, so an agent can compute it. The
-    // control is the shown-time stamp plus the turn check below: a rev goes
-    // only after a typed turn that came after its last showing (review
-    // 2026-11-21: probe a wrong rev, read the right one, send).
-    if (rev !== revOf(d)) return { display: `Draft ${d.id} is not the version that rev names. Show it again with vibe_prepare {id: "${d.id}"}, and send only what the person approves after seeing it. Nothing sent.` };
-    if (d.status === 'sending') {
-      // The claiming process died mid-send: the SAME text under the SAME key
-      // is what a retry would send. Uncertainty is recorded BEFORE the retry
-      // so a later definite refusal cannot erase it.
-      if (!reconcileAbandoned(d)) return { display: `Draft ${d.id} is already being sent — not sending it twice.` };
-    }
-    // POST /api/invites has no idempotency key: an unconfirmed Keep is never
-    // retried, because a retry could create a second invitation.
-    if (d.held && d.status === 'unknown') return { display: heldUnknown(d) };
-    if (d.status === 'unknown' && !transportDedupes()) {
-      // Without server-side deduplication a retry could deliver twice; the
-      // honest options are to cancel (with the warning) or write anew.
-      return { display: `Draft ${d.id}: the earlier Send to @${d.to} did not confirm, and this transport cannot deduplicate a retry. Cancel it (the earlier attempt may have reached them) and open a new draft if you still want to say it. Nothing sent.` };
-    }
+    const no = cannotSend(d, rev, me);
+    if (no) return { display: no };
+    // A box was opened for this draft and not accepted: a request that offers
+    // no box does not get around it. It needs showing again (and a turn).
+    if (!byPerson && !isAgentIdentity() && boxBlocked(d)) return { display: BOX_NOT_ACCEPTED(d.to), data: { sent: false, definite: true, reason: 'box_not_accepted' } };
     // The person must have had a turn since THIS text was last shown
     // (turns.js): an agent cannot show a new rev and send it inside one turn.
     turn = turnCheck(d, byPerson);
@@ -650,17 +947,15 @@ async function send(args, { byPerson }) {
       stampRev(d);
       return { unseen: { ...d, reshown }, why };
     }
-    d.status = 'sending'; d.claimedAt = Date.now(); d.claimedBy = process.pid;
-    d.idempotencyKey = sendKey(d);
-    const message = compose(d).trim();
-    d.approvedSha256 = d.held ? heldDigest(message) : approvedDigest(d.to, message);
-    // Sent exactly as first previewed? Unknown (null) for a draft with no first rev on record.
-    const unchanged = typeof d.firstRev === 'string' ? d.firstRev === rev : null;
-    return { snapshot: { id: d.id, to: d.to, body: d.body, refs: d.refs, context: d.context, replyTo: d.replyTo || null, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, held: Boolean(d.held), unchanged } };
+    return { snapshot: claimDraft(d, rev) };
   });
   if (claim.display) return claim;
   if (claim.unseen) return unseenRefusal(claim.unseen, claim.why);
-  const s = claim.snapshot;
+  return deliverClaimed(claim.snapshot, me, turn);
+}
+
+/** Deliver a claimed snapshot (outside the lock) and finalize it against the latest stored state. */
+async function deliverClaimed(s, me, turn) {
   if (s.held) return withTurn(await keepHeld(s, me), turn);
 
   // 2. Deliver, outside the lock.
@@ -715,21 +1010,25 @@ async function send(args, { byPerson }) {
  */
 function turnCheck(d, byPerson) {
   if (byPerson) return { check: 'by_person' };
-  try { if (require('../agent-auth').isAgent()) return { check: 'agent_identity' }; } catch {}
+  if (isAgentIdentity()) return { check: 'agent_identity' };
   return require('../turns').judge(revPreparedAt(d));
+}
+/** Signed in as an agent with its own credential, and that agent is who sends (agent-auth.js). Not just VIBE_AGENT_HANDLE. */
+function isAgentIdentity() {
+  try { return Boolean(require('../agent-auth').signedInAsAgent()); } catch { return false; }
 }
 function withTurn(result, turn) {
   if (!result || !turn) return result;
-  return { ...result, data: { ...(result.data || {}), turn_check: turn.check } };
+  return { ...result, data: { ...(result.data || {}), turn_check: turn.check, ...(turn.turn ? { turn: turn.turn } : {}) } };
 }
 /**
  * Not sent: this text was last shown after the person's last turn (or in an
  * earlier session). Normal, not an error: the preview is shown again, and the
  * next Send after their answer goes. Nothing reached the network on this path.
  */
-async function unseenRefusal(d, why = null) {
+async function unseenRefusal(d, why = null, { boxy = false } = {}) {
   const changed = typeof d.firstRev === 'string' && d.firstRev !== revOf(d);
-  const p = d.held ? heldPreview(d) : preview(d, await findPerson(d.to));
+  const p = d.held ? heldPreview(d, { boxy }) : preview(d, await findPerson(d.to), { boxy });
   let lead; let reason;
   if (why === 'shown_in_earlier_session') {
     lead = 'Not sent yet: this draft was last shown in an earlier session, so the person has not seen it in this one. It can go after their next message.';

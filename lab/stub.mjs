@@ -2,6 +2,7 @@
 // 127.0.0.1 only, state in memory. Identity comes from the bearer token's
 // handle. Nothing here can reach a real person.
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 
 export function startStub({ people = {}, agentMints = {}, servesInvitedByYou = true } = {}) {
   // Invitations, as the platform keeps them: a code minted on the inviter's
@@ -48,6 +49,9 @@ export function startStub({ people = {}, agentMints = {}, servesInvitedByYou = t
       };
     });
   };
+  let heldSeq = 0;
+  /** The platform's invitation approval digest: sha256 over the 'invitation-v1' fields joined by U+0000; a Keep carries only first_thought. */
+  const heldDigest = (thought) => createHash('sha256').update(['invitation-v1', '', '', '', '', '', '', thought].join('\u0000'), 'utf8').digest('hex');
   function mintCode(by) {
     const code = `VIBE-LAB${String(++codeSeq).padStart(6, '0')}-${by.toUpperCase().slice(0, 4)}`;
     invites.set(code, { code, created_by: by, used_by: null, status: 'available', expires_at: new Date(Date.now() + 30 * 86400000).toISOString() });
@@ -134,6 +138,30 @@ export function startStub({ people = {}, agentMints = {}, servesInvitedByYou = t
         const codes = [...invites.values()].filter((i) => i.created_by === me).map((i) => ({ code: i.code, named_for: null, for_email_hash: null, carries_thought: false, status: i.status, expires_at: i.expires_at, used_by: i.used_by }));
         const unused = codes.filter((c) => c.status === 'available').length;
         return send(200, { success: true, codes, unused, max_codes: 3, can_generate: unused < 3 });
+      }
+      // A message held for someone not on /vibe yet (a Keep), as the platform
+      // does it (api/invites.js, invitation-email.js APPROVAL_RULE
+      // 'invitation-v1'): dry_run answers the digest of what would be stored;
+      // the create is refused unless approved_sha256 is that digest. Without
+      // this, every Keep in the lab fell through to the catch-all below and
+      // the client refused it as approval_mismatch.
+      if (p === '/api/invites' && req.method === 'POST' && body && typeof body.first_thought === 'string') {
+        if (!me) return send(401, { success: false, error: 'unauthorized' });
+        const thought = body.first_thought;
+        const forGithub = String(body.for_github || '').toLowerCase();
+        if (thought.length > 2000) return send(400, { success: false, error: `first_thought is ${thought.length} chars (max 2000)` });
+        const sha = heldDigest(thought);
+        if (body.dry_run === true) {
+          rec('held_dry_run', { for_github: forGithub });
+          return send(200, { success: true, dry_run: true, named_for: forGithub, carries_thought: true, approval: { rule: 'invitation-v1', sha256: sha } });
+        }
+        if (body.approved_sha256 !== sha) { rec('HELD_REFUSED', { for_github: forGithub }); return send(409, { success: false, error: 'approval_mismatch' }); }
+        if ([...invites.values()].filter((i) => i.created_by === me && i.status === 'available').length >= 3) return send(400, { success: false, error: 'No invite codes remaining' });
+        const code = `VIBE-${(++heldSeq).toString(36).toUpperCase().padStart(4, '0')}-${me.toUpperCase().slice(0, 4)}`;
+        const expires_at = new Date(Date.now() + 30 * 86400000).toISOString();
+        invites.set(code, { code, created_by: me, used_by: null, status: 'available', expires_at, named_for: forGithub, first_thought: thought });
+        rec('HELD', { for_github: forGithub, code, body: thought });
+        return send(200, { success: true, code, expires_at, share_url: `https://www.slashvibe.dev/join/${code}`, carries_thought: true, named_for: forGithub });
       }
       if (p === '/api/invites' && req.method === 'POST' && (!body || Object.keys(body).length === 0)) {
         if (!me) return send(401, { success: false, error: 'unauthorized' });

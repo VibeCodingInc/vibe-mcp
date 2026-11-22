@@ -249,3 +249,39 @@ test('a forged mark from someone without a line changes nothing', () => {
   assert.doesNotMatch(rows[0].context, /vibe_answer/);
   assert.match(rows[0].context, /Never send without their explicit choice/);
 });
+
+// ── the hourly cap holds for calls in parallel ──────────────────────────────
+// Review 2026-11-22: the cap was checked, delivery awaited, then the receipt
+// written, so 12 parallel vibe_ask calls all passed a cap of 6.
+
+async function slowWire(fn) {
+  const sends = [];
+  const orig = { sendMessage: store.sendMessage, getActiveUsers: store.getActiveUsers, getActiveUsersResult: store.getActiveUsersResult, getThread: store.getThread };
+  store.sendMessage = async (from, to, body) => { await new Promise((r) => setTimeout(r, 30)); sends.push({ from, to, body }); return { id: `msg_par${sends.length}`, storedLength: body.length }; };
+  store.getActiveUsers = async () => [];
+  store.getActiveUsersResult = async () => ({ ok: true, users: [] });
+  store.getThread = async () => [];
+  try { await fn(sends); } finally { Object.assign(store, orig); }
+  return sends;
+}
+
+test('12 parallel vibe_ask calls send at most MAX_PER_HOUR', async () => {
+  resetLines(); line.open('ben');
+  const sends = await slowWire(async () => {
+    const rs = await Promise.all(Array.from({ length: 12 }, (_, i) => vibe_ask.handler({ handle: 'ben', question: `parallel question ${i}?`, wait_seconds: 0 })));
+    assert.equal(rs.filter((r) => r.data && r.data.sent).length, line.MAX_PER_HOUR);
+    assert.ok(rs.some((r) => /unattended messages already went to @ben this hour/.test(r.display)));
+  });
+  assert.equal(sends.length, line.MAX_PER_HOUR);
+  assert.equal(line.sentThisHour('ben'), line.MAX_PER_HOUR, 'receipts replace the slots; nothing counted twice');
+});
+
+test('12 parallel vibe_answer calls to distinct questions send at most MAX_PER_HOUR', async () => {
+  resetLines(); line.open('ben');
+  const ids = Array.from({ length: 12 }, (_, i) => arrive('ben', `question number ${i}?` + line.ASKED('ben')));
+  const sends = await slowWire(async () => {
+    await Promise.all(ids.map((id, i) => vibe_answer.handler({ reply_to: id, message: `answer ${i}` })));
+  });
+  assert.equal(sends.length, line.MAX_PER_HOUR);
+});
+

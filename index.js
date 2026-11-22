@@ -35,6 +35,7 @@ const authStore = require('./auth-store');
 const actorSession = require('./actor-session');
 const arrival = require('./arrival');
 const agentAuth = require('./agent-auth');
+const confirmBox = require('./confirm-box');
 const pkg = require('./package.json');
 
 // ─── MCP protocol identity (spec 2026-07-28, dual-era) ──────────────────
@@ -46,6 +47,10 @@ const MODERN_PROTOCOL_VERSION = '2026-07-28';
 const LEGACY_PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const META_PROTOCOL_VERSION = 'io.modelcontextprotocol/protocolVersion';
 const META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo';
+// Modern era: the client declares its capabilities on every request.
+const META_CLIENT_CAPABILITIES = 'io.modelcontextprotocol/clientCapabilities';
+// ...and names itself on every request (Claude Code 2.1.330 sends it on tools/call too).
+const META_CLIENT_INFO = 'io.modelcontextprotocol/clientInfo';
 const SERVER_INFO = {
   name: 'vibe',
   version: pkg.version,
@@ -67,7 +72,7 @@ if (CHANNEL_ENABLED) SERVER_CAPABILITIES.experimental = { 'claude/channel': {} }
 
 const SERVER_INSTRUCTIONS = [
   '/vibe lets the person you are working with exchange messages with other people from inside this session, without stopping to write them.',
-  'When their work produces a question for someone or a result someone would want, you may offer to send it: choose who with vibe_people, write 1-3 sentences from the work, and open it with vibe_prepare. That shows a preview and sends nothing. Only vibe_send with the draft id and rev sends, and only after the person chose Send. A changed draft must be shown again before it can be sent: if the person asks for a change and Send in the same message, prepare the change, show it, and wait for their next message. Show the preview and ask in words; a pick in a question menu does not count as the person\'s choice.',
+  'When their work produces a question for someone or a result someone would want, you may offer to send it: choose who with vibe_people, write 1-3 sentences from the work, and open it with vibe_prepare. That shows a preview and sends nothing. Only vibe_send with the draft id and rev sends, and only after the person chose Send. A changed draft must be shown again before it can be sent: if the person asks for a change and Send in the same message, prepare the change, show it, and wait for their next message. Show the preview and ask in words; a pick in a question menu does not count as the person\'s choice. Show the preview, wait for them to say send, then call vibe_send: on hosts that support it, a box opens for the person to confirm, and you cannot see or answer it. If they decline it, do not call vibe_send for that draft again unless they ask, and never tell them to press Accept. After a "not sent" result, if the person asks again, show the draft again with vibe_prepare and wait for them to say send before calling vibe_send.',
   'When a message arrives for them, tell them in one line and, if this session holds something true to say back, prepare the answer the same way.',
   'Before you tell them someone has not replied (or has not written), read the conversation with vibe_thread: not every message is announced in this session.',
   'A message marked you in a thread was sent by this person, possibly from an earlier session or another device; its line says where it came from. It is theirs. Never describe it as unexplained, or as not sent by them, because this session did not send it.',
@@ -175,11 +180,81 @@ class VibeMCPServer {
     presence.start();
   }
 
+  /**
+   * A request from this server to the client (stdio): resolves with the
+   * client's result, rejects on its error. An aborted request is withdrawn
+   * with notifications/cancelled, so the host can close what it opened.
+   */
+  requestClient(method, params, { signal } = {}) {
+    if (!this.pending) { this.pending = new Map(); this.nextRequestId = 1; }
+    const id = `vibe-${this.nextRequestId++}`;
+    return new Promise((resolve, reject) => {
+      const done = () => { this.pending.delete(id); if (signal) signal.removeEventListener('abort', onAbort); };
+      const onAbort = () => {
+        if (!this.pending.has(id)) return;
+        done();
+        this.notify('notifications/cancelled', { requestId: id, reason: 'withdrawn' });
+        reject(new Error('cancelled'));
+      };
+      this.pending.set(id, {
+        resolve: (v) => { done(); resolve(v); },
+        reject: (e) => { done(); reject(e); },
+      });
+      if (signal) {
+        if (signal.aborted) { onAbort(); return; }
+        signal.addEventListener('abort', onAbort);
+      }
+      try {
+        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+      } catch (e) { done(); reject(e); }
+    });
+  }
+
+  /** Calls in flight, by request id, so the client can cancel one. */
+  trackCall(id) {
+    if (!this.calls) this.calls = new Map();
+    const ctl = new AbortController();
+    this.calls.set(JSON.stringify(id), ctl);
+    return ctl;
+  }
+  untrackCall(id, ctl) {
+    const k = JSON.stringify(id);
+    if (this.calls && this.calls.get(k) === ctl) this.calls.delete(k);
+  }
+  cancelCall(requestId) {
+    const ctl = this.calls && this.calls.get(JSON.stringify(requestId));
+    if (ctl) ctl.abort();
+  }
+
+  /** A response to one of this server's requests. True if it was one. */
+  takeResponse(msg) {
+    if (!msg || typeof msg !== 'object' || msg.method !== undefined || msg.id === undefined) return false;
+    if (!('result' in msg) && !('error' in msg)) return false;
+    const p = this.pending && this.pending.get(msg.id);
+    if (p) {
+      if (msg.error) { const e = new Error(String(msg.error.message || 'error')); e.code = msg.error.code; p.reject(e); }
+      else p.resolve(msg.result);
+    }
+    return true;
+  }
+
+  /** The Send box for vibe_send (confirm-box.js) on this connection. */
+  box() {
+    const state = confirmBox.clientState();
+    // VIBE_BOX_TIMEOUT_MS may only shorten the timeout (tests, the lab).
+    const short = Number(process.env.VIBE_BOX_TIMEOUT_MS);
+    return {
+      ...(Number.isFinite(short) && short > 0 && short < confirmBox.TIMEOUT_MS ? { timeoutMs: short } : {}),
+      protocolVersion: state && state.protocolVersion,
+      request: (params, opts) => this.requestClient('elicitation/create', params, opts),
+    };
+  }
+
   notify(method, params = {}) {
     try { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n'); } catch {}
   }
 
-  async handleRequest(request) {
+  async handleRequest(request, extra = {}) {
     const { params, id } = request;
     // Modern era: a request carrying a _meta protocol version is served
     // statelessly. An unsupported version gets -32022 whose `supported` list
@@ -192,7 +267,11 @@ class VibeMCPServer {
         error: { code: -32022, message: 'Unsupported protocol version', data: { supported: [MODERN_PROTOCOL_VERSION], requested: requestedVersion } },
       };
     }
-    const response = await this.dispatch(request);
+    // The host, as this request names it: the turn check (turns.js) applies
+    // only inside Claude Code, and a stateless client may never call
+    // server/discover. server/discover and the environment still count.
+    if (isModern && params?._meta?.[META_CLIENT_INFO]) require('./host').setClientInfo(params._meta[META_CLIENT_INFO]);
+    const response = await this.dispatch(request, extra);
     if (isModern && response?.result) {
       response.result.resultType = response.result.resultType || 'complete';
       response.result._meta = { [META_SERVER_INFO]: SERVER_INFO, ...(response.result._meta || {}) };
@@ -200,7 +279,7 @@ class VibeMCPServer {
     return response;
   }
 
-  async dispatch(request) {
+  async dispatch(request, { signal = null } = {}) {
     const { method, params, id } = request;
     const ok = (result) => ({ jsonrpc: '2.0', id, result });
     const fail = (code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -223,8 +302,12 @@ class VibeMCPServer {
         // keeps it so presence can say which agent this session lives in.
         require('./host').setClientInfo(params?.clientInfo);
         const requested = params?.protocolVersion;
+        const negotiated = LEGACY_PROTOCOL_VERSIONS.includes(requested) ? requested : LEGACY_PROTOCOL_VERSIONS[0];
+        // Whether this client can show the person a Send box (confirm-box.js):
+        // form elicitation, declared here, in a version that has it.
+        confirmBox.noteClient({ protocolVersion: negotiated, capabilities: params?.capabilities });
         return ok({
-          protocolVersion: LEGACY_PROTOCOL_VERSIONS.includes(requested) ? requested : LEGACY_PROTOCOL_VERSIONS[0],
+          protocolVersion: negotiated,
           capabilities: SERVER_CAPABILITIES,
           serverInfo: SERVER_INFO,
           instructions: SERVER_INSTRUCTIONS,
@@ -286,8 +369,32 @@ class VibeMCPServer {
         try {
           const wasAuthed = isAuthed();
           presence.noteActivity(); // a tool call means the person is here: polls snap back to fast
-          const result = await tool.handler(params.arguments || {});
+          // The Send box (confirm-box.js), when the client can show one:
+          //   2025-* (initialize)   the server sends elicitation/create during
+          //                         the call (form elicitation declared at
+          //                         initialize);
+          //   2026-07-28            the call returns resultType
+          //                         "input_required" and the client retries
+          //                         with inputResponses + requestState (form
+          //                         elicitation declared in THIS request's _meta).
+          const isModern = params?._meta?.[META_PROTOCOL_VERSION] !== undefined;
+          let result;
+          if (params.name === 'vibe_send' || params.name === 'vibe_prepare') {
+            let box = null;
+            if (isModern) { if (confirmBox.declaresForm(params?._meta?.[META_CLIENT_CAPABILITIES])) box = { mode: 'input_required' }; }
+            else if (confirmBox.available()) box = this.box();
+            const retry = isModern && (params.requestState !== undefined || params.inputResponses !== undefined)
+              ? { requestState: params.requestState, inputResponses: params.inputResponses } : null;
+            result = await tool.handler(params.arguments || {}, { box, retry, signal });
+          } else {
+            result = await tool.handler(params.arguments || {});
+          }
           if (!wasAuthed && isAuthed()) this.notify('notifications/tools/list_changed');
+          if (result && result.inputRequired) {
+            // Only a stateless request may be answered this way.
+            if (!isModern) return fail(-32000, 'internal: input required on a connection without it');
+            return ok({ resultType: 'input_required', ...result.inputRequired });
+          }
           const callResult = { content: [{ type: 'text', text: result.display || JSON.stringify(result, null, 2) }] };
           if (result.structured) callResult.structuredContent = result.structured;
           return ok(callResult);
@@ -321,12 +428,26 @@ class VibeMCPServer {
       buffer = lines.pop() || '';
       for (const line of lines) {
         if (!line.trim()) continue;
-        try {
-          const response = await this.handleRequest(JSON.parse(line));
-          if (response) process.stdout.write(JSON.stringify(response) + '\n');
-        } catch (e) {
-          process.stderr.write(`Error: ${e.message}\n`);
+        let msg;
+        try { msg = JSON.parse(line); } catch (e) { process.stderr.write(`Error: ${e.message}\n`); continue; }
+        // The client's answer to a request of ours (the Send box) is never
+        // queued behind the tool call that is waiting for it.
+        if (this.takeResponse(msg)) continue;
+        // A notification gets no response. notifications/cancelled withdraws
+        // a call in flight: its box is withdrawn and nothing is sent.
+        if (msg && typeof msg === 'object' && (msg.id === undefined || msg.id === null)) {
+          if (msg.method === 'notifications/cancelled') this.cancelCall(msg.params && msg.params.requestId);
+          continue;
         }
+        // A tool call may wait on the person (the Send box): it is not
+        // awaited here, so nothing else on the connection waits behind it.
+        const ctl = msg.method === 'tools/call' ? this.trackCall(msg.id) : null;
+        const handled = this.handleRequest(msg, { signal: ctl ? ctl.signal : null }).then((response) => {
+          // A cancelled call is not answered (the client has stopped waiting).
+          if (response && !(ctl && ctl.signal.aborted)) process.stdout.write(JSON.stringify(response) + '\n');
+        }).catch((e) => { process.stderr.write(`Error: ${e.message}\n`); })
+          .finally(() => { if (ctl) this.untrackCall(msg.id, ctl); });
+        if (msg.method !== 'tools/call') await handled;
       }
     });
 
