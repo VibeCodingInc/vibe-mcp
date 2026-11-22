@@ -38,11 +38,31 @@ const agentAuth = require('./agent-auth');
 const confirmBox = require('./confirm-box');
 const pkg = require('./package.json');
 
-// ─── MCP protocol identity (spec 2026-07-28, dual-era) ──────────────────
-// Modern clients declare io.modelcontextprotocol/protocolVersion in each
-// request's _meta and get stateless semantics (server/discover, resultType,
-// serverInfo echoed in _meta). Legacy clients open with `initialize`. Both
-// are served from this one process.
+// ─── MCP protocol identity ──────────────────────────────────────────────
+// Legacy clients open with `initialize` (2025-11-25 and earlier). The
+// stateless 2026-07-28 era (server/discover, a version in every request's
+// _meta, resultType, input_required) is implemented below but NOT served:
+//
+// SERVE_STATELESS. Measured on Claude Code 2.1.330, interactive, a person at
+// the keyboard (2026-11-21):
+//   - on 2025-11-25 (initialize), a server-sent `elicitation/create` with an
+//     empty-properties form is SHOWN to the person (four separate tests);
+//   - on 2026-07-28, a tool call answered `resultType: "input_required"` is
+//     NOT shown: Claude Code retries about 2 seconds later with
+//     `inputResponses: {"…": {"action": "accept", "content": {}}}` (reproduced
+//     twice, no Elicitation hook on that machine); with no keyboard
+//     (`claude -p`) it retries with "cancel";
+//   - Claude Code probes `server/discover` first, and picks 2026-07-28 for
+//     every session of a server that answers it. A server that answers
+//     -32601 (Method not found) gets `initialize` 2025-11-25 instead.
+// So the Send box (confirm-box.js) is only ever real on `initialize`: while
+// this is false, server/discover is answered as by a server that does not
+// implement it, and a request in the stateless era is refused with the
+// versions this server speaks (handleRequest). Turn it on only once a host
+// is seen to show the box on that path; confirm-box.js STATELESS_BOX_SHOWN
+// must then be set separately before an answer there counts as Accept.
+const SERVE_STATELESS = false;
+
 const MODERN_PROTOCOL_VERSION = '2026-07-28';
 const LEGACY_PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const META_PROTOCOL_VERSION = 'io.modelcontextprotocol/protocolVersion';
@@ -124,7 +144,14 @@ const NO_AUTH_REQUIRED = new Set(['vibe_start', 'vibe_init', 'vibe_token']);
 const isAuthed = () => authStore.isAuthenticated();
 
 class VibeMCPServer {
-  constructor() {
+  /**
+   * `serveStateless` / `statelessBoxShown` exist for the test fixture
+   * (test/fixtures/stateless-server.cjs, not shipped) to exercise the
+   * stateless code; nothing a person runs passes them.
+   */
+  constructor({ serveStateless = SERVE_STATELESS, statelessBoxShown } = {}) {
+    this.serveStateless = Boolean(serveStateless);
+    if (statelessBoxShown !== undefined) confirmBox._setStatelessBoxShownForTest(statelessBoxShown);
     authStore.hydrate();
 
     // An agent as itself (agent-auth.js): its session comes from its own
@@ -255,23 +282,36 @@ class VibeMCPServer {
   }
 
   async handleRequest(request, extra = {}) {
-    const { params, id } = request;
+    const { method, params, id } = request;
+    const requestedVersion = params?._meta?.[META_PROTOCOL_VERSION];
+    // `initialize` always selects legacy semantics (2026-07-28 versioning,
+    // "A dual-era server selects its behavior from how the client opens").
+    // A legacy version named in _meta is not a stateless request either: the
+    // legacy revisions carry no per-request version, so it is ignored.
+    const isModern = method !== 'initialize' && requestedVersion !== undefined && !LEGACY_PROTOCOL_VERSIONS.includes(requestedVersion);
+    if (!this.serveStateless) {
+      // Answered exactly as by a server that does not implement it: the
+      // stdio binding's probe falls back to `initialize` on any error that is
+      // not a recognized modern one, and must NOT fall back on -32022.
+      if (method === 'server/discover') return { jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } };
+      // Any other stateless request: "If the server does not implement the
+      // requested version ... it MUST respond with an
+      // UnsupportedProtocolVersionError listing the versions it does
+      // support". Those are the initialize-era versions.
+      if (isModern) return unsupportedVersion(id, LEGACY_PROTOCOL_VERSIONS, requestedVersion);
+      return this.dispatch(request, { ...extra, modern: false });
+    }
     // Modern era: a request carrying a _meta protocol version is served
     // statelessly. An unsupported version gets -32022 whose `supported` list
     // drives the client's retry.
-    const requestedVersion = params?._meta?.[META_PROTOCOL_VERSION];
-    const isModern = requestedVersion !== undefined;
     if (isModern && requestedVersion !== MODERN_PROTOCOL_VERSION) {
-      return {
-        jsonrpc: '2.0', id,
-        error: { code: -32022, message: 'Unsupported protocol version', data: { supported: [MODERN_PROTOCOL_VERSION], requested: requestedVersion } },
-      };
+      return unsupportedVersion(id, [MODERN_PROTOCOL_VERSION], requestedVersion);
     }
     // The host, as this request names it: the turn check (turns.js) applies
     // only inside Claude Code, and a stateless client may never call
     // server/discover. server/discover and the environment still count.
     if (isModern && params?._meta?.[META_CLIENT_INFO]) require('./host').setClientInfo(params._meta[META_CLIENT_INFO]);
-    const response = await this.dispatch(request, extra);
+    const response = await this.dispatch(request, { ...extra, modern: isModern });
     if (isModern && response?.result) {
       response.result.resultType = response.result.resultType || 'complete';
       response.result._meta = { [META_SERVER_INFO]: SERVER_INFO, ...(response.result._meta || {}) };
@@ -279,7 +319,7 @@ class VibeMCPServer {
     return response;
   }
 
-  async dispatch(request, { signal = null } = {}) {
+  async dispatch(request, { signal = null, modern = false } = {}) {
     const { method, params, id } = request;
     const ok = (result) => ({ jsonrpc: '2.0', id, result });
     const fail = (code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -376,12 +416,16 @@ class VibeMCPServer {
           //   2026-07-28            the call returns resultType
           //                         "input_required" and the client retries
           //                         with inputResponses + requestState (form
-          //                         elicitation declared in THIS request's _meta).
-          const isModern = params?._meta?.[META_PROTOCOL_VERSION] !== undefined;
+          //                         elicitation declared in THIS request's _meta),
+          //                         ONLY while STATELESS_BOX_SHOWN: Claude Code
+          //                         2.1.330 answers that request without showing
+          //                         it, so until a host is seen to show it a
+          //                         stateless request is "no box" (turn check).
+          const isModern = modern;
           let result;
           if (params.name === 'vibe_send' || params.name === 'vibe_prepare') {
             let box = null;
-            if (isModern) { if (confirmBox.declaresForm(params?._meta?.[META_CLIENT_CAPABILITIES])) box = { mode: 'input_required' }; }
+            if (isModern) { if (confirmBox.statelessBoxShown() && confirmBox.declaresForm(params?._meta?.[META_CLIENT_CAPABILITIES])) box = { mode: 'input_required' }; }
             else if (confirmBox.available()) box = this.box();
             const retry = isModern && (params.requestState !== undefined || params.inputResponses !== undefined)
               ? { requestState: params.requestState, inputResponses: params.inputResponses } : null;
@@ -484,9 +528,14 @@ class VibeMCPServer {
   }
 }
 
+/** A 2026-07-28 UnsupportedProtocolVersionError (-32022) naming what this server speaks. */
+function unsupportedVersion(id, supported, requested) {
+  return { jsonrpc: '2.0', id, error: { code: -32022, message: 'Unsupported protocol version', data: { supported, requested } } };
+}
+
 /** Start the MCP server on stdin/stdout. cli.js calls this; so does `node index.js`. */
-function start() {
-  const server = new VibeMCPServer();
+function start(options) {
+  const server = new VibeMCPServer(options);
   server.start();
   return server;
 }
@@ -495,4 +544,4 @@ function start() {
 // requirer's stdin and verify the saved sign-in against production.
 if (require.main === module) start();
 
-module.exports = { start, VibeMCPServer, SERVER_INSTRUCTIONS };
+module.exports = { start, VibeMCPServer, SERVER_INSTRUCTIONS, SERVE_STATELESS };

@@ -491,7 +491,7 @@ async function draftHandler(args, ctx = {}) {
   });
   if (out.display) return out;
   // Will this send be confirmed in a box the host shows (index.js says)?
-  const boxy = Boolean(ctx && ctx.box) && !isAgentIdentity();
+  const boxy = Boolean(boxOffered(ctx)) && !isAgentIdentity();
   if (out.draft.held) return heldPreview(out.draft, { boxy });
   return preview(out.draft, await findPerson(out.draft.to), { boxy });
 }
@@ -589,7 +589,9 @@ const sendDefinition = {
  * server (index.js), never from the call's arguments:
  *   box     { mode: 'request', protocolVersion, request(params, {signal}) }
  *           on a 2025-* connection, { mode: 'input_required' } on a
- *           stateless (2026-07-28) request; null when no box can be shown
+ *           stateless (2026-07-28) request (honoured only while
+ *           confirm-box.js STATELESS_BOX_SHOWN; see boxOffered); null when
+ *           no box can be shown
  *   retry   { inputResponses, requestState } on a stateless retry
  *   signal  aborted when the client cancels this call
  */
@@ -847,6 +849,21 @@ async function sendWithBox(id, rev, me, box, { signal = null } = {}) {
   return afterClose(closeBox(o.boxed.id, o.boxed.nonce, answer, { signal, rev }));
 }
 
+/**
+ * The box this call can really show, from the server's ctx, or null. A
+ * stateless (2026-07-28) box counts only while confirm-box.js
+ * STATELESS_BOX_SHOWN: Claude Code 2.1.330 answers that request "accept"
+ * without showing it, so until a host is seen to show it a stateless
+ * connection is one with no box. Checked here as well as in index.js.
+ */
+function boxOffered(ctx) {
+  const box = ctx && ctx.box ? ctx.box : null;
+  if (!box) return null;
+  if (typeof box.request === 'function') return box;
+  if (box.mode === 'input_required' && require('../confirm-box').statelessBoxShown()) return box;
+  return null;
+}
+
 /** requestState for a stateless retry: which draft, and which box. Opaque to the client. */
 const packState = (id, nonce) => Buffer.from(JSON.stringify({ v: 1, id, n: nonce }), 'utf8').toString('base64url');
 function unpackState(s) {
@@ -866,6 +883,12 @@ function unpackState(s) {
 async function sendStateless(id, rev, me, ctx) {
   const confirmBox = require('../confirm-box');
   const retry = ctx.retry && typeof ctx.retry.requestState === 'string' ? ctx.retry : null;
+  // An answer on a path where no host has been seen to show the box is never
+  // the person's Accept: nothing is sent, and no box is opened there.
+  if (!confirmBox.statelessBoxShown()) {
+    const d = loadDrafts().find(x => x.id === id);
+    return notAccepted(d ? d.to : 'them');
+  }
   if (retry) {
     const state = unpackState(retry.requestState);
     const responses = retry.inputResponses && typeof retry.inputResponses === 'object' ? retry.inputResponses : {};
@@ -892,7 +915,7 @@ async function sendStateless(id, rev, me, ctx) {
 }
 
 async function send(args, { byPerson, ctx = {} }) {
-  const box = ctx && ctx.box ? ctx.box : null;
+  const box = boxOffered(ctx);
   const initCheck = requireInit();
   if (initCheck) return initCheck;
   const id = args && args.id;
@@ -919,6 +942,8 @@ async function send(args, { byPerson, ctx = {} }) {
   // not. An agent really signed in as itself has no person to ask
   // and keeps its own rule (turnCheck: agent_identity).
   if (!byPerson && !isAgentIdentity()) {
+    // A stateless retry is answered by sendStateless whatever ctx.box says:
+    // it refuses, sending nothing, unless the stateless box is one a host shows.
     if (ctx && ctx.retry && typeof ctx.retry.requestState === 'string') return sendStateless(id, rev, me, ctx);
     if (box && box.mode === 'input_required') return sendStateless(id, rev, me, ctx);
     if (box && typeof box.request === 'function') return sendWithBox(id, rev, me, box, { signal: ctx.signal || null });

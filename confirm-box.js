@@ -19,14 +19,21 @@
  *     installed), the box alone decides.
  * The model never sees the box or the answer, only the tool result.
  *
- * Two ways a box is opened, by protocol era (index.js decides which applies):
+ * Two ways a box can be asked for, by protocol era (index.js decides):
  *   2025-06-18 / 2025-11-25   the server sends `elicitation/create` to the
- *                             client during the tool call (ask(), below);
+ *                             client during the tool call (ask(), below).
+ *                             Claude Code 2.1.330 shows this box. It is the
+ *                             only way /vibe asks today.
  *   2026-07-28 (stateless)    the tool call returns `resultType:
  *                             "input_required"` with the same request in
  *                             `inputRequests`, and the client retries the call
  *                             with `inputResponses` and the echoed
  *                             `requestState` (multi round-trip requests).
+ *                             Claude Code 2.1.330 answers this "accept"
+ *                             WITHOUT showing anything, so it is not served
+ *                             (index.js SERVE_STATELESS) and, even if it were,
+ *                             an answer there is never the person's Accept
+ *                             until STATELESS_BOX_SHOWN (below) is set.
  *
  * This file holds the box's wording and layout (constants, in one place), the
  * client capability record, the in-process one-box guard and timeout, and the
@@ -56,6 +63,20 @@ const SCHEMA = Object.freeze({ type: 'object', properties: Object.freeze({}) });
 const TIMEOUT_MS = 5 * 60 * 1000;
 /** The key of the one input request a stateless (2026-07-28) vibe_send asks for. */
 const INPUT_KEY = 'send_confirmation';
+
+/**
+ * Has a host been seen to SHOW the box on the stateless (2026-07-28) path?
+ * No: Claude Code 2.1.330 answered `input_required` with action "accept" and
+ * no box on screen (2026-11-21). While false, a stateless connection is a
+ * connection with no box (the turn check, and the no-box line in the
+ * preview), and an `inputResponses` answer never sends. Independent of
+ * index.js SERVE_STATELESS: both must be true before a stateless answer counts.
+ */
+const STATELESS_BOX_SHOWN = false;
+let statelessShown = STATELESS_BOX_SHOWN;
+function statelessBoxShown() { return statelessShown === true; }
+/** The test fixture only (test/fixtures/stateless-server.cjs and unit tests). */
+function _setStatelessBoxShownForTest(v) { statelessShown = v === true; }
 
 /** Protocol versions in which a server may send elicitation/create to the client during a call. */
 const ELICITATION_VERSIONS = new Set(['2025-06-18', '2025-11-25']);
@@ -350,6 +371,7 @@ function labAllowsHook(env = process.env) {
 
 module.exports = {
   WRAP_COLUMNS, VISIBLE_LINES, NEWLINE_MARK, SCHEMA, TIMEOUT_MS, INPUT_KEY, ELICITATION_VERSIONS,
+  STATELESS_BOX_SHOWN, statelessBoxShown, _setStatelessBoxShownForTest,
   declaresForm, noteClient, available, clientState,
   displayWidth, wrapLine, textLines, question, message, fits, request, ask, isOpen,
   settingsAnswerBox, settingsFiles, answeringHook, labAllowsHook, managedSettingsFile,
