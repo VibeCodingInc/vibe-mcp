@@ -90,18 +90,25 @@ test('SERVER_INSTRUCTIONS carries each guidance sentence, and each goes with its
   assert.ok(now.includes(CHARTER), 'voiceCharter');
   assert.ok(now.includes(NOTICING), 'noticingLine');
   assert.ok(now.includes(LANDED_START), 'itLanded');
-  assert.ok(now.includes('That landed: I\'m keeping tool_choice on auto and dropping the retry wrapper.'));
   assert.ok(now.includes('never send it without their choice'));
-  // A normal part of finishing the work, no longer a maybe; every limit kept.
+  // A normal part of finishing the work, no longer a maybe.
   assert.ok(!/you may offer one note back/.test(now));
-  for (const limit of ['once that change has actually been made', 'one line, at most about 100 characters', "in the person's own terms", 'no file paths, code', 'invented feelings or claimed savings', 'if they declined one for that reply, do not offer it again']) assert.ok(now.includes(limit), limit);
+  // landedReceipt (on): the note back is a receipt; the "That landed" one-liner is gone.
+  assert.ok(now.includes(`${LANDED_START} ${notice.LANDED_RECEIPT} It is at most 160 characters, for example "${notice.LANDED_RECEIPT_EXAMPLE}"; if they declined one for that reply, do not offer it again, and never send it without their choice.`));
+  assert.ok(!now.includes('That landed: I\'m keeping tool_choice on auto'));
+  // The earlier text, with landedReceipt off (loopback only); every limit kept there.
+  const before = serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'landedReceipt' });
+  assert.ok(before.includes(LANDED_START) && !before.includes(notice.LANDED_RECEIPT));
+  assert.ok(before.includes('That landed: I\'m keeping tool_choice on auto and dropping the retry wrapper.'));
+  for (const limit of ['once that change has actually been made', 'one line, at most about 100 characters', "in the person's own terms", 'no file paths, code', 'invented feelings or claimed savings', 'if they declined one for that reply, do not offer it again']) assert.ok(before.includes(limit), limit);
+  assert.equal(serverInstructions({ ...PROD, VIBE_NOTICE_OFF: 'landedReceipt' }), serverInstructions(PROD), 'landedReceipt: a real account always gets it');
   assert.ok(!serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'voiceCharter' }).includes(CHARTER));
   assert.ok(serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'voiceCharter' }).includes(NOTICING));
   assert.ok(!serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'noticingLine' }).includes(NOTICING));
   assert.ok(!serverInstructions({ ...LOCAL, VIBE_NOTICE_OFF: 'itLanded' }).includes(LANDED_START));
   assert.equal(serverInstructions({ ...PROD, VIBE_NOTICE_OFF: NAMES.join(',') }), serverInstructions(PROD), 'a real account always gets them');
   // The guidance itself keeps the house rule.
-  for (const s of [CHARTER, NOTICING, LANDED_START]) assert.ok(!s.includes('!'), s);
+  for (const s of [CHARTER, NOTICING, LANDED_START, notice.LANDED_RECEIPT, notice.LANDED_RECEIPT_SHORT]) assert.ok(!s.includes('!'), s);
 });
 
 test('the /vibe command leads an offer with the line on why this person, and describes the note back', () => {
@@ -115,6 +122,11 @@ test('the /vibe command leads an offer with the line on why this person, and des
   assert.ok(cmd.includes('Exactly once per reply they received.'));
   assert.ok(cmd.includes('once that change has actually been made'));
   assert.ok(!cmd.includes('you may offer one note back'));
+  // landedReceipt: the command carries the same rule as SERVER_INSTRUCTIONS.
+  assert.ok(cmd.includes(notice.LANDED_RECEIPT), 'the receipt rule');
+  assert.ok(cmd.includes(`It is at most 160 characters, for example "${notice.LANDED_RECEIPT_EXAMPLE}"`));
+  assert.ok(cmd.includes('`vibe_prepare` refuses a note back with a question mark in it.'));
+  assert.ok(!cmd.includes('That landed: I\'m keeping tool_choice on auto'));
   assert.ok(!/!(?!\[)/.test(cmd.replace(/`[^`]*`/g, '')), 'no exclamation mark in the command text');
 });
 
@@ -482,11 +494,124 @@ test('vibe_prepare advertises kind with the one allowed value', () => {
   assert.match(k.description, /changes nothing about how the message is checked or sent/);
 });
 
+// ── 21 landedReceipt: a note back is a receipt, and asks nothing ────────────
+// Outside review of 11 real notes back (2026-11-22): the worst smuggled a new
+// request into the thank-you, gave an order, invented a number or reported no
+// change; the best were receipts. The one mechanical rule: no question mark.
+
+const RECEIPT_LINE = 'Your bare-ID answer landed: issue_refund pattern is now ^[0-9]{5,8}$ and the ORD- rule is out of the prompt. Not published to staging yet.';
+const NO_QUESTION = 'Not prepared: a note back ("landed") carries no question. Put the question in a separate draft if the person wants to ask it. Nothing was sent.';
+const QUESTIONS = [
+  'Thanks, your 3,112 is in the postmortem. Can you pull a /v2/quotes failed count?',
+  'Your 3,112 is in the postmortem. Can you pull the failed count\uFF1F',
+  'Your 3,112 is in the postmortem. Can you pull the failed count\u061F',
+];
+
+test('landedReceipt: the switch exists, is on, and turns off by name only against a loopback API', () => {
+  assert.equal(notice.NOTICE.landedReceipt, true);
+  assert.equal(notice.on('landedReceipt', LOCAL), true);
+  assert.equal(notice.on('landedReceipt', { ...LOCAL, VIBE_NOTICE_OFF: 'landedReceipt' }), false);
+  assert.equal(notice.on('landedReceipt', { ...LOCAL, VIBE_NOTICE_VARIANT: 'off' }), false);
+  assert.equal(notice.on('landedReceipt', { ...PROD, VIBE_NOTICE_OFF: 'landedReceipt' }), true, 'a real account had it turned off');
+  assert.equal(notice.on('itLanded', { ...LOCAL, VIBE_NOTICE_OFF: 'landedReceipt' }), true, 'the note back itself stays on');
+  assert.ok(Array.from(notice.LANDED_RECEIPT_EXAMPLE).length <= drafts.LANDED_MAX, 'the example fits the limit');
+  assert.ok(!/[?\uFF1F\u061F]/.test(notice.LANDED_RECEIPT_EXAMPLE), 'the example asks nothing');
+});
+
+test('landedReceipt: a new note back with a question mark (?, fullwidth, Arabic) is refused, nothing drafted', async () => {
+  const before = drafts.loadDrafts().filter((d) => d.kind === 'landed').length;
+  for (const [i, q] of QUESTIONS.entries()) {
+    const r = await prep({ handle: 'mira', message: q, reply_to: `msg_q${i}x`, kind: 'landed' });
+    assert.equal(r.display, seen(NO_QUESTION), q);
+  }
+  assert.equal(drafts.LANDED_NO_QUESTION, NO_QUESTION);
+  assert.equal(drafts.loadDrafts().filter((d) => d.kind === 'landed').length, before, 'nothing drafted');
+  assert.ok(!fs.existsSync(drafts.LANDED_FILE) || !Object.keys(JSON.parse(fs.readFileSync(drafts.LANDED_FILE, 'utf8'))).some((k) => /#msg_q\dx$/.test(k)), 'no reply marked as offered');
+  // A refused one can be opened again without the question: once per reply counts only what was opened.
+  const ok = await prep({ handle: 'mira', message: RECEIPT_LINE, reply_to: 'msg_q0x', kind: 'landed' });
+  assert.equal(ok.data.draft.kind, 'landed');
+  assert.ok(ok.display.includes(`**Message (exact):**\n${RECEIPT_LINE}\n`));
+  await drafts.vibe_discard.handler({ id: ok.data.draft.id });
+});
+
+test('landedReceipt: an edit of a note back that adds a question mark is refused; the draft is unchanged', async () => {
+  const r = await prep({ handle: 'kenji', message: 'Your CRLF answer landed: the parser now strips \\r before splitting. Local only.', reply_to: 'msg_qe1', kind: 'landed' });
+  const id = r.data.draft.id;
+  const rev = r.data.draft.rev;
+  for (const q of QUESTIONS) assert.equal((await prep({ id, message: q })).display, NO_QUESTION, q);
+  const d = drafts.loadDrafts().find((x) => x.id === id);
+  assert.equal(d.body, 'Your CRLF answer landed: the parser now strips \\r before splitting. Local only.');
+  assert.equal(drafts.revOf(d), rev, 'the draft was not changed');
+  const edited = await prep({ id, message: 'Your CRLF answer landed: the parser strips \\r first. Not deployed yet.' });
+  assert.equal(edited.data.draft.kind, 'landed');
+  await drafts.vibe_discard.handler({ id });
+});
+
+test('landedReceipt: an ordinary draft may still ask; only a note back is held to it', async () => {
+  const r = await prep({ handle: 'kenji', message: 'Can you pull a /v2/quotes failed count?', reply_to: 'msg_qo1' });
+  assert.equal(r.data.draft.kind, undefined);
+  assert.ok(r.display.includes('Can you pull a /v2/quotes failed count?'));
+  await drafts.vibe_discard.handler({ id: r.data.draft.id });
+});
+
+test('landedReceipt switched off (loopback only): a question mark in a note back is allowed again, as before', () => withOff('landedReceipt', async () => {
+  const r = await prep({ handle: 'mira', message: QUESTIONS[0], reply_to: 'msg_qoff1', kind: 'landed' });
+  assert.equal(r.data.draft.kind, 'landed');
+  const e = await prep({ id: r.data.draft.id, message: QUESTIONS[1] });
+  assert.equal(e.data.draft.kind, 'landed');
+  // The guidance falls back with it: the hook, the kind field, the record.
+  assert.equal(arrival.landedHook('msg_abc123'), HOOK_PLAIN('msg_abc123'));
+  assert.ok(!drafts.vibe_prepare.definition.inputSchema.properties.kind.description.includes('receipt'));
+  await drafts.vibe_discard.handler({ id: r.data.draft.id });
+}));
+
+test('landedReceipt is ignored against production: the refusal and the guidance stay', async () => {
+  const { serverInstructions } = require('../index.js');
+  assert.equal(arrival.landedHook('msg_abc123', { ...PROD, VIBE_NOTICE_OFF: 'landedReceipt' }), HOOK_FOR('msg_abc123'));
+  assert.equal(arrival.landedHook('msg_abc123', { ...PROD, VIBE_NOTICE_VARIANT: 'off' }), HOOK_FOR('msg_abc123'));
+  assert.ok(serverInstructions({ ...PROD, VIBE_NOTICE_OFF: 'landedReceipt' }).includes(notice.LANDED_RECEIPT));
+  // vibe_prepare reads process.env: point it at production with the switch named off.
+  const prev = { url: process.env.VIBE_API_URL, off: process.env.VIBE_NOTICE_OFF };
+  process.env.VIBE_API_URL = PROD.VIBE_API_URL;
+  process.env.VIBE_NOTICE_OFF = 'landedReceipt';
+  try {
+    assert.equal(notice.on('landedReceipt'), true);
+    const r = await prep({ handle: 'mira', message: QUESTIONS[2], reply_to: 'msg_qprod1', kind: 'landed' });
+    assert.equal(r.display, NO_QUESTION);
+  } finally {
+    process.env.VIBE_API_URL = prev.url;
+    if (prev.off === undefined) delete process.env.VIBE_NOTICE_OFF; else process.env.VIBE_NOTICE_OFF = prev.off;
+  }
+});
+
+test('landedReceipt: the kind field, the hook and the reminder say what a note back is', () => {
+  const k = drafts.vibe_prepare.definition.inputSchema.properties.kind;
+  assert.equal(k.description, 'Only "landed": a note back to someone whose reply led to a concrete change made in this session. Needs reply_to (their reply). Once per reply. It is a one-sentence receipt of what changed on the person\'s side: what was actually updated, "not deployed yet" or "local only" when it is not live, and no question, request or instruction to them (a question mark is refused); if nothing changed, do not open one. It changes nothing about how the message is checked or sent.');
+  assert.deepEqual(k.enum, ['landed']);
+  assert.ok(arrival.landedHook('msg_abc123').endsWith(RECEIPT));
+  assert.equal(hookMod.LANDED_RECEIPT_SHORT, notice.LANDED_RECEIPT_SHORT, 'the hook\'s copy is the same text');
+  for (const phrase of ['one-sentence receipt of what changed on the person\'s side', '"not deployed yet" or "local only"', 'only numbers and names that are in the person\'s files or in the answer itself', 'no question, no request and no instruction to the other person', 'a separate ordinary draft, offered separately', 'If nothing changed (the answer only agreed with what they had), there is no note back.']) {
+    assert.ok(notice.LANDED_RECEIPT.includes(phrase), phrase);
+  }
+  for (const phrase of ['one-sentence receipt', '"not deployed yet" or "local only"', 'no question, request or instruction to them', 'separate ordinary draft', 'If nothing changed, no note back.']) assert.ok(notice.LANDED_RECEIPT_SHORT.includes(phrase), phrase);
+});
+
+test('docs/VOICE.md: the note back is a receipt, with the reviewed example', () => {
+  const v = fs.readFileSync(path.join(ROOT, 'docs', 'VOICE.md'), 'utf8');
+  assert.ok(v.includes('## The note back is a receipt'));
+  assert.ok(v.includes(notice.LANDED_RECEIPT_EXAMPLE));
+  assert.ok(v.includes('It carries no question, no request and no instruction to the other person.'));
+  assert.ok(!v.includes("That landed: I'm keeping tool_choice on auto"));
+});
+
 // ── 5b the note-back hook, at the moment it matters ─────────────────────────
 
 // landedAsDraft (lab 2026-11-22): the draft is the offer; agents had asked in prose instead.
-const HOOK_FOR = (id) => `If their answer changes what you do here, then once the change is made (in this reply or a later one), end that reply by opening one note back as a draft: vibe_prepare, kind landed, reply_to ${id}, asked: false. The draft is the offer and sends nothing; do not ask in prose whether they want one.`;
-const HOOK_FOR_OLD = (id) => `If their answer changes what you do here, then once the change is made you can offer one note back (vibe_prepare, kind landed, reply_to ${id}, asked: false).`;
+// landedReceipt (on): what the note is, after the hook line.
+const RECEIPT = ` ${notice.LANDED_RECEIPT_SHORT}`;
+const HOOK_PLAIN = (id) => `If their answer changes what you do here, then once the change is made (in this reply or a later one), end that reply by opening one note back as a draft: vibe_prepare, kind landed, reply_to ${id}, asked: false. The draft is the offer and sends nothing; do not ask in prose whether they want one.`;
+const HOOK_FOR = (id) => HOOK_PLAIN(id) + RECEIPT;
+const HOOK_FOR_OLD = (id) => `If their answer changes what you do here, then once the change is made you can offer one note back (vibe_prepare, kind landed, reply_to ${id}, asked: false).${RECEIPT}`;
 
 test('landedAsDraft switched off (loopback only): the earlier hook line', () => withOff('landedAsDraft', () => {
   assert.equal(arrival.landedHook('msg_abc123'), HOOK_FOR_OLD('msg_abc123'));

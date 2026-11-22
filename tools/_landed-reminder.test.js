@@ -57,7 +57,7 @@ const landingFile = (m, session = 's1') => path.join(m.vh, 'landing', `${session
 test('the server marks only a person\'s reply to the person\'s own message', () => {
   const m = machine();
   const [row] = spoolReply(m.env);
-  assert.deepEqual(row.landed, { id: REPLY, from: 'mira', asDraft: true });
+  assert.deepEqual(row.landed, { id: REPLY, from: 'mira', asDraft: true, receipt: true });
   const [none] = spoolReply(m.env, { id: 'msg_nobind1', binding: false });
   assert.equal(none.landed, undefined, 'no record of a message of theirs: first contact');
   const [agent] = spoolReply(m.env, { id: 'msg_agent1', kind: 'agent' });
@@ -66,7 +66,7 @@ test('the server marks only a person\'s reply to the person\'s own message', () 
   const now = Date.now();
   const mine = { project: 'x', firstLine: 'y', sentAt: now - 30 * MIN, messageId: 'msg_mine1' };
   const item = (over) => ({ id: 'msg_abc123', from: 'mira', text: 'auto', unread: 1, kind: null, building: '', context: mine, at: now, line: false, invited: false, note: null, sentAt: now - MIN, ...over });
-  assert.deepEqual(arrival.render(item({})).landed, { id: 'msg_abc123', from: 'mira', asDraft: true });
+  assert.deepEqual(arrival.render(item({})).landed, { id: 'msg_abc123', from: 'mira', asDraft: true, receipt: true });
   assert.equal(arrival.render(item({ line: true })).landed, undefined, 'an open line');
   assert.equal(arrival.render(item({ line: true, text: 'answer' })).landed, undefined);
   assert.equal(arrival.render(item({ invited: true })).landed, undefined, 'a first message after an invitation');
@@ -200,7 +200,7 @@ test('landedAsDraft switched off (loopback only): the earlier reminder wording',
   process.env.VIBE_NOTICE_OFF = 'landedAsDraft';
   try {
     const [row] = spoolReply(m.env);
-    assert.deepEqual(row.landed, { id: REPLY, from: 'mira' });
+    assert.deepEqual(row.landed, { id: REPLY, from: 'mira', receipt: true });
     assert.ok(row.context.includes(`you can offer one note back (vibe_prepare, kind landed, reply_to ${REPLY}, asked: false).`));
   } finally { delete process.env.VIBE_NOTICE_OFF; }
   hook(m, 'UserPromptSubmit');
@@ -331,4 +331,47 @@ test('normalizeMessages keeps who it was to, an agent\'s mark and the invitation
   assert.equal(b.to, null);
   assert.equal(b.kind, null);
   assert.equal(b.invited, false);
+});
+
+// ── landedReceipt (notice.js): the reminder says what the note is ───────────
+
+test('landedReceipt: the reminder says the note is a receipt, from the arrival hook and from session start', () => {
+  const RECEIPT = ` ${hookMod.LANDED_RECEIPT_SHORT}`;
+  assert.equal(hookMod.LANDED_RECEIPT_SHORT, require('../notice').LANDED_RECEIPT_SHORT);
+  const m = machine();
+  spoolReply(m.env);
+  hook(m, 'UserPromptSubmit');
+  const o = hook(m, 'UserPromptSubmit');
+  assert.ok(reminded(o));
+  assert.ok(ctx(o).includes(`One line, in the person's own terms.${RECEIPT} The draft is the offer and sends nothing`), ctx(o));
+  const m2 = machine();
+  started(m2);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(m2.vh, 'landing', 'start-s1.json'), 'utf8')).receipt, true);
+  const o2 = hook(m2, 'UserPromptSubmit');
+  assert.ok(reminded(o2) && ctx(o2).includes(RECEIPT));
+  assert.equal(o2.systemMessage, undefined, 'never in what the person sees');
+  for (const x of [m, m2]) fs.rmSync(x.vh, { recursive: true, force: true });
+});
+
+test('landedReceipt switched off (loopback only): the reminder as before', () => {
+  const m = machine();
+  process.env.VIBE_NOTICE_OFF = 'landedReceipt';
+  try {
+    const [row] = spoolReply(m.env);
+    assert.deepEqual(row.landed, { id: REPLY, from: 'mira', asDraft: true });
+    assert.ok(!row.context.includes('receipt'));
+  } finally { delete process.env.VIBE_NOTICE_OFF; }
+  hook(m, 'UserPromptSubmit');
+  const o = hook(m, 'UserPromptSubmit');
+  assert.ok(reminded(o) && !ctx(o).includes('receipt'));
+  assert.ok(ctx(o).includes("One line, in the person's own terms. The draft is the offer and sends nothing"));
+  const m2 = machine();
+  started(m2, { env: { VIBE_NOTICE_OFF: 'landedReceipt' } });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(m2.vh, 'landing', 'start-s1.json'), 'utf8')).receipt, undefined);
+  assert.ok(!ctx(hook(m2, 'UserPromptSubmit')).includes('receipt'));
+  // Against production the switch is ignored.
+  const m3 = machine();
+  started(m3, { env: { VIBE_API_URL: 'https://www.slashvibe.dev', VIBE_NOTICE_OFF: 'landedReceipt' } });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(m3.vh, 'landing', 'start-s1.json'), 'utf8')).receipt, true);
+  for (const x of [m, m2, m3]) fs.rmSync(x.vh, { recursive: true, force: true });
 });

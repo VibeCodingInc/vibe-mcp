@@ -157,6 +157,10 @@ function main() {
 // the person's own message, not an agent, not an open line, not a first
 // message); this only keeps the record. One small file per session.
 const LANDED_TIMES = 3;
+// notice.js LANDED_RECEIPT_SHORT (landedReceipt), copied so this hook needs
+// nothing else from the package; a test keeps the two equal. The switch is
+// read where the record is opened (arrival.js, session-start-hook.cjs).
+const LANDED_RECEIPT_SHORT = 'The note is a one-sentence receipt of what changed on the person\'s side (the file, setting or decision actually updated; say "not deployed yet" or "local only" when it is not live), with only numbers and names from their files or the answer, and no question, request or instruction to them; anything more the person needs from them is a separate ordinary draft. If nothing changed, no note back.';
 const LANDED_TTL_MS = 2 * 60 * 60 * 1000;
 const SAFE_ID = /^[A-Za-z0-9_-]{4,80}$/;
 const SAFE_HANDLE = /^[A-Za-z0-9_.-]{1,40}$/;
@@ -190,7 +194,7 @@ function openLanded(dir, session, row, now = Date.now()) {
     const file = landingFile(dir, session);
     if (!file) return;
     const open = readLanding(file).filter((r) => r.id !== l.id);
-    open.push({ id: l.id, from: l.from, to: String(row.to || '').toLowerCase(), at: now, told: 0, ...(l.asDraft === true ? { asDraft: true } : {}) });
+    open.push({ id: l.id, from: l.from, to: String(row.to || '').toLowerCase(), at: now, told: 0, ...(l.asDraft === true ? { asDraft: true } : {}), ...(l.receipt === true ? { receipt: true } : {}) });
     writeLanding(file, open.slice(-10));
   } catch {}
 }
@@ -247,7 +251,7 @@ function adoptStart(dir, session, input, now = Date.now()) {
       if (b.from && normHandle(b.from) !== to) continue;
       if (now - b.sentAt > BINDING_TTL_MS || !Number.isFinite(m.at) || !(m.at > b.sentAt)) continue;
       open = open.filter((r) => r.id !== m.id);
-      open.push({ id: m.id, from, to, at: start.at, told: 0, ...(start.asDraft === true ? { asDraft: true } : {}) });
+      open.push({ id: m.id, from, to, at: start.at, told: 0, ...(start.asDraft === true ? { asDraft: true } : {}), ...(start.receipt === true ? { receipt: true } : {}) });
     }
     writeLanding(file, open.slice(-10));
   } catch {}
@@ -280,9 +284,10 @@ function landedReminders(dir, session, now = Date.now()) {
     const say = [];
     for (const r of open) {
       if (!(now - r.at <= LANDED_TTL_MS) || !(Number(r.told) < LANDED_TIMES) || landedOpened(dir, r)) continue;
+      const receipt = r.receipt === true ? ` ${LANDED_RECEIPT_SHORT}` : '';
       say.push(r.asDraft === true
-        ? `/vibe: @${r.from}'s answer ${r.id} reached the person earlier in this session. If it has changed what you do here, then once that change is made (in this reply or a later one), end that reply by opening one note back as a draft: vibe_prepare, kind landed, reply_to ${r.id}, asked: false. One line, in the person's own terms. The draft is the offer and sends nothing; do not ask in prose whether they want one. Otherwise ignore this.`
-        : `/vibe: @${r.from}'s answer ${r.id} arrived earlier in this session. If it has changed what you do here, then once that change is made, offer one note back: vibe_prepare, kind landed, reply_to ${r.id}, asked: false. One line, in the person's own terms, sent only if they choose. Otherwise ignore this.`);
+        ? `/vibe: @${r.from}'s answer ${r.id} reached the person earlier in this session. If it has changed what you do here, then once that change is made (in this reply or a later one), end that reply by opening one note back as a draft: vibe_prepare, kind landed, reply_to ${r.id}, asked: false. One line, in the person's own terms.${receipt} The draft is the offer and sends nothing; do not ask in prose whether they want one. Otherwise ignore this.`
+        : `/vibe: @${r.from}'s answer ${r.id} arrived earlier in this session. If it has changed what you do here, then once that change is made, offer one note back: vibe_prepare, kind landed, reply_to ${r.id}, asked: false. One line, in the person's own terms, sent only if they choose.${receipt} Otherwise ignore this.`);
       const told = Number(r.told) + 1;
       if (told < LANDED_TIMES) keep.push({ ...r, told });
     }
@@ -430,4 +435,4 @@ function stuckNudge(input, dir) {
 }
 
 if (require.main === module) { try { main(); } catch { quiet(); } }
-module.exports = { personWrote, shownLine, headerLine, ago, landedReminders, openLanded, adoptStart, LANDED_TIMES, LANDED_TTL_MS, START_ADOPT_MS };
+module.exports = { personWrote, shownLine, headerLine, ago, landedReminders, openLanded, adoptStart, LANDED_TIMES, LANDED_TTL_MS, START_ADOPT_MS, LANDED_RECEIPT_SHORT };

@@ -50,6 +50,9 @@ const SHIPPED_COMMAND_SHA256 = new Set([
   '36823d773eacc14d7b08bf5796acf7d3c6636b21eb22fc8efab6e7bc55028425', // v0.9.23
   // v0.9.24 did not say the preview is the offer, or give the why-this-person line.
   'aaab50678448921a8524c2fede4f82c58b6d73c67c39027f6025e06b6b2ab7d6', // v0.9.24
+  // v0.9.25 - v0.9.26 described the note back as a one-line "That landed"
+  // without saying it is a receipt with no question or request (landedReceipt).
+  '49ed66dff06b5f186c11709cf6a33a9ab64775f8be7185ef9d20db55392126d1', // v0.9.25 - v0.9.26
 ]);
 
 function claudeDir(env = process.env) {

@@ -59,7 +59,7 @@ const BINDINGS_FILE = path.join(config.VIBE_DIR, 'return-bindings.json');
 const LANDED_FILE = path.join(config.VIBE_DIR, 'landed.json');
 const LANDED_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const LANDED_KEEP = 500;
-const LANDED_MAX = 160;   // one line; the guidance asks for about 100
+const LANDED_MAX = 160;   // one line; the guidance (landedReceipt) says at most 160
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const BINDING_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const LOCK_STALE_MS = 10 * 1000;         // a transaction never takes this long
@@ -299,6 +299,7 @@ const draftDefinition = {
     },
   },
 };
+const LANDED_KIND_RECEIPT = 'It is a one-sentence receipt of what changed on the person\'s side: what was actually updated, "not deployed yet" or "local only" when it is not live, and no question, request or instruction to them (a question mark is refused); if nothing changed, do not open one.';
 // answerFirst (notice.js): one more sentence and the `asked` argument, read
 // each time the tool list is served so the lab switch applies.
 const DRAFT_DESCRIPTION = draftDefinition.description;
@@ -306,7 +307,14 @@ const DRAFT_PROPERTIES = draftDefinition.inputSchema.properties;
 const ASKED = { type: 'boolean', description: "true only if the person's latest message asked for a message to this person or agreed to one (also for a reply); false or absent when you are offering it unprompted." };
 const ASKED_SENTENCE = ' Set asked: true only when the person\'s latest message asked for this message or agreed to it; when you offer it unprompted, your reply must first give the person everything their message asked for, in full, and show the draft after that, never instead of it.';
 Object.defineProperty(draftDefinition, 'description', { enumerable: true, get: () => DRAFT_DESCRIPTION + (require('../notice').on('answerFirst') ? ASKED_SENTENCE : '') });
-Object.defineProperty(draftDefinition.inputSchema, 'properties', { enumerable: true, get: () => (require('../notice').on('answerFirst') ? { ...DRAFT_PROPERTIES, asked: ASKED } : DRAFT_PROPERTIES) });
+// landedReceipt (notice.js): the kind field says what a note back is.
+const KIND_RECEIPT = { ...DRAFT_PROPERTIES.kind, description: 'Only "landed": a note back to someone whose reply led to a concrete change made in this session. Needs reply_to (their reply). Once per reply. ' + LANDED_KIND_RECEIPT + ' It changes nothing about how the message is checked or sent.' };
+function draftProperties() {
+  const notice = require('../notice');
+  const props = notice.on('landedReceipt') ? { ...DRAFT_PROPERTIES, kind: KIND_RECEIPT } : DRAFT_PROPERTIES;
+  return notice.on('answerFirst') ? { ...props, asked: ASKED } : props;
+}
+Object.defineProperty(draftDefinition.inputSchema, 'properties', { enumerable: true, get: draftProperties });
 
 /**
  * The note back (notice.js itLanded): a draft the agent opened to tell someone
@@ -324,9 +332,15 @@ function landedArgs(args, wantId) {
   if (!isMessageId(args.reply_to)) return { refuse: 'Not prepared: a note back ("landed") needs reply_to, the id of the reply it is about. Nothing was sent.' };
   return { landed: true };
 }
+const LANDED_QUESTION = /[?\uFF1F\u061F]/u;
+const LANDED_NO_QUESTION = 'Not prepared: a note back ("landed") carries no question. Put the question in a separate draft if the person wants to ask it. Nothing was sent.';
 function landedTextProblem(text) {
   if (/\n/.test(text)) return 'Not prepared: a note back ("landed") is one line. Nothing was sent.';
   if (Array.from(text).length > LANDED_MAX) return `Not prepared: a note back ("landed") is one short line, at most ${LANDED_MAX} characters. Nothing was sent.`;
+  // landedReceipt (notice.js): a note back is a receipt, so it asks nothing.
+  // The one mechanical sign of a request smuggled into it is a question mark
+  // (ASCII, fullwidth, Arabic). Directives are left to the guidance.
+  if (require('../notice').on('landedReceipt') && LANDED_QUESTION.test(text)) return LANDED_NO_QUESTION;
   return null;
 }
 function readLanded(now = Date.now()) {
@@ -1542,5 +1556,5 @@ module.exports = {
   isQaHandle, getReturnBinding, clearReturnBinding, loadDrafts, transact, DRAFTS_FILE, BINDINGS_FILE,
   compose, revOf, reconcileAbandoned, sentProvenance,
   // the note back (notice.js itLanded)
-  LANDED_LABEL, LANDED_FILE, LANDED_MAX, landedOffered,
+  LANDED_LABEL, LANDED_FILE, LANDED_MAX, LANDED_NO_QUESTION, landedOffered,
 };
