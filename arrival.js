@@ -101,9 +101,16 @@ function isSpooled(id, env = process.env) {
  * note back although replies visibly changed the receiver's work; the general
  * guidance was too far from the moment.
  */
-function landedHook(replyId) {
+function landedHook(replyId, env = process.env) {
   const id = safeId(replyId);
   if (!id) return null;
+  // Lab 2026-11-22 (PR #102, 14 worlds): where a reply was used, agents more
+  // often ASKED in prose ("I can draft her a one-line note, if you want it")
+  // than opened the note, so the person had to answer a question to get a
+  // draft. The draft is the offer (notice.js offerIsDraft, landedAsDraft).
+  if (notice.on('landedAsDraft', env)) {
+    return `If their answer changes what you do here, then once the change is made (in this reply or a later one), end that reply by opening one note back as a draft: vibe_prepare, kind landed, reply_to ${id}, asked: false. The draft is the offer and sends nothing; do not ask in prose whether they want one.`;
+  }
   return `If their answer changes what you do here, then once the change is made you can offer one note back (vibe_prepare, kind landed, reply_to ${id}, asked: false).`;
 }
 
@@ -234,7 +241,7 @@ function render(item) {
     // The arrival hook keeps this in front of the agent on the next prompts
     // of the session where it is shown (notice.js landedReminder): by the
     // time the reply has changed the work, this text is many turns back.
-    if (hook && notice.on('landedReminder')) landed = { id: safeId(item.id), from };
+    if (hook && notice.on('landedReminder')) landed = { id: safeId(item.id), from, ...(notice.on('landedAsDraft') ? { asDraft: true } : {}) };
   }
   const more = item.unread > 1 ? ` (+${item.unread - 1} more unread in this thread)` : '';
   const context = lines.join('\n') + renderIncoming([{ from: item.from, text: text + more }]);

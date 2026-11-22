@@ -796,6 +796,8 @@ async function getRawInbox(handle) {
         unread_count: thread.unread,
         // The caller invited this person (served for the caller only; absent = false).
         invitedByYou: thread.invited_by_you === true,
+        // As served (#272): an agent's message is never taken for a person's reply.
+        actorKind: waiting.actor?.kind || null,
       });
     });
 

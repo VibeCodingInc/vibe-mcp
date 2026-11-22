@@ -42,8 +42,9 @@ const NOTICE = {
   itLanded: true,           // 16. a one-line note back when a reply changed the work here, as a draft, once per reply
   // The first five minutes (BRIEF-20, outside walk-through of a newcomer).
   setupReceipt: true,       // 17. setup ends with notes already waiting (handles only, one bounded read) and "open a fresh session"
-  landedReminder: true,     // 18. after a reply to the person's own message was shown, the next prompts in that session remind the agent (agent only, at most 3, 2 hours)
+  landedReminder: true,     // 18. after a reply to the person's own message was shown (by the arrival hook or at session start), prompts in that session remind the agent (agent only, at most 3, 2 hours)
   confirmLead: true,        // 19. the Send box's fixed first line reads as the confirmation of the send: "Confirm: send to @ben? (...)"
+  landedAsDraft: true,      // 20. the note-back hook and reminder say: open it as a draft at the end of that reply, do not ask in prose first
 };
 
 /** The agent's copy of someone's line about what they are working on. The person's copy stays at 48. */

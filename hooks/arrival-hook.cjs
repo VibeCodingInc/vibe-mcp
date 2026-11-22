@@ -119,6 +119,9 @@ function main() {
   // Reminders for replies shown earlier in this session, read BEFORE this
   // pause's own rows are taken: a reply shown now is not reminded of now.
   const person = event === 'UserPromptSubmit' && personWrote(input.prompt);
+  // Replies the session-start hook showed: decided and opened on the first
+  // prompt of the session, and reminded of on that same prompt.
+  if (person) adoptStart(dir, session, input, Date.now());
   const landed = person ? landedReminders(dir, session, Date.now()) : [];
   const rows = take(dir, Date.now(), session);
   for (const r of rows) openLanded(dir, session, r, Date.now());
@@ -187,7 +190,65 @@ function openLanded(dir, session, row, now = Date.now()) {
     const file = landingFile(dir, session);
     if (!file) return;
     const open = readLanding(file).filter((r) => r.id !== l.id);
-    open.push({ id: l.id, from: l.from, to: String(row.to || '').toLowerCase(), at: now, told: 0 });
+    open.push({ id: l.id, from: l.from, to: String(row.to || '').toLowerCase(), at: now, told: 0, ...(l.asDraft === true ? { asDraft: true } : {}) });
+    writeLanding(file, open.slice(-10));
+  } catch {}
+}
+
+// ── replies shown at session start (session-start-hook.cjs shownForLanding) ──
+// The session-start hook writes what it showed; the first prompt the person
+// writes in that session takes the file and decides, from this machine's own
+// records, which shown messages were replies to the person's own message:
+// the same test as arrival.js repliesToOwn (a return binding for that sender,
+// made by this account, with a message id, and their message written after
+// it), with the same exclusions (an agent, an open line, a first message
+// after an invitation, first contact: no binding). The match is by session
+// id, which SessionStart and UserPromptSubmit share; without one, by the
+// project directory (turns.js key) and a start no older than START_ADOPT_MS.
+const START_ADOPT_MS = 15 * 60 * 1000;
+const BINDING_TTL_MS = 7 * 24 * 60 * 60 * 1000;   // = tools/drafts.js BINDING_TTL_MS
+const normHandle = (h) => String(h || '').trim().replace(/^@+/, '').toLowerCase();
+
+function takeFile(file) {
+  // Claimed by rename: two prompts racing cannot both adopt the same start.
+  const mine = `${file}.${process.pid}.taken`;
+  try { fs.renameSync(file, mine); } catch { return null; }
+  try { return JSON.parse(fs.readFileSync(mine, 'utf8')); } catch { return null; } finally { try { fs.unlinkSync(mine); } catch {} }
+}
+
+function adoptStart(dir, session, input, now = Date.now()) {
+  try {
+    if (!session) return;
+    const landing = path.join(dir, '..', 'landing');
+    let start = takeFile(path.join(landing, `start-${session}.json`));
+    if (!start) {
+      const dirs = [...new Set([process.env.CLAUDE_PROJECT_DIR, input && input.cwd].filter((d) => typeof d === 'string' && d.trim()))];
+      for (const d of dirs) {
+        const k = turnKey(d);
+        const got = k ? takeFile(path.join(landing, `start-dir-${k}.json`)) : null;
+        if (got && Number.isFinite(got.at) && now - got.at >= 0 && now - got.at <= START_ADOPT_MS) { start = got; break; }
+      }
+    }
+    if (!start || !Array.isArray(start.shown) || !Number.isFinite(start.at) || !(now - start.at <= LANDED_TTL_MS)) return;
+    const home = path.join(dir, '..');
+    let bindings = {};
+    let lines = {};
+    try { bindings = JSON.parse(fs.readFileSync(path.join(home, 'return-bindings.json'), 'utf8')) || {}; } catch {}
+    try { lines = JSON.parse(fs.readFileSync(path.join(home, 'lines.json'), 'utf8')) || {}; } catch {}
+    const file = landingFile(dir, session);
+    let open = readLanding(file);
+    for (const m of start.shown.slice(0, 10)) {
+      if (!m || !SAFE_ID.test(m.id) || !SAFE_HANDLE.test(m.from) || m.kind === 'agent' || m.invited === true) continue;
+      const from = normHandle(m.from);
+      const to = normHandle(m.to);
+      if (!to || Object.prototype.hasOwnProperty.call(lines, from)) continue;
+      const b = bindings && typeof bindings === 'object' ? bindings[from] : null;
+      if (!b || typeof b !== 'object' || !b.messageId || !Number.isFinite(b.sentAt)) continue;
+      if (b.from && normHandle(b.from) !== to) continue;
+      if (now - b.sentAt > BINDING_TTL_MS || !Number.isFinite(m.at) || !(m.at > b.sentAt)) continue;
+      open = open.filter((r) => r.id !== m.id);
+      open.push({ id: m.id, from, to, at: start.at, told: 0, ...(start.asDraft === true ? { asDraft: true } : {}) });
+    }
     writeLanding(file, open.slice(-10));
   } catch {}
 }
@@ -219,7 +280,9 @@ function landedReminders(dir, session, now = Date.now()) {
     const say = [];
     for (const r of open) {
       if (!(now - r.at <= LANDED_TTL_MS) || !(Number(r.told) < LANDED_TIMES) || landedOpened(dir, r)) continue;
-      say.push(`/vibe: @${r.from}'s answer ${r.id} arrived earlier in this session. If it has changed what you do here, then once that change is made, offer one note back: vibe_prepare, kind landed, reply_to ${r.id}, asked: false. One line, in the person's own terms, sent only if they choose. Otherwise ignore this.`);
+      say.push(r.asDraft === true
+        ? `/vibe: @${r.from}'s answer ${r.id} reached the person earlier in this session. If it has changed what you do here, then once that change is made (in this reply or a later one), end that reply by opening one note back as a draft: vibe_prepare, kind landed, reply_to ${r.id}, asked: false. One line, in the person's own terms. The draft is the offer and sends nothing; do not ask in prose whether they want one. Otherwise ignore this.`
+        : `/vibe: @${r.from}'s answer ${r.id} arrived earlier in this session. If it has changed what you do here, then once that change is made, offer one note back: vibe_prepare, kind landed, reply_to ${r.id}, asked: false. One line, in the person's own terms, sent only if they choose. Otherwise ignore this.`);
       const told = Number(r.told) + 1;
       if (told < LANDED_TIMES) keep.push({ ...r, told });
     }
@@ -367,4 +430,4 @@ function stuckNudge(input, dir) {
 }
 
 if (require.main === module) { try { main(); } catch { quiet(); } }
-module.exports = { personWrote, shownLine, headerLine, ago, landedReminders, openLanded, LANDED_TIMES, LANDED_TTL_MS };
+module.exports = { personWrote, shownLine, headerLine, ago, landedReminders, openLanded, adoptStart, LANDED_TIMES, LANDED_TTL_MS, START_ADOPT_MS };

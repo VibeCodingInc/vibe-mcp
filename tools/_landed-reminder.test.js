@@ -25,7 +25,8 @@ const hookMod = require('../hooks/arrival-hook.cjs');
 
 const MIN = 60 * 1000;
 const REPLY = 'msg_reply77';
-const SAYS = (from, id) => `/vibe: @${from}'s answer ${id} arrived earlier in this session.`;
+const SAYS = (from, id) => `/vibe: @${from}'s answer ${id} reached the person earlier in this session.`;
+const SAYS_OLD = (from, id) => `/vibe: @${from}'s answer ${id} arrived earlier in this session.`;
 
 function machine() {
   const vh = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-landing-'));
@@ -40,10 +41,10 @@ function spoolReply(env, { id = REPLY, binding = true, kind = 'human' } = {}) {
   return arrival.record([row], 'ada', { since: now - 2 * MIN, env, bindingFor: () => (binding ? mine : null) });
 }
 
-function hook(m, event, { prompt = 'carry on with the parser', session = 's1' } = {}) {
+function hook(m, event, { prompt = 'carry on with the parser', session = 's1', cwd = undefined, projectDir = '' } = {}) {
   const r = spawnSync(process.execPath, [HOOK], {
-    input: JSON.stringify({ hook_event_name: event, session_id: session, prompt }),
-    env: { ...process.env, VIBE_ARRIVALS_DIR: m.dir, VIBE_TURNS_DIR: path.join(m.vh, 'turns') },
+    input: JSON.stringify({ hook_event_name: event, session_id: session, prompt, ...(cwd ? { cwd } : {}) }),
+    env: { ...process.env, VIBE_ARRIVALS_DIR: m.dir, VIBE_TURNS_DIR: path.join(m.vh, 'turns'), CLAUDE_PROJECT_DIR: projectDir },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr);
@@ -56,7 +57,7 @@ const landingFile = (m, session = 's1') => path.join(m.vh, 'landing', `${session
 test('the server marks only a person\'s reply to the person\'s own message', () => {
   const m = machine();
   const [row] = spoolReply(m.env);
-  assert.deepEqual(row.landed, { id: REPLY, from: 'mira' });
+  assert.deepEqual(row.landed, { id: REPLY, from: 'mira', asDraft: true });
   const [none] = spoolReply(m.env, { id: 'msg_nobind1', binding: false });
   assert.equal(none.landed, undefined, 'no record of a message of theirs: first contact');
   const [agent] = spoolReply(m.env, { id: 'msg_agent1', kind: 'agent' });
@@ -65,7 +66,7 @@ test('the server marks only a person\'s reply to the person\'s own message', () 
   const now = Date.now();
   const mine = { project: 'x', firstLine: 'y', sentAt: now - 30 * MIN, messageId: 'msg_mine1' };
   const item = (over) => ({ id: 'msg_abc123', from: 'mira', text: 'auto', unread: 1, kind: null, building: '', context: mine, at: now, line: false, invited: false, note: null, sentAt: now - MIN, ...over });
-  assert.deepEqual(arrival.render(item({})).landed, { id: 'msg_abc123', from: 'mira' });
+  assert.deepEqual(arrival.render(item({})).landed, { id: 'msg_abc123', from: 'mira', asDraft: true });
   assert.equal(arrival.render(item({ line: true })).landed, undefined, 'an open line');
   assert.equal(arrival.render(item({ line: true, text: 'answer' })).landed, undefined);
   assert.equal(arrival.render(item({ invited: true })).landed, undefined, 'a first message after an invitation');
@@ -101,8 +102,8 @@ test('shown in a session: the next prompts there remind the agent, three times, 
   for (let i = 0; i < 3; i++) {
     const o = hook(m, 'UserPromptSubmit');
     assert.ok(reminded(o), `prompt ${i + 1} is reminded`);
-    assert.ok(ctx(o).includes(`vibe_prepare, kind landed, reply_to ${REPLY}, asked: false`));
-    assert.ok(ctx(o).includes('Otherwise ignore this.'));
+    assert.ok(ctx(o).includes(`opening one note back as a draft: vibe_prepare, kind landed, reply_to ${REPLY}, asked: false`));
+    assert.ok(ctx(o).includes('do not ask in prose whether they want one. Otherwise ignore this.'));
     assert.equal(o.systemMessage, undefined, 'the person is shown nothing');
     assert.equal(o.suppressOutput, true);
     seen.push(o);
@@ -154,7 +155,7 @@ test('stops once a note back for that reply was opened: landed.json or a landed 
 test('expires two hours after the reply was shown; quiet says nothing', () => {
   const m = machine();
   fs.mkdirSync(path.join(m.vh, 'landing'), { recursive: true });
-  const rec = (at) => JSON.stringify({ open: [{ id: REPLY, from: 'mira', to: 'ada', at, told: 0 }] });
+  const rec = (at) => JSON.stringify({ open: [{ id: REPLY, from: 'mira', to: 'ada', at, told: 0, asDraft: true }] });
   fs.writeFileSync(landingFile(m), rec(Date.now() - hookMod.LANDED_TTL_MS - 1000));
   assert.ok(!reminded(hook(m, 'UserPromptSubmit')), 'older than two hours');
   fs.writeFileSync(landingFile(m), rec(Date.now() - hookMod.LANDED_TTL_MS + 60 * 1000));
@@ -192,4 +193,142 @@ test('the server prunes a landing file a finished session left behind', () => {
   assert.equal(fs.existsSync(old), false);
   assert.equal(fs.existsSync(fresh), true);
   fs.rmSync(m.vh, { recursive: true, force: true });
+});
+
+test('landedAsDraft switched off (loopback only): the earlier reminder wording', () => {
+  const m = machine();
+  process.env.VIBE_NOTICE_OFF = 'landedAsDraft';
+  try {
+    const [row] = spoolReply(m.env);
+    assert.deepEqual(row.landed, { id: REPLY, from: 'mira' });
+    assert.ok(row.context.includes(`you can offer one note back (vibe_prepare, kind landed, reply_to ${REPLY}, asked: false).`));
+  } finally { delete process.env.VIBE_NOTICE_OFF; }
+  hook(m, 'UserPromptSubmit');
+  const o = hook(m, 'UserPromptSubmit');
+  assert.ok(ctx(o).includes(SAYS_OLD('mira', REPLY)) && !reminded(o));
+  fs.rmSync(m.vh, { recursive: true, force: true });
+});
+
+// ── replies shown at session start ──────────────────────────────────────────
+// Lab 2026-11-22: 15 of 26 replies that were used reached the person at the
+// start of a session, where no record was ever opened.
+
+const ssh = require('../session-start-hook.cjs');
+const LOCAL = { VIBE_API_URL: 'http://127.0.0.1:9' };
+
+function started(m, { messages, binding = true, lines = null, session = 's1', input = null, env = {} } = {}) {
+  const now = Date.now();
+  if (binding) fs.writeFileSync(path.join(m.vh, 'return-bindings.json'), JSON.stringify({ mira: { from: 'ada', project: 'agent loop', draftId: 'w1', sentAt: now - 20 * MIN, messageId: 'msg_mine9', firstLine: 'auto or any?' }, ...(typeof binding === 'object' ? binding : {}) }));
+  if (lines) fs.writeFileSync(path.join(m.vh, 'lines.json'), JSON.stringify(lines));
+  const rows = messages || [{ id: REPLY, from: 'mira', to: 'ada', text: 'auto is fine', createdAt: new Date(now - 5 * MIN).toISOString() }];
+  ssh.shownForLanding(ssh.normalizeMessages(rows), input || { session_id: session }, { ...LOCAL, VIBE_HOME: m.vh, ...env });
+}
+
+test('a reply shown at session start is reminded on the first prompt of that session, then twice more, never to the person', () => {
+  const m = machine();
+  started(m);
+  assert.ok(fs.existsSync(path.join(m.vh, 'landing', 'start-s1.json')), 'what was shown is written down');
+  const outs = [1, 2, 3].map(() => hook(m, 'UserPromptSubmit'));
+  for (const o of outs) {
+    assert.ok(reminded(o), JSON.stringify(o));
+    assert.equal(o.systemMessage, undefined, 'never in what the person sees');
+  }
+  assert.equal(fs.existsSync(path.join(m.vh, 'landing', 'start-s1.json')), false, 'the start file is taken once');
+  assert.deepEqual(hook(m, 'UserPromptSubmit'), { suppressOutput: true }, 'at most three times');
+  fs.rmSync(m.vh, { recursive: true, force: true });
+});
+
+test('session start: only replies to the person\'s own message, by this machine\'s records', () => {
+  const now = Date.now();
+  const at = (ago) => new Date(now - ago).toISOString();
+  for (const [name, opts] of [
+    ['first contact: no record of a message of theirs', { binding: false }],
+    ['written before the person\'s message', { messages: [{ id: REPLY, from: 'mira', to: 'ada', text: 'x', createdAt: at(30 * MIN) }] }],
+    ['no time on the message', { messages: [{ id: REPLY, from: 'mira', to: 'ada', text: 'x' }] }],
+    ['an agent', { messages: [{ id: REPLY, from: 'mira', to: 'ada', text: 'x', createdAt: at(MIN), actorKind: 'agent' }] }],
+    ['a first message after an invitation', { messages: [{ id: REPLY, from: 'mira', to: 'ada', text: 'x', createdAt: at(MIN), invitedByYou: true }] }],
+    ['an open line', { lines: { mira: { since: now - 3600000 } } }],
+    ['a binding made by another account', { binding: { mira: { from: 'zed', sentAt: now - 20 * MIN, messageId: 'msg_z' } } }],
+    ['a binding with no message id', { binding: { mira: { from: 'ada', sentAt: now - 20 * MIN, messageId: null } } }],
+  ]) {
+    const m = machine();
+    started(m, opts);
+    assert.ok(!reminded(hook(m, 'UserPromptSubmit')), name);
+    fs.rmSync(m.vh, { recursive: true, force: true });
+  }
+});
+
+test('session start: another session does not adopt it; a prompt nobody typed does not take it', () => {
+  const m = machine();
+  started(m);
+  assert.ok(!reminded(hook(m, 'UserPromptSubmit', { session: 's2' })), 'another session');
+  assert.ok(!reminded(hook(m, 'UserPromptSubmit', { prompt: '<task-notification>x</task-notification>' })));
+  assert.ok(!reminded(hook(m, 'PostToolUse')));
+  assert.ok(fs.existsSync(path.join(m.vh, 'landing', 'start-s1.json')), 'still there for the person\'s first prompt');
+  assert.ok(reminded(hook(m, 'UserPromptSubmit')));
+  fs.rmSync(m.vh, { recursive: true, force: true });
+});
+
+test('session start with no session id: matched by the project directory, within 15 minutes', () => {
+  const m = machine();
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-landing-proj-'));
+  started(m, { input: { cwd: proj } });
+  const key = require('../turns').key(proj);
+  const file = path.join(m.vh, 'landing', `start-dir-${key}.json`);
+  assert.ok(fs.existsSync(file));
+  assert.ok(!reminded(hook(m, 'UserPromptSubmit', { cwd: fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-landing-other-')) })), 'another project');
+  assert.ok(reminded(hook(m, 'UserPromptSubmit', { cwd: proj })), 'the same project, by the input cwd');
+  assert.equal(fs.existsSync(file), false);
+  // CLAUDE_PROJECT_DIR matches as well; a start older than 15 minutes is not adopted.
+  const m2 = machine();
+  started(m2, { input: { cwd: proj } });
+  const f2 = path.join(m2.vh, 'landing', `start-dir-${key}.json`);
+  const old = JSON.parse(fs.readFileSync(f2, 'utf8'));
+  fs.writeFileSync(f2, JSON.stringify({ ...old, at: Date.now() - hookMod.START_ADOPT_MS - 1000 }));
+  assert.ok(!reminded(hook(m2, 'UserPromptSubmit', { projectDir: proj })), 'too old to be this session\'s start');
+  const m3 = machine();
+  started(m3, { input: { cwd: proj } });
+  assert.ok(reminded(hook(m3, 'UserPromptSubmit', { projectDir: proj })));
+  for (const x of [m, m2, m3]) fs.rmSync(x.vh, { recursive: true, force: true });
+  fs.rmSync(proj, { recursive: true, force: true });
+});
+
+test('session start: the two-hour limit runs on the real clock from when it was shown; a note back stops it', () => {
+  const m = machine();
+  started(m);
+  const f = path.join(m.vh, 'landing', 'start-s1.json');
+  const body = JSON.parse(fs.readFileSync(f, 'utf8'));
+  fs.writeFileSync(f, JSON.stringify({ ...body, at: Date.now() - hookMod.LANDED_TTL_MS - 1000 }));
+  // A lab display clock days ahead changes nothing here.
+  const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 's1', prompt: 'go on' }), env: { ...process.env, VIBE_ARRIVALS_DIR: m.dir, VIBE_TURNS_DIR: path.join(m.vh, 'turns'), CLAUDE_PROJECT_DIR: '', VIBE_LAB_CLOCK_OFFSET_HOURS: '-72' }, encoding: 'utf8' });
+  assert.ok(!reminded(JSON.parse(r.stdout)), 'shown more than two hours ago');
+  const m2 = machine();
+  started(m2);
+  fs.writeFileSync(path.join(m2.vh, 'landed.json'), JSON.stringify({ [`ada>mira#${REPLY}`]: { draft: 'w1', at: Date.now() } }));
+  assert.ok(!reminded(hook(m2, 'UserPromptSubmit')), 'a note back for it was already opened');
+  for (const x of [m, m2]) fs.rmSync(x.vh, { recursive: true, force: true });
+});
+
+test('session start: switched off (loopback only), nothing is written; what crosses is ids and handles only', () => {
+  const m = machine();
+  started(m, { env: { VIBE_NOTICE_OFF: 'landedReminder' } });
+  assert.equal(fs.existsSync(path.join(m.vh, 'landing', 'start-s1.json')), false);
+  started(m, { env: { VIBE_NOTICE_OFF: 'itLanded' } });
+  assert.equal(fs.existsSync(path.join(m.vh, 'landing', 'start-s1.json')), false);
+  started(m);
+  const body = JSON.parse(fs.readFileSync(path.join(m.vh, 'landing', 'start-s1.json'), 'utf8'));
+  assert.deepEqual(Object.keys(body.shown[0]).sort(), ['at', 'from', 'id', 'to']);
+  assert.ok(!JSON.stringify(body).includes('auto is fine'), 'no message text on disk');
+  fs.rmSync(m.vh, { recursive: true, force: true });
+});
+
+test('normalizeMessages keeps who it was to, an agent\'s mark and the invitation mark', () => {
+  const [a] = ssh.normalizeMessages([{ id: 'msg_1234', from: 'mira', to: 'Ada', text: 'x', actorKind: 'agent', invitedByYou: true }]);
+  assert.equal(a.to, 'ada');
+  assert.equal(a.kind, 'agent');
+  assert.equal(a.invited, true);
+  const [b] = ssh.normalizeMessages([{ id: 'msg_1234', from: 'mira', text: 'x' }]);
+  assert.equal(b.to, null);
+  assert.equal(b.kind, null);
+  assert.equal(b.invited, false);
 });
