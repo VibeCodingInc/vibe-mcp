@@ -9,11 +9,13 @@
  * counts, even "no, don't send". Where the host can show a box itself (MCP
  * elicitation), vibe_send also asks the person directly: a box whose first
  * line is fixed /vibe wording (recipient, length, whether all of it is
- * shown), then the text, each line quoted with "> ", and Accept / Decline.
+ * shown), then the text, each line quoted with "> ", then one required
+ * choice (Not now / Send, nothing chosen) and Accept / Decline.
  * The box shows the start of the text, not the reply target and not exact
  * spacing, so the preview is where the person reads the message:
  *   - wherever person turns are recorded, a send needs the turn check (a
- *     typed message after the preview) AND Accept, for every draft;
+ *     typed message after the preview) AND Send chosen and accepted in the
+ *     box, for every draft;
  *   - where the turn check is unavailable (a host that is not Claude Code, or
  *     Claude Code with no turn ever recorded because the hook is not
  *     installed), the box alone decides.
@@ -50,8 +52,52 @@ const WRAP_COLUMNS = 72;
 const VISIBLE_LINES = 3;
 /** A line break inside the text, as shown in the box: it does not use up a line. Display only. */
 const NEWLINE_MARK = ' ↵ ';
-/** The form asked for: no fields, so the box is Accept / Decline. */
-const SCHEMA = Object.freeze({ type: 'object', properties: Object.freeze({}) });
+/**
+ * The form asked for: one required choice with no default, "Not now" first.
+ * 0.9.23 asked for no fields, so the box was Accept / Decline with Accept
+ * selected, and a stray Enter (one still queued after the person typed "send")
+ * accepted it before they saw it. With a required field and no default,
+ * Claude Code shows "Your choice: not set" and refuses Accept until a choice
+ * is made (2.1.330, tested by hand): Enter alone cannot send.
+ *
+ * Labels use `enum` + `enumNames`, the LegacyTitledEnumSchema of the
+ * 2025-11-25 and 2026-07-28 schemas (marked "Use TitledSingleSelectEnumSchema
+ * instead", still in the EnumSchema union in both). It is the form Claude
+ * Code was seen to render with labels; `oneOf` + `const`/`title` is not added
+ * beside it, since an object with both matches neither schema member exactly.
+ * A host that ignores `enumNames` still shows the two values.
+ */
+const CHOICE_FIELD = 'choice';
+const CHOICE_SEND = 'send';
+const CHOICE_NOT_NOW = 'not_now';
+const SCHEMA = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({
+    [CHOICE_FIELD]: Object.freeze({
+      type: 'string',
+      title: 'Your choice',
+      enum: Object.freeze([CHOICE_NOT_NOW, CHOICE_SEND]),
+      enumNames: Object.freeze(['Not now', 'Send']),
+    }),
+  }),
+  required: Object.freeze([CHOICE_FIELD]),
+});
+
+/**
+ * The person's answer, from an elicitation result: 'accept' only for action
+ * "accept" whose content chose Send (the exact string, an own property);
+ * 'decline' for an explicit decline or a choice of Not now; else 'none'.
+ */
+function answerOf(result) {
+  if (!result || typeof result !== 'object') return 'none';
+  if (result.action === 'decline') return 'decline';
+  if (result.action !== 'accept') return 'none';
+  const c = result.content;
+  if (!c || typeof c !== 'object' || Array.isArray(c) || !Object.prototype.hasOwnProperty.call(c, CHOICE_FIELD)) return 'none';
+  if (c[CHOICE_FIELD] === CHOICE_SEND) return 'accept';
+  if (c[CHOICE_FIELD] === CHOICE_NOT_NOW) return 'decline';
+  return 'none';
+}
 /** How long a box may stay open before the send is given up. */
 const TIMEOUT_MS = 5 * 60 * 1000;
 /** The key of the one input request a stateless (2026-07-28) vibe_send asks for. */
@@ -220,7 +266,7 @@ function isOpen() { return openNow; }
  * Open the box and wait. `box.request(params, { signal })` sends the request
  * to the client and resolves with its result. Returns 'accept', 'decline',
  * 'busy', or 'none' (cancel, error, client refusal, timeout, the call itself
- * cancelled). Only an explicit action "accept" is yes.
+ * cancelled). Only action "accept" with the choice Send is yes (answerOf).
  */
 async function ask(box, text, { timeoutMs = TIMEOUT_MS, signal = null } = {}) {
   if (openNow) return 'busy';
@@ -239,10 +285,7 @@ async function ask(box, text, { timeoutMs = TIMEOUT_MS, signal = null } = {}) {
       result = await Promise.race([Promise.resolve().then(() => box.request(request(text, box.protocolVersion), { signal: ctl.signal })), stop]);
     } catch { return 'none'; }
     if (result && result.stopped) { ctl.abort(); return 'none'; }
-    const action = result && typeof result === 'object' ? result.action : undefined;
-    if (action === 'accept') return 'accept';
-    if (action === 'decline') return 'decline';
-    return 'none';
+    return answerOf(result);
   } finally {
     if (timer) clearTimeout(timer);
     if (signal && onAbort) signal.removeEventListener('abort', onAbort);
@@ -350,6 +393,7 @@ function labAllowsHook(env = process.env) {
 
 module.exports = {
   WRAP_COLUMNS, VISIBLE_LINES, NEWLINE_MARK, SCHEMA, TIMEOUT_MS, INPUT_KEY, ELICITATION_VERSIONS,
+  CHOICE_FIELD, CHOICE_SEND, CHOICE_NOT_NOW, answerOf,
   declaresForm, noteClient, available, clientState,
   displayWidth, wrapLine, textLines, question, message, fits, request, ask, isOpen,
   settingsAnswerBox, settingsFiles, answeringHook, labAllowsHook, managedSettingsFile,

@@ -77,7 +77,7 @@ test('the gate\'s case end to end: a long Keep, stateless box accepted, with vib
     const first = (await wait(2)).result;
     assert.equal(first.resultType, 'input_required');
     assert.match(first.inputRequests.send_confirmation.params.message, /^Keep for @dalia\? \(\d+ chars, start only\)\n> Heads up/);
-    send({ id: 4, method: 'tools/call', params: { name: 'vibe_send', arguments: { id, rev }, inputResponses: { send_confirmation: { action: 'accept', content: {} } }, requestState: first.requestState, _meta: meta } },
+    send({ id: 4, method: 'tools/call', params: { name: 'vibe_send', arguments: { id, rev }, inputResponses: { send_confirmation: { action: 'accept', content: { choice: 'send' } } }, requestState: first.requestState, _meta: meta } },
       { id: 5, method: 'tools/call', params: { name: 'vibe_thread', arguments: { handle: 'ines' }, _meta: meta } });
     const done = (await wait(4)).result.content[0].text;
     assert.match(done, /^Held for @dalia\. \/vibe created the invitation\./, done);

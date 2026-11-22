@@ -22,9 +22,9 @@
  *  - Shown, then a typed turn: Send goes only if the person has had a turn (a
  *    prompt, recorded by the arrival hook) after the rev was last shown, so an
  *    agent cannot show and send in one turn (turns.js). Where the host can
- *    show a box (confirm-box.js), the person must ALSO press Accept in a box
- *    /vibe opens, bound to the id, rev and text in it: a typed turn AND
- *    Accept wherever turns are recorded; the box alone where they are not.
+ *    show a box (confirm-box.js), the person must ALSO choose Send and accept
+ *    in a box /vibe opens, bound to the id, rev and text in it: a typed turn
+ *    AND the box wherever turns are recorded; the box alone where they are not.
  *  - Exactly once: Send claims the draft under a whole-file lock, sends with
  *    an idempotency key derived from the exact text, and finalizes against
  *    the latest stored state. A draft whose delivery could not be confirmed
@@ -650,11 +650,12 @@ function claimDraft(d, rev) {
 
 // ── the Send box (confirm-box.js) ─────────────────────────────────────────────
 // Wherever person turns are recorded (Claude Code with the arrival hook), a
-// send needs BOTH the turn check (a typed message after the preview) AND an
-// Accept in a box /vibe opens, for every draft, whatever its length. Where
+// send needs BOTH the turn check (a typed message after the preview) AND Send
+// chosen and accepted in a box /vibe opens, for every draft, whatever its
+// length (Enter alone cannot send: confirm-box.js SCHEMA). Where
 // turns cannot be recorded, the box alone decides. One box at a time; a draft
 // whose box was not accepted needs showing again and a typed turn; after any
-// answer but Accept, no box for any draft until the person types again.
+// answer but accept-with-Send, no box for any draft until the person types again.
 // Tool results never repeat the box, its answer, or the rev; every outcome
 // after the box but a send reads the same, except: another box open, a hook
 // found, the account changed.
@@ -788,7 +789,7 @@ function blockedAfterNonAccept(drafts, now = Date.now()) {
 /**
  * The person's answer to the box, under the lock. Only the box that is open
  * for this draft is answered (an answer naming another is ignored and sends
- * nothing); it is closed whatever the answer. Only an Accept within the
+ * nothing); it is closed whatever the answer. Only an accept with Send within the
  * timeout, by the same account, of the same rev and exact text, with the call
  * not withdrawn and the draft still sendable, claims the draft. Everything
  * else but a changed account reads, and is recorded, as not accepted, so the
@@ -874,9 +875,11 @@ async function sendStateless(id, rev, me, ctx) {
       const d = loadDrafts().find(x => x.id === id);
       return notAccepted(d ? d.to : 'them');
     }
-    // A hook that appeared while the box was open: the box is closed unanswered.
-    const hook = r && typeof r === 'object' && r.action === 'accept' ? hookRefusal() : null;
-    const closed = closeBox(id, state.n, !hook && r && typeof r === 'object' && r.action === 'accept' ? 'accept' : 'none', { signal: ctx.signal || null, rev });
+    // Only accept with the choice Send is yes (confirm-box.js answerOf). A hook
+    // that appeared while the box was open: the box is closed unanswered.
+    const answer = confirmBox.answerOf(r);
+    const hook = answer === 'accept' ? hookRefusal() : null;
+    const closed = closeBox(id, state.n, !hook && answer === 'accept' ? 'accept' : 'none', { signal: ctx.signal || null, rev });
     if (hook && !closed.display) return hook;
     return afterClose(closed);
   }

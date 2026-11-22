@@ -93,7 +93,7 @@ test('2025-11-25: the box opens with the fixed first line and the text; Decline 
     s.send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d } });
     const req = await s.waitFor((r) => r.method === 'elicitation/create');
     assert.equal(req.params.message, 'Send to @linus? (13 chars, all shown)\n> over the wire');
-    assert.deepEqual(req.params.requestedSchema, { type: 'object', properties: {} });
+    assert.deepEqual(req.params.requestedSchema, { type: 'object', properties: { choice: { type: 'string', title: 'Your choice', enum: ['not_now', 'send'], enumNames: ['Not now', 'Send'] } }, required: ['choice'] });
     assert.equal(req.params.mode, 'form');
     s.send({ id: 4, method: 'tools/list' });
     await s.waitFor((r) => r.id === 4);   // answered while the box is open
@@ -109,7 +109,7 @@ test('2025-11-25: Accept goes through to delivery', async () => {
     const d = await legacyReady(s, 'accepted and delivered');
     s.send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d } });
     const req = await s.waitFor((r) => r.method === 'elicitation/create');
-    s.send({ id: req.id, result: { action: 'accept', content: {} } });
+    s.send({ id: req.id, result: { action: 'accept', content: { choice: 'send' } } });
     const res = await s.waitFor((r) => r.id === 3);
     assert.doesNotMatch(textOf(res), /^Not sent/);
     assert.equal(a.sent('accepted and delivered'), true);
@@ -122,7 +122,7 @@ test('2025-11-25: a response with "error": null and a result is a normal result'
     const d = await legacyReady(s, 'error null result');
     s.send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d } });
     const req = await s.waitFor((r) => r.method === 'elicitation/create');
-    s.send({ id: req.id, error: null, result: { action: 'accept' } });
+    s.send({ id: req.id, error: null, result: { action: 'accept', content: { choice: 'send' } } });
     await s.waitFor((r) => r.id === 3);
     assert.equal(a.sent('error null result'), true);
   } finally { s.close(); await a.close(); }
@@ -137,7 +137,7 @@ test('2025-11-25: the call is cancelled, then Accept arrives: nothing is sent, t
     s.send({ method: 'notifications/cancelled', params: { requestId: 3, reason: 'user pressed Esc' } });
     const withdrawn = await s.waitFor((r) => r.method === 'notifications/cancelled' && r.params.requestId === req.id);
     assert.ok(withdrawn);
-    s.send({ id: req.id, result: { action: 'accept' } });
+    s.send({ id: req.id, result: { action: 'accept', content: { choice: 'send' } } });
     await sleep(800);
     assert.equal(s.rows.some((r) => r.id === 3), false, 'no response to a cancelled call');
     assert.equal(a.sent('cancelled then accepted'), false);
@@ -207,7 +207,7 @@ test('2026-07-28: the call returns input_required; the retry with Accept and the
     assert.equal(first.content, undefined, 'nothing for the model in the input request');
     assert.equal(s.rows.some((r) => r.method === 'elicitation/create'), false, 'no server-to-client request on the stateless path');
     assert.equal(a.sent('stateless and sent'), false);
-    s.send({ id: 4, method: 'tools/call', params: { name: 'vibe_send', arguments: d, inputResponses: { send_confirmation: { action: 'accept', content: {} } }, requestState: first.requestState, _meta: meta(caps) } });
+    s.send({ id: 4, method: 'tools/call', params: { name: 'vibe_send', arguments: d, inputResponses: { send_confirmation: { action: 'accept', content: { choice: 'send' } } }, requestState: first.requestState, _meta: meta(caps) } });
     const done = (await s.waitFor((r) => r.id === 4)).result;
     assert.equal(done.resultType, 'complete');
     assert.doesNotMatch(done.content[0].text, /^Not sent/);
@@ -265,3 +265,51 @@ test('2026-07-28: the host is read from each request\'s _meta clientInfo (no dis
     assert.equal(a.sent('one agent turn only'), false);
   } finally { s.close(); await a.close(); }
 });
+
+// ── a choice must be made (0.9.24): only accept with choice "send" sends ─────
+
+const SCHEMA_SENT = { type: 'object', properties: { choice: { type: 'string', title: 'Your choice', enum: ['not_now', 'send'], enumNames: ['Not now', 'Send'] } }, required: ['choice'] };
+const NOT_SENDS = [
+  ['accept with Not now', { action: 'accept', content: { choice: 'not_now' } }],
+  ['accept with empty content (0.9.23\'s box)', { action: 'accept', content: {} }],
+  ['accept with no content', { action: 'accept' }],
+  ['accept with choice "SEND"', { action: 'accept', content: { choice: 'SEND' } }],
+  ['cancel', { action: 'cancel' }],
+];
+
+for (const [name, answer] of NOT_SENDS) {
+  test(`2025-11-25 over stdio: ${name} is not sent and is the not-accepted result`, async () => {
+    const a = await api(); const s = server(a.url);
+    try {
+      const d = await legacyReady(s, 'choose first legacy');
+      s.send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d } });
+      const req = await s.waitFor((r) => r.method === 'elicitation/create');
+      assert.deepEqual(req.params.requestedSchema, SCHEMA_SENT);
+      s.send({ id: req.id, result: answer });
+      assert.equal(textOf(await s.waitFor((r) => r.id === 3)), NOT_ACCEPTED);
+      assert.equal(a.sent('choose first legacy'), false);
+      assert.equal(s.draftStatus(d.id), 'previewed');
+    } finally { s.close(); await a.close(); }
+  });
+
+  test(`2026-07-28 over stdio: ${name} is not sent and is the not-accepted result`, async () => {
+    const a = await api(); const s = server(a.url);
+    try {
+      const caps = { elicitation: { form: {} } };
+      s.send({ id: 1, method: 'server/discover', params: { _meta: meta(caps), clientInfo: { name: 'claude-code', version: 'test' } } });
+      await s.waitFor((r) => r.id === 1);
+      s.send({ id: 2, method: 'tools/call', params: { name: 'vibe_prepare', arguments: { handle: 'linus', message: 'choose first stateless' }, _meta: meta(caps) } });
+      const d = draftOf(await s.waitFor((r) => r.id === 2));
+      await s.personTurn();
+      s.send({ id: 3, method: 'tools/call', params: { name: 'vibe_send', arguments: d, _meta: meta(caps) } });
+      const first = (await s.waitFor((r) => r.id === 3)).result;
+      assert.equal(first.resultType, 'input_required');
+      assert.deepEqual(first.inputRequests.send_confirmation.params.requestedSchema, SCHEMA_SENT);
+      s.send({ id: 4, method: 'tools/call', params: { name: 'vibe_send', arguments: d, inputResponses: { send_confirmation: answer }, requestState: first.requestState, _meta: meta(caps) } });
+      const done = (await s.waitFor((r) => r.id === 4)).result;
+      assert.equal(done.content[0].text, NOT_ACCEPTED);
+      assert.equal(a.sent('choose first stateless'), false);
+      assert.equal(s.draftStatus(d.id), 'previewed');
+    } finally { s.close(); await a.close(); }
+  });
+}

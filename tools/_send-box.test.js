@@ -66,7 +66,8 @@ function fakeBox(answer, { protocolVersion = '2025-11-25', timeoutMs } = {}) {
   if (timeoutMs) box.timeoutMs = timeoutMs;
   return box;
 }
-const accept = { action: 'accept', content: {} };
+/** The person chose Send and accepted: the only answer that sends. */
+const accept = { action: 'accept', content: { choice: 'send' } };
 const NOT_ACCEPTED = 'Not sent. It is still a draft for @linus. Only if they ask again: show it with vibe_prepare and wait for them to say send.';
 /** A message too long for the box to show whole: the turn check applies on top of the box. */
 const LONG = (tag) => `${tag}: ${'this one is long enough that the box shows only its start, so the preview matters. '.repeat(2).trim()}`;
@@ -107,7 +108,7 @@ test('a typed turn, then Accept: sends exactly the text in the box', async () =>
     assert.equal(box.asked.length, 1, 'one box');
     const { params } = box.asked[0];
     assert.equal(params.message, 'Send to @linus? (24 chars, all shown)\n> cloud owns placement now');
-    assert.deepEqual(params.requestedSchema, { type: 'object', properties: {} });
+    assert.deepEqual(params.requestedSchema, { type: 'object', properties: { choice: { type: 'string', title: 'Your choice', enum: ['not_now', 'send'], enumNames: ['Not now', 'Send'] } }, required: ['choice'] });
     assert.equal(params.mode, 'form', '2025-11-25 names the form mode');
     assert.equal(r.data.sent, true);
     assert.equal(r.data.turn_check, 'box');
@@ -582,7 +583,7 @@ test('stateless: the first call returns the box as an input request; the retry w
     assert.ok(first.inputRequired, 'input required');
     const req = first.inputRequired.inputRequests[confirmBox.INPUT_KEY];
     assert.equal(req.method, 'elicitation/create');
-    assert.deepEqual(req.params, { message: 'Send to @linus? (23 chars, all shown)\n> over the stateless path', requestedSchema: { type: 'object', properties: {} }, mode: 'form' });
+    assert.deepEqual(req.params, { message: 'Send to @linus? (23 chars, all shown)\n> over the stateless path', requestedSchema: { type: 'object', properties: { choice: { type: 'string', title: 'Your choice', enum: ['not_now', 'send'], enumNames: ['Not now', 'Send'] } }, required: ['choice'] }, mode: 'form' });
     assert.equal(typeof first.inputRequired.requestState, 'string');
     assert.equal(sends.length, 0, 'nothing sent by the first call');
     const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(first, accept));
@@ -1011,5 +1012,124 @@ test('another project is not held up by this project\'s outstanding box', async 
       assert.equal(r.data.sent, true, 'not "another box is open"');
       assert.deepEqual(sends.map((x) => x.body), ['project two']);
     } finally { process.env.CLAUDE_PROJECT_DIR = before; fs.rmSync(SECOND, { recursive: true, force: true }); }
+  });
+});
+
+// ── a choice must be made (0.9.24) ───────────────────────────────────────────
+// 0.9.23's box had no fields, so Accept was pre-selected and a stray Enter sent.
+// Now only action "accept" with content.choice === "send" sends; every other
+// answer is the standard not-accepted result, on both protocol paths.
+
+const NOT_SENDS = [
+  ['accept with Not now', { action: 'accept', content: { choice: 'not_now' } }],
+  ['accept with empty content (what 0.9.23\'s box returned)', { action: 'accept', content: {} }],
+  ['accept with no content', { action: 'accept' }],
+  ['accept with choice "SEND"', { action: 'accept', content: { choice: 'SEND' } }],
+  ['accept with choice " send"', { action: 'accept', content: { choice: ' send' } }],
+  ['accept with choice true', { action: 'accept', content: { choice: true } }],
+  ['accept with another field', { action: 'accept', content: { confirm: 'send' } }],
+  ['accept with content an array', { action: 'accept', content: ['send'] }],
+  ['accept with choice inherited, not own', { action: 'accept', content: Object.create({ choice: 'send' }) }],
+  ['decline', { action: 'decline' }],
+  ['decline carrying choice send', { action: 'decline', content: { choice: 'send' } }],
+  ['cancel', { action: 'cancel' }],
+  ['cancel carrying choice send', { action: 'cancel', content: { choice: 'send' } }],
+];
+
+test('the schema as sent: one required choice, Not now first, labelled, no default', () => {
+  const s = confirmBox.SCHEMA;
+  assert.deepEqual(Object.keys(s.properties), ['choice']);
+  assert.deepEqual(s.required, ['choice']);
+  const f = s.properties.choice;
+  assert.equal(f.type, 'string');
+  assert.equal(f.title, 'Your choice');
+  assert.deepEqual(f.enum, ['not_now', 'send'], 'Not now first');
+  assert.deepEqual(f.enumNames, ['Not now', 'Send']);
+  assert.equal('default' in f, false, 'no default: nothing is chosen until the person chooses');
+  assert.equal(JSON.stringify(s).includes('default'), false);
+  assert.deepEqual(confirmBox.request('x', '2025-11-25').requestedSchema, s);
+  assert.deepEqual(confirmBox.request('x', '2026-07-28').requestedSchema, s);
+});
+
+test('answerOf: only accept with choice "send" is yes; Not now and decline are a decline; the rest none', () => {
+  assert.equal(confirmBox.answerOf({ action: 'accept', content: { choice: 'send' } }), 'accept');
+  assert.equal(confirmBox.answerOf({ action: 'accept', content: { choice: 'not_now' } }), 'decline');
+  assert.equal(confirmBox.answerOf({ action: 'decline' }), 'decline');
+  for (const [name, r] of NOT_SENDS) assert.notEqual(confirmBox.answerOf(r), 'accept', name);
+  for (const r of [null, undefined, 'accept', 1, [], { action: 'ACCEPT', content: { choice: 'send' } }]) assert.equal(confirmBox.answerOf(r), 'none');
+});
+
+test('2025-11-25 in process: every answer but accept-with-Send is not sent and recorded as a non-accept', async () => {
+  await withWire(async (sends) => {
+    for (const [name, answer] of NOT_SENDS) {
+      const p = await shown({ message: `not this one ${Math.random()}` });
+      const box = fakeBox(answer);
+      const r = await sendIn(p, box);
+      assert.equal(box.asked.length, 1, `${name}: the box opened`);
+      assert.equal(r.display, NOT_ACCEPTED, name);
+      assert.equal(r.data.sent, false, name);
+      assert.equal(r.data.reason, 'box_not_accepted', name);
+      const d = drafts.loadDrafts().find((x) => x.id === p.data.draft.id);
+      assert.equal(d.status, 'previewed', name);
+      assert.ok(Number.isFinite(d.boxRefusedAt), `${name}: recorded as a non-accept`);
+      assert.equal(d.box, undefined, `${name}: the box is closed`);
+    }
+    assert.equal(sends.length, 0);
+  });
+});
+
+test('2025-11-25 in process: a box that times out (no answer) is not sent', async () => {
+  await withWire(async (sends) => {
+    const p = await shown({ message: 'nobody answers' });
+    const box = fakeBox(() => new Promise(() => {}), { timeoutMs: 50 });
+    const r = await sendIn(p, box);
+    assert.equal(r.display, NOT_ACCEPTED);
+    assert.ok(Number.isFinite(drafts.loadDrafts().find((x) => x.id === p.data.draft.id).boxRefusedAt));
+    assert.equal(sends.length, 0);
+  });
+});
+
+test('2025-11-25 in process: a client error is not sent', async () => {
+  await withWire(async (sends) => {
+    const p = await shown({ message: 'client failed' });
+    const box = fakeBox(() => { throw new Error('boom'); });
+    const r = await sendIn(p, box);
+    assert.equal(r.display, NOT_ACCEPTED);
+    assert.equal(sends.length, 0);
+  });
+});
+
+test('after accept-with-Not-now, the next box needs vibe_prepare again and a typed turn, like any non-accept', async () => {
+  await withWire(async (sends) => {
+    const p = await shown({ message: 'not now please' });
+    const r1 = await sendIn(p, fakeBox({ action: 'accept', content: { choice: 'not_now' } }));
+    assert.equal(r1.display, NOT_ACCEPTED);
+    const box2 = fakeBox(accept);
+    const r2 = await sendIn(p, box2);
+    assert.equal(box2.asked.length, 0, 'no new box for that draft until it is shown again');
+    assert.equal(r2.data.sent, false);
+    const other = await prepare({ message: 'a different draft' });
+    const box3 = fakeBox(accept);
+    await sendIn(other, box3);
+    assert.equal(box3.asked.length, 0, 'no box for another draft until the person types again');
+    assert.equal(sends.length, 0);
+  });
+});
+
+test('stateless: every answer but accept-with-Send is not sent and recorded as a non-accept', async () => {
+  await withWire(async (sends) => {
+    for (const [name, answer] of NOT_SENDS) {
+      const p = await shown({ message: `stateless not this ${Math.random()}` });
+      const first = await sendIn(p, null, stateless);
+      assert.ok(first.inputRequired, name);
+      const r = await drafts.vibe_send.handler({ id: p.data.draft.id, rev: p.data.draft.rev }, retryWith(first, answer));
+      assert.equal(r.display, NOT_ACCEPTED, name);
+      assert.equal(r.data.reason, 'box_not_accepted', name);
+      const d = drafts.loadDrafts().find((x) => x.id === p.data.draft.id);
+      assert.equal(d.status, 'previewed', name);
+      assert.ok(Number.isFinite(d.boxRefusedAt), `${name}: recorded as a non-accept`);
+      assert.equal(d.box, undefined, `${name}: the request is spent`);
+    }
+    assert.equal(sends.length, 0);
   });
 });
