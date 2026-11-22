@@ -5,12 +5,18 @@
 // When the /vibe server under test opens a confirmation box (MCP
 // elicitation), Claude Code runs this as an Elicitation hook instead of
 // showing it. It asks the same person-player the population runner uses
-// (lab/player.mjs: `claude -p`, or --human-cmd) whether this simulated person
-// presses Accept or Decline, from the context the runner wrote before the
-// turn (persona, what they last typed, what was on their screen earlier), and
-// prints the hook's answer. Any error, unreadable answer or timeout is a
-// Decline. Each box and its answer is appended to the person's box log, which
-// the runner folds into the transcript and summary.
+// (lab/player.mjs: `claude -p`, or --human-cmd) what this simulated person
+// does with the box as the host draws it (a required choice, nothing chosen):
+// choose Send and Accept, choose Not now and Accept, or Decline. It decides
+// from the context the runner wrote before the turn (persona, what they last
+// typed, what was on their screen earlier), and prints the hook's answer:
+//   Send     {action: "accept", content: {choice: "send"}}
+//   Not now  {action: "accept", content: {choice: "not_now"}}
+//   Decline  {action: "decline", content: {}}
+// Any error, unreadable answer or timeout is a Decline. Each box and its
+// answer is appended to the person's box log (`choice`, the `action` sent,
+// and `decision`: "accept" only for Send, else "decline"), which the runner
+// folds into the transcript and summary.
 //
 // The /vibe server refuses to open a box while a hook like this is configured,
 // unless VIBE_LAB_BOX_HOOK=1 AND its API is on this machine (confirm-box.js).
@@ -18,7 +24,7 @@
 //   env VIBE_LAB_BOX_CONTEXT  the context file (JSON) the runner rewrites per turn
 //   env VIBE_LAB_BOX_LOG      the per-person log (JSON lines) this appends to
 //   stdin                     Claude Code's hook input (its `message` is the box text)
-//   stdout                    {"hookSpecificOutput":{"hookEventName":"Elicitation","action":...,"content":{}}}
+//   stdout                    {"hookSpecificOutput":{"hookEventName":"Elicitation","action":...,"content":{...}}}
 
 const fs = require('fs');
 const path = require('path');
@@ -26,16 +32,29 @@ const { pathToFileURL } = require('url');
 
 const DEADLINE_MS = Number(process.env.VIBE_LAB_BOX_DEADLINE_MS) || 220000;
 
+/**
+ * The hook's answer for what the person did: Send and Not now are both an
+ * Accept carrying the choice; anything else is a Decline. Defined here, not
+ * in player.mjs, so the hook still answers when that import fails.
+ */
+function answerFor(choice) {
+  if (choice === 'send') return { action: 'accept', content: { choice: 'send' } };
+  if (choice === 'not_now') return { action: 'accept', content: { choice: 'not_now' } };
+  return { action: 'decline', content: {} };
+}
+
 let finished = false;
-function finish({ message = null, decision = 'decline', why = null, error = null }) {
+function finish({ message = null, choice = 'decline', why = null, error = null }) {
   if (finished) return;
   finished = true;
-  const action = decision === 'accept' ? 'accept' : 'decline';
+  const c = choice === 'send' || choice === 'not_now' ? choice : 'decline';
+  const answer = answerFor(c);
   const log = process.env.VIBE_LAB_BOX_LOG;
   if (log) {
-    try { fs.appendFileSync(log, JSON.stringify({ at: Date.now(), message, decision: action, why, ...(error ? { error } : {}) }) + '\n', { mode: 0o600 }); } catch {}
+    const entry = { at: Date.now(), message, choice: c, action: answer.action, decision: c === 'send' ? 'accept' : 'decline', why, ...(error ? { error } : {}) };
+    try { fs.appendFileSync(log, JSON.stringify(entry) + '\n', { mode: 0o600 }); } catch {}
   }
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'Elicitation', action, content: {} } }) + '\n');
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'Elicitation', ...answer } }) + '\n');
   process.exit(0);
 }
 
@@ -76,7 +95,7 @@ async function main() {
     if (r.isError) return finish({ message, error: r.timedOut ? 'player timed out' : 'player failed' });
     const got = player.parseBox(r.raw);
     if (!got) return finish({ message, error: 'player answer unreadable' });
-    return finish({ message, decision: got.press, why: got.why });
+    return finish({ message, choice: got.choice, why: got.why });
   } catch (e) {
     return finish({ message, error: `hook error: ${e && e.message ? e.message : e}`.slice(0, 300) });
   }
@@ -84,4 +103,4 @@ async function main() {
 
 if (require.main === module) main();
 
-module.exports = { boxMessage };
+module.exports = { boxMessage, answerFor };
