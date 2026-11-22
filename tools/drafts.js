@@ -568,7 +568,7 @@ async function discardHandler(args) {
 
 const sendDefinition = {
   name: 'vibe_send',
-  description: "Send a prepared draft: pass id AND rev from the preview vibe_prepare showed. Call this only when the person chose Send; that choice is the approval, do not ask again. It sends exactly the previewed text, once. A changed draft must be shown again before it can be sent: a rev prepared after the person's last message is not sent, and the preview comes back to show them. There is no other way to send: to write to someone, even in words the person dictated, open a draft with vibe_prepare first.",
+  description: "Send a prepared draft: pass id AND rev from the preview vibe_prepare showed. Call this only when the person chose Send; that choice is the approval, do not ask again. It sends exactly the previewed text, once. A changed draft must be shown again before it can be sent: a rev prepared after the person's last message is not sent, and the preview comes back to show them. Where the host supports it, a box opens for the person to confirm the exact text; you cannot answer it, and if they decline, do not call again unless they ask. There is no other way to send: to write to someone, even in words the person dictated, open a draft with vibe_prepare first.",
   inputSchema: {
     type: 'object',
     properties: {
