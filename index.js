@@ -80,6 +80,15 @@ const NOTICE_TEXT = {
   askFirst: 'Before you propose a guess, a workaround or cutting scope for something whose answer lives with someone the person knows (their note, what they say they are working on, their role), offer to ask that person first.',
   // 4: the offer is the draft.
   offerIsDraft: 'The offer is the draft: when a message to a specific person is clearly useful, or the person names someone as the one to check with, call vibe_prepare straight away so they see the exact text to send, edit or cancel, instead of asking in prose whether they want a draft; vibe_prepare sends nothing. One or two sentences, with the concrete numbers or names from the work, easy for the other person to answer when they next look. At most one draft they did not ask for per message of theirs, and none right after they declined one.',
+  // 7: show your work (BRIEF-13 #2): a question that says what was ruled out
+  // is easier to send and to answer.
+  showYourWork: 'A question to someone says in a few words what was already checked or tried here, then asks one specific thing they can answer in a line; still one or two sentences, with no apology, no preamble and no "quick question".',
+  // 6: how it arrives (BRIEF-13 #1), as the code does it: arrival-hook.cjs
+  // shows an arrival on the person's next prompt or after a tool call; a
+  // channel push (opt-in) reaches an idle open session; a new session's
+  // SessionStart hook says what is waiting. Nothing here can speak for other
+  // /vibe apps the person may run, so this says only what happens in a session.
+  quietArrival: 'If the person hesitates to bother someone, you may tell them how a message reaches the other person: in their session it shows at a pause (their next prompt or tool step), never over what they are typing, and if they are not in a session it waits for them. The preview says which.',
 };
 
 function serverInstructions(env = process.env) {
@@ -90,6 +99,8 @@ function serverInstructions(env = process.env) {
     on('triggers') ? NOTICE_TEXT.results : '',
     on('triggers') ? NOTICE_TEXT.askFirst : '',
     on('offerIsDraft') ? NOTICE_TEXT.offerIsDraft : '',
+    on('showYourWork') ? NOTICE_TEXT.showYourWork : '',
+    on('quietArrival') ? NOTICE_TEXT.quietArrival : '',
     on('replyFromProject')
       ? 'When a message arrives for them, tell them in one line, then look in this session and in the project\'s files for something true to say back; if there is, prepare the answer the same way, and only if there is not, tell them you have nothing to add.'
       : 'When a message arrives for them, tell them in one line and, if this session holds something true to say back, prepare the answer the same way.',

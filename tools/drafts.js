@@ -306,13 +306,32 @@ function noteLine(message) {
   return noted ? `**Note:** this draft includes something from your private note about @${noted.handle} (kept on this machine). Send only if you want that to go.\n` : '';
 }
 
+/**
+ * How the message will reach them (notice.js quietArrival), as the code does
+ * it. In their session an arrival is shown by the arrival hook on their next
+ * prompt or after a tool call (hooks/arrival-hook.cjs: UserPromptSubmit,
+ * PostToolUse), or, where they launched with channels, pushed into an idle
+ * open session (index.js); never over what they are typing. Not shown as in a
+ * session: it waits, and their next session's SessionStart hook says it is
+ * there (an invisible person's open session shows it at its next pause).
+ * Only what happens in a session: other /vibe apps they may run are not this
+ * package's to speak for. Empty when the change is off.
+ */
+function arrivalLine(to, person) {
+  if (!require('../notice').on('quietArrival')) return '';
+  if (person && isHereNow(person)) return `**How it reaches them:** @${to} is in a session now; it shows there at their next pause (a prompt or a tool step), never over what they are typing.\n`;
+  // Not shown as here (gone, away, invisible, or presence unread): it waits.
+  // "Does not show as" because an invisible person may be in a session.
+  return `**How it reaches them:** ${person ? `@${to} does not show as in a session now; it` : `it`} waits for them, and they are told when they next open a session or pause in one, never over what they are typing.\n`;
+}
+
 function preview(d, person, { boxy = false } = {}) {
   const where = person ? (isHereNow(person) ? 'here now' : (person.status === 'away' ? 'away' : 'not around — it waits for their next turn')) : 'presence unknown — it waits for their next turn';
   const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
   const message = compose(d);
   const rev = revOf(d);
   const answers = d.replyTo ? `\n**Answers:** #${inertField(d.replyTo, 60)}` : '';
-  const head = `**To:** @${d.to} (${where})\n**Message (exact):**\n${message}\n**Attachments:** ${att}${answers}\n${noteLine(message)}\n`;
+  const head = `**To:** @${d.to} (${where})\n**Message (exact):**\n${message}\n**Attachments:** ${att}${answers}\n${noteLine(message)}${arrivalLine(d.to, person)}\n`;
   if (d.status === 'unknown') {
     // The earlier Send did not confirm: it may already have reached them.
     // Only the two honest actions exist (codex P2).
