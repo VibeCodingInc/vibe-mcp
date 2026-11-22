@@ -708,16 +708,44 @@ function openBox(id, rev, me) {
       stampRev(d);
       return { unseen: { ...d, reshown }, why: turn.why || null };
     }
-    // A box was opened for this draft since vibe_prepare last showed it.
-    if (Number.isFinite(d.boxAt) && !(Number.isFinite(d.preparedAt) && d.preparedAt > d.boxAt)) return { refused: boxRefusal(BOX_NOT_ACCEPTED(d.to), 'box_not_accepted') };
     const now = Date.now();
     const live = (x) => x.box && Number.isFinite(x.box.at) && now - x.box.at < confirmBox.TIMEOUT_MS + 5000;
-    if (confirmBox.isOpen() || drafts.some(live)) return { refused: boxRefusal(BOX_BUSY, 'box_busy') };
+    // This draft's own request that the host never answered (a dropped
+    // input_required): superseded by this one; its nonce stops working.
+    const superseding = live(d) && !confirmBox.isOpen();
+    // A box was opened for this draft since vibe_prepare last showed it.
+    if (!superseding && boxBlocked(d)) return { refused: boxRefusal(BOX_NOT_ACCEPTED(d.to), 'box_not_accepted') };
+    // After any answer but Accept, no box for any draft until the person
+    // types again (or, with no turn record to go by, for a while).
+    if (blockedAfterNonAccept(drafts, turn, now)) return { refused: boxRefusal(BOX_NOT_ACCEPTED(d.to), 'box_not_accepted') };
+    if (confirmBox.isOpen() || drafts.some((x) => x !== d && live(x))) return { refused: boxRefusal(BOX_BUSY, 'box_busy') };
     const nonce = crypto.randomBytes(16).toString('hex');
     d.boxAt = now;
-    d.box = { nonce, at: now, rev, sha: sha256(message), me };
+    d.box = { nonce, at: now, rev, sha: sha256(message), me, turn: turn.check };
     return { boxed: { id: d.id, to: d.to, nonce, text: boxMessageFor(d), turn } };
   });
+}
+
+/** A box was opened for this draft (and not accepted) since vibe_prepare last showed it. */
+function boxBlocked(d) {
+  return Number.isFinite(d.boxAt) && !(Number.isFinite(d.preparedAt) && d.preparedAt > d.boxAt);
+}
+/** How long a non-accept blocks boxes for other drafts when there is no turn record to go by. */
+const NON_ACCEPT_COOLDOWN_MS = 5 * 60 * 1000;
+/**
+ * The latest answer but Accept, for any draft, blocks every box until a
+ * person's turn recorded after it. Where the turn check is unavailable (no
+ * turn record on this host), until NON_ACCEPT_COOLDOWN_MS has passed.
+ */
+function blockedAfterNonAccept(drafts, turn, now = Date.now()) {
+  const last = drafts.reduce((m, x) => (Number.isFinite(x.boxRefusedAt) && x.boxRefusedAt > m ? x.boxRefusedAt : m), 0);
+  if (!last) return false;
+  if (turn && turn.check === 'passed') {
+    const turns = require('../turns');
+    const at = turns.lastTurn(turns.projectDir());
+    return !(at !== null && at > last);
+  }
+  return now - last < NON_ACCEPT_COOLDOWN_MS;
 }
 
 /**
@@ -735,7 +763,10 @@ function closeBox(id, nonce, answer, { signal = null, rev = null } = {}) {
     if (!box || typeof nonce !== 'string' || box.nonce !== nonce) return { refused: boxRefusal(BOX_NOT_ACCEPTED(d.to), 'box_not_accepted') };
     delete d.box;
     d.boxAnsweredAt = Date.now();
+    // A hook appeared while the box was open: not the person's answer.
+    if (answer === 'hook') return { closedForHook: true };
     if (answer !== 'accept' || (signal && signal.aborted) || Date.now() - box.at > confirmBox.TIMEOUT_MS) {
+      d.boxRefusedAt = d.boxAnsweredAt;
       return { refused: boxRefusal(BOX_NOT_ACCEPTED(d.to), 'box_not_accepted') };
     }
     const me = config.getHandle();
@@ -746,14 +777,19 @@ function closeBox(id, nonce, answer, { signal = null, rev = null } = {}) {
     }
     const no = cannotSend(d, box.rev, me);
     if (no) return { display: no };
-    return { snapshot: claimDraft(d, box.rev), me };
+    // Accepted: this box is spent. A Send whose delivery does not confirm can
+    // be tried again through the ordinary path (turn check, a new box).
+    delete d.boxAt;
+    return { snapshot: claimDraft(d, box.rev), me, turn: box.turn || null };
   });
 }
 
-async function afterClose(closed, turn) {
+async function afterClose(closed) {
   if (closed.display) return { display: closed.display, data: { sent: false, definite: true } };
   if (closed.refused) return closed.refused;
-  return deliverClaimed(closed.snapshot, closed.me, { check: 'box', ...(turn && turn.check ? { turn: turn.check } : {}) });
+  // Which turn check applied before the box: 'passed', or 'unavailable' (the
+  // box alone decided).
+  return deliverClaimed(closed.snapshot, closed.me, { check: 'box', ...(closed.turn ? { turn: closed.turn } : {}) });
 }
 
 /** A 2025-* connection: the server asks the client during this call and waits. */
@@ -767,7 +803,7 @@ async function sendWithBox(id, rev, me, box, { signal = null } = {}) {
   if (opened.refused) return opened.refused;
   const b = opened.boxed;
   const answer = await confirmBox.ask(box, b.text, { ...(box.timeoutMs ? { timeoutMs: box.timeoutMs } : {}), signal });
-  return afterClose(closeBox(b.id, b.nonce, answer, { signal, rev }), b.turn);
+  return afterClose(closeBox(b.id, b.nonce, answer, { signal, rev }));
 }
 
 /** requestState for a stateless retry: which draft, and which box. Opaque to the client. */
@@ -795,14 +831,14 @@ async function sendStateless(id, rev, me, ctx) {
     const r = responses[confirmBox.INPUT_KEY];
     let answer = r && typeof r === 'object' && r.action === 'accept' ? 'accept' : 'none';
     const hook = answer === 'accept' ? answeringHookFile() : null;
-    if (hook) answer = 'none';
+    if (hook) answer = 'hook';
     if (!state || state.id !== id) {
       const to = loadDrafts().find(x => x.id === id);
       return boxRefusal(BOX_NOT_ACCEPTED(to ? to.to : 'them'), 'box_not_accepted');
     }
     const closed = closeBox(id, state.n, answer, { signal: ctx.signal || null, rev });
     if (hook) return boxRefusal(BOX_HOOK(hook), 'box_hook');
-    return afterClose(closed, null);
+    return afterClose(closed);
   }
   const hook = answeringHookFile();
   if (hook) return boxRefusal(BOX_HOOK(hook), 'box_hook');
@@ -860,6 +896,9 @@ async function send(args, { byPerson, ctx = {} }) {
     if (!d) return { display: `No draft ${id} — nothing sent. Open it with vibe_prepare first.` };
     const no = cannotSend(d, rev, me);
     if (no) return { display: no };
+    // A box was opened for this draft and not accepted: a request that offers
+    // no box does not get around it. It needs showing again (and a turn).
+    if (!byPerson && !isAgentIdentity() && boxBlocked(d)) return { display: BOX_NOT_ACCEPTED(d.to), data: { sent: false, definite: true, reason: 'box_not_accepted' } };
     // The person must have had a turn since THIS text was last shown
     // (turns.js): an agent cannot show a new rev and send it inside one turn.
     turn = turnCheck(d, byPerson);
@@ -943,7 +982,7 @@ function isAgentIdentity() {
 }
 function withTurn(result, turn) {
   if (!result || !turn) return result;
-  return { ...result, data: { ...(result.data || {}), turn_check: turn.check } };
+  return { ...result, data: { ...(result.data || {}), turn_check: turn.check, ...(turn.turn ? { turn: turn.turn } : {}) } };
 }
 /**
  * Not sent: this text was last shown after the person's last turn (or in an
