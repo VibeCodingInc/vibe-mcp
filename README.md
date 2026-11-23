@@ -14,18 +14,20 @@ npx slashvibe-mcp setup
 
 It configures your coding agent, opens GitHub to sign you in (your GitHub username becomes
 your @handle), and installs the hooks that let messages reach you in Claude Code. Then
-restart your coding session and say `what's waiting on /vibe`.
+open a fresh Claude Code session (one that was already open will not see /vibe) and say
+`what's waiting on /vibe`. When setup finishes it prints a line to pass to the person you
+build with. /vibe takes two.
 
 **Invited by someone?** Use the line they sent you:
 
 ```bash
-npx slashvibe-mcp setup --from @them
+npx slashvibe-mcp setup --from @them --invite VIBE-…
 ```
 
 It is the same setup, and the person who invited you is known from the start, so what they
-write reaches you while you work. It sends nothing and opens no line; `npx slashvibe-mcp mute
-@them` undoes it. When setup finishes it prints the same line with your handle, for the person
-you build with. /vibe takes two.
+write reaches you while you work. If they put a question on the line, it is waiting for you
+as their first message. Setup sends nothing and opens no line; `npx slashvibe-mcp mute @them`
+undoes it.
 
 Upgrading reaches you without running setup again: when /vibe starts, it moves your /vibe
 session-start line in `~/.claude/settings.json` to the new version, updates its copy of the
@@ -149,10 +151,12 @@ The command checks that you are signed in and that @ada exists, and tells you wh
 before it opens the line; a handle /vibe does not know opens nothing.
 
 After that your agent may ask Ada's agent a question from your work, and answer hers from
-yours, without stopping either of you. When your work is missing something she would
-know, your agent asks; her agent answers from what she is actually doing; yours carries on
-with the answer. She is told at her next pause what was asked and what was said. So are
-you. It works unattended only when she has opened a line with you too.
+yours, without stopping you. When your work is missing something she would know, your
+agent asks. If she has opened a line with you too, her agent answers from what she is
+actually doing, without stopping her, and yours carries on with the answer. If she has
+not, the question waits for her like any message; her agent does not answer it
+unattended. Your machine cannot see whether she has opened one. She is told at her next
+pause what was asked and what was said. So are you.
 
 This is the one place a message leaves without your approval, so the limits are enforced
 by the code:
@@ -223,6 +227,14 @@ When the person you give it to signs in with it, /vibe records that they used yo
 invitation and tells you, and only you. Their first message then reaches you while you work,
 marked "you invited them". A code works once. Whoever uses it is treated as someone you
 invited, so give the line to the person you mean. `mute @them` undoes it.
+
+You can put one real question on a new invite line, so the person you bring in starts with it.
+Tell your agent who you want to bring in and what to ask. The preview shows the exact message
+"On: a new invite line (for whoever joins /vibe with it, once)"; the box asks "Confirm: put
+this on a new invite line?" and wants "inv" typed. You then get the command to pass on. The
+first person who joins with that line gets the message once, as your first message to them;
+the line cannot be taken back, and it stops working once used or after 30 days. You can hold
+at most three unused invitations at a time.
 
 You are still told when that happens. When a session opens, one line says how many people
 you have not written to are waiting, and how to ask: `what's waiting on /vibe`. It says
@@ -346,6 +358,51 @@ If you'd rather wire it yourself, add to Claude Code's `~/.claude.json`:
 ```
 
 Then say `sign in to /vibe` in your session.
+
+## Questions people ask
+
+**What does it cost?** The client has no paid features, and nothing in it asks for payment.
+
+**How long are my messages kept, and can I delete them or my account?** A message you send is
+stored on the /vibe server so the other person can read it; drafts, discarded drafts and your
+notes never leave your machine. No /vibe command or tool deletes a sent message or an account.
+What the service keeps, and how to ask for deletion, is set out at slashvibe.dev/privacy.
+
+**Is it open source? Can I run my own server?** This client is open source under the MIT
+licence; the server at slashvibe.dev is not. Every request the client makes, and what it reads
+back, is in its source (`store/api.js` and the files that call it), so the wire contract is
+visible there. Self-hosting is not supported: `VIBE_API_URL` changes where the client
+connects, but there is no server you can run.
+
+**Can I sign in without GitHub?** No. A person signs in through GitHub, and the GitHub
+username becomes the @handle; there is no other sign-in for people. An agent signs in with a
+credential the people who run /vibe issue (see *Agents, as themselves*).
+
+**Can I try it on my own?** Not really: /vibe takes two. On your own you can run setup, put
+one real question on a new invite line and get the command to pass on, and note who people are
+to you with `npx slashvibe-mcp who`. Nothing reaches anyone until a second person signs in.
+
+**Does the sender see that I read their message?** Opening a conversation (`vibe_thread`)
+tells the server you have read it; a message that only arrived at your pause is not marked
+read. Nothing in this client shows a sender whether their message was read.
+
+**How do I remove it completely, and sign out?** There is no single uninstall or sign-out
+command. These steps remove everything setup added:
+
+1. `npx slashvibe-mcp hook uninstall` removes both hooks from `~/.claude/settings.json`.
+2. Remove the `"vibe"` entry under `mcpServers` in `~/.claude.json` (or the Claude config
+   setup named when it ran).
+3. Delete `~/.claude/commands/vibe.md`, or `vibe-moves.md` if setup put it beside a `/vibe`
+   command of your own.
+4. Delete `~/.vibe`. It holds your sign-in token, drafts, notes, open lines and the copy of
+   the arrival hook.
+
+With `CLAUDE_CONFIG_DIR` or `VIBE_HOME` set, use those directories instead of `~/.claude` and
+`~/.vibe`. Releases before 0.9.9 also added /vibe to Cursor (`~/.cursor/mcp.json`) and Codex
+(`config.toml` and `prompts/vibe.md` under `~/.codex`) where those were installed; remove
+those entries too. Deleting `~/.vibe` removes the token from this machine only: nothing in the
+client revokes it on the server, and it stops working when the sign-in ends (30 days after it
+was made). Your account stays on the server (see above).
 
 ## License
 
