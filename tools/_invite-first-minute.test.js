@@ -125,7 +125,7 @@ test('inviteQuestion: the preview names no one, says who gets it and that it is 
     QUESTION,
     '**Attachments:** none',
     '',
-    'If you keep it, /vibe makes a new invite line that carries this exact message, kept for 30 days. The first person who joins /vibe with that line gets it once, as your first message to them, and the line is then used up. Anyone you pass the line to could be that person, so leave out anything you would not send them. You get the command and page to pass on; nothing reaches anyone before they join.',
+    'If you keep it, /vibe makes a new invite line that carries this exact message, kept for 30 days. The first person who joins /vibe with that line gets it once, as your first message to them, and the line is then used up. Anyone you pass the line to could be that person, so leave out anything you would not send them. You get the command and page to pass on; nothing reaches anyone before they join. Once made, the line cannot be taken back from here; it stops working when it is used or after 30 days.',
     '',
     `Keep on a new invite line · Edit · Cancel — nothing has been sent.  _(draft ${p.data.draft.id} · rev ${p.data.draft.rev})_`,
     "This app cannot show /vibe's confirmation box or record your reply; a message goes when the agent sends it after you say so.",
@@ -159,6 +159,7 @@ test('inviteQuestion: Keep makes one unnamed invitation carrying exactly the app
   assert.equal(again.display, `Draft ${p.data.draft.id} is already on an invite line — not creating a second one. Pass on: npx slashvibe-mcp setup --from @ada --invite ${code}`);
   // The plain line never reuses a code that carries a message (invite.codeFor).
   const plain = await invite.codeFor('ada');
+  assert.ok(plain, 'a plain code is there to give out');
   assert.notEqual(plain, code);
   // Nell joins with it: the question is hers, once, from @ada.
   assert.equal(signInWith(r.data.pass_on, 'nell'), true);
@@ -179,6 +180,84 @@ test('inviteQuestion: what it refuses, before anything is drafted', async () => 
   const o = await moves.vibe_prepare.handler({ handle: 'nell', message: 'plain one', asked: true });
   const e = await moves.vibe_prepare.handler({ id: o.data.draft.id, invite: true, message: 'now on a line' });
   assert.match(e.display, /^Not changed: draft w[0-9a-f]+ is a message to @nell; a message on an invite line is opened as a new draft/);
+});
+
+test('inviteQuestion: an agent account cannot make an invite line with a message; a held message to a named account is unchanged', async () => {
+  const agentAuth = require('../agent-auth');
+  const was = agentAuth.signedInAsAgent;
+  agentAuth.signedInAsAgent = () => true;
+  try {
+    const before = stub.invites.size;
+    const r = await moves.vibe_prepare.handler({ invite: true, message: QUESTION, asked: true });
+    assert.equal(r.display, 'Not prepared: an invite line with a message is made by a person; an agent account cannot make one. Nothing was sent.');
+    assert.ok(!r.data || !r.data.draft, 'nothing drafted');
+    assert.equal(stub.invites.size, before, 'nothing created');
+    // A message held for a named account is still prepared, as before.
+    const h = await moves.vibe_prepare.handler({ handle: 'agentheld', message: 'the cron moved to 02:00 UTC', asked: true });
+    assert.equal(h.data.draft.held, true, h.display);
+    assert.equal(h.data.draft.to, 'agentheld');
+    assert.match(h.display, /^\*\*To:\*\* @agentheld \(not on \/vibe yet\)/);
+  } finally { agentAuth.signedInAsAgent = was; }
+  // Signed in as a person: offered as before.
+  const p = await moves.vibe_prepare.handler({ invite: true, message: QUESTION, asked: true });
+  assert.equal(p.data.draft.invite, true);
+});
+
+test('inviteQuestion: no "@null" for an invite draft in discard, edit or send refusals', async () => {
+  const p = await moves.vibe_prepare.handler({ invite: true, message: 'which branch is the release cut from?', asked: true });
+  const id = p.data.draft.id;
+  const setState = (patch) => moves.transact((all) => { const d = all.find((x) => x.id === id); for (const k of Object.keys(d)) if (['status', 'unconfirmed', 'claimedAt', 'claimedBy'].includes(k)) delete d[k]; Object.assign(d, patch); });
+  const texts = [];
+  const look = (t, re) => { texts.push(t); assert.match(t, re); assert.doesNotMatch(t, /@null|@undefined/); };
+  // Discard while it is being sent.
+  await setState({ status: 'sending', claimedAt: Date.now(), claimedBy: process.pid });
+  look((await moves.vibe_discard.handler({ id })).display, new RegExp(`^Draft ${id} is being sent to your invite line right now`));
+  // Discard of a cancelled draft whose earlier Send did not confirm.
+  await setState({ status: 'cancelled', unconfirmed: true });
+  look((await moves.vibe_discard.handler({ id })).display, new RegExp(`^Draft ${id} is already cancelled — and the earlier Send to your invite line did not confirm`));
+  // Editing a cancelled-after-unconfirmed draft, and a sent one.
+  look((await moves.vibe_prepare.handler({ id, message: 'changed' })).display, new RegExp(`^Draft ${id} was cancelled after a Send to your invite line that did not confirm`));
+  await setState({ status: 'sent' });
+  look((await moves.vibe_prepare.handler({ id, message: 'changed' })).display, new RegExp(`^Draft ${id} was already sent to your invite line — nothing changed`));
+  // Discard and Send of a sent one.
+  look((await moves.vibe_discard.handler({ id })).display, new RegExp(`^Draft ${id} was already sent to your invite line — a sent message can't be unsent`));
+  look((await moves.vibe_send.handler({ id, rev: p.data.draft.rev })).display, new RegExp(`Draft ${id} was already sent to your invite line — not sending it twice`));
+  assert.equal(texts.length, 6);
+  await setState({ status: 'cancelled' });
+});
+
+test('invitedEmptyState: --from is recorded as the inviter only when the --invite code is consistent with it (the platform\'s suffix rule)', async () => {
+  // The shape api/lib/invite-code.js mints for @ada (not minted on the stand-in: its three-code allowance is used by the tests below).
+  const minted = 'VIBE-ABCDEFGHJK-ADA';
+  assert.equal(invite.codeIsFrom(minted, 'ada'), true);
+  assert.equal(invite.codeIsFrom('VIBE-ABCDEFGHJK-MALL', 'mallory'), true, 'the first four letters, upper-cased');
+  assert.equal(invite.codeIsFrom('VIBE-ABCDEFGHJK-ADA', 'mallory'), false);
+  assert.equal(invite.codeIsFrom('VIBE-ABCDEFGHJK-ADA', 'adam'), false, 'ADAM, not ADA');
+  assert.equal(invite.codeIsFrom('VIBE-ABCDEFGHJK-A-B', 'a-b'), true);
+  assert.equal(invite.codeIsFrom('VIBE-ADA', 'ada'), false, 'no random part');
+  const fetchFor = (handle) => async () => ({ ok: true, status: 200, json: async () => ({ handle, kind: 'human' }) });
+  // A matching pair: recorded, and named at session start.
+  const vhOk = homeFor('tess');
+  const ok = await invite.accept('@ada', 'tess', { code: minted, env: { VIBE_HOME: vhOk }, fetchImpl: fetchFor('ada'), apiUrl: 'http://127.0.0.1:9' });
+  assert.equal(ok.known, true);
+  assert.equal(invite.inviter({ VIBE_HOME: vhOk }), 'ada');
+  assert.ok((await sitDown(vhOk)).lines.some((l) => /@ada invited you/.test(l)));
+  // A forwarded line: --from @mallory with ada's code. Nothing recorded, no "invited you" line.
+  const vhNo = homeFor('ursa');
+  const no = await invite.accept('@mallory', 'ursa', { code: minted, env: { VIBE_HOME: vhNo }, fetchImpl: fetchFor('mallory'), apiUrl: 'http://127.0.0.1:9' });
+  assert.equal(no.known, false);
+  assert.deepEqual(no.lines, ['That invite code was not made by @mallory, so nobody was marked as your inviter.']);
+  assert.ok(!no.lines.some((l) => /invited you/.test(l)));
+  assert.equal(invite.inviter({ VIBE_HOME: vhNo }), null, 'no inviter recorded');
+  assert.equal(require('../reach').isKnown('mallory', { VIBE_HOME: vhNo }), false, 'not marked known either');
+  const s = await sitDown(vhNo);
+  assert.ok(!s.lines.some((l) => /invited you/.test(l)), s.lines.join('\n'));
+  // No code (an older line): --from alone is recorded, as before.
+  const vhPlain = homeFor('vera');
+  assert.equal((await invite.accept('@mallory', 'vera', { env: { VIBE_HOME: vhPlain }, fetchImpl: fetchFor('mallory'), apiUrl: 'http://127.0.0.1:9' })).known, true);
+  assert.equal(invite.inviter({ VIBE_HOME: vhPlain }), 'mallory');
+  // setup.js passes the --invite code through.
+  assert.match(fs.readFileSync(path.join(ROOT, 'setup.js'), 'utf8'), /invite\.accept\(from, authResult\.handle, \{ code: invite\.inviteArg\(\) \}\)/);
 });
 
 test('inviteQuestion: the box asks for the first letters of "invite", three or more; no reply word, no "@", no handle', () => {

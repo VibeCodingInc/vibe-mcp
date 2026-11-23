@@ -354,12 +354,18 @@ function inviteArgs(args, wantId) {
   const v = args ? args.invite : undefined;
   if (!(v === true || v === 'true')) return { invite: false };
   if (!require('../notice').on('inviteQuestion')) return { invite: false };
+  // An agent's own account skips the typed turn and the box (it speaks in its
+  // own name), so a line it made would carry a message nobody confirmed to
+  // whoever joins with it. Only a person makes one. Held messages to a named
+  // account are not affected.
+  if (isAgentIdentity()) return { refuse: INVITE_AGENT_REFUSED };
   if (wantId) return { invite: true };
   if (typeof args.handle === 'string' && args.handle.trim()) return { refuse: 'Not prepared: a message on an invite line is for whoever joins with the line, so it takes no handle. To write to someone, leave out invite. Nothing was sent.' };
   if (args.reply_to !== undefined && args.reply_to !== null && args.reply_to !== '') return { refuse: 'Not prepared: a message on an invite line answers no message yet; leave out reply_to. Nothing was sent.' };
   if (args.kind !== undefined && args.kind !== null && args.kind !== '') return { refuse: 'Not prepared: a note back ("landed") goes to someone whose reply you used, not on an invite line. Nothing was sent.' };
   return { invite: true };
 }
+const INVITE_AGENT_REFUSED = 'Not prepared: an invite line with a message is made by a person; an agent account cannot make one. Nothing was sent.';
 const LANDED_QUESTION = /[?\uFF1F\u061F]/u;
 const LANDED_NO_QUESTION = 'Not prepared: a note back ("landed") carries no question. Put the question in a separate draft if the person wants to ask it. Nothing was sent.';
 function landedTextProblem(text) {
@@ -624,12 +630,12 @@ async function draftHandler(args, ctx = {}) {
       reconcileAbandoned(d);
       if (d.status === 'held') return { display: heldAlready(d) };
       if (d.held && d.status === 'unknown') return { display: heldUnknown(d) };
-      if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — nothing changed. Open a new draft to say more.` };
+      if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to ${forWhom(d)} — nothing changed. Open a new draft to say more.` };
       if (d.status === 'cancelled') return { display: d.unconfirmed
-        ? `Draft ${d.id} was cancelled after a Send to @${d.to} that did not confirm — it may or may not have reached them. Open a new draft to say more.`
+        ? `Draft ${d.id} was cancelled after a Send to ${forWhom(d)} that did not confirm — it may or may not have reached them. Open a new draft to say more.`
         : `Draft ${d.id} was cancelled — open a new draft (vibe_prepare with handle + message). Nothing sent.` };
       if (d.status === 'sending') return { display: `Draft ${d.id} is being sent right now — nothing to edit.` };
-      if (d.status === 'unknown' && (message || args.refs)) return { display: `Draft ${d.id}: the last Send to @${d.to} did not confirm, so the text is frozen — Send again to retry exactly that text (it delivers once), or Cancel. To say something different, cancel and open a new draft.` };
+      if (d.status === 'unknown' && (message || args.refs)) return { display: `Draft ${d.id}: the last Send to ${forWhom(d)} did not confirm, so the text is frozen — Send again to retry exactly that text (it delivers once), or Cancel. To say something different, cancel and open a new draft.` };
       if (d.status === 'unknown') {
         const stored = firstHidden(compose(d));
         if (stored) return { display: storedHidden(d.id, stored) };
@@ -888,7 +894,7 @@ function invitePreview(d, { boxy = false } = {}) {
   const rev = revOf(d);
   return {
     display: `**On:** a new invite line (for whoever joins /vibe with it, once)\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n${noteLine(message)}\n`
-      + `If you keep it, /vibe makes a new invite line that carries this exact message, kept for ${HELD_DAYS} days. The first person who joins /vibe with that line gets it once, as your first message to them, and the line is then used up. Anyone you pass the line to could be that person, so leave out anything you would not send them. You get the command and page to pass on; nothing reaches anyone before they join.\n\n`
+      + `If you keep it, /vibe makes a new invite line that carries this exact message, kept for ${HELD_DAYS} days. The first person who joins /vibe with that line gets it once, as your first message to them, and the line is then used up. Anyone you pass the line to could be that person, so leave out anything you would not send them. You get the command and page to pass on; nothing reaches anyone before they join. Once made, the line cannot be taken back from here; it stops working when it is used or after ${HELD_DAYS} days.\n\n`
       + `Keep on a new invite line · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_${boxNote(d, boxy)}`,
     data: {
       draft: { id: d.id, to: null, invite: true, body: d.body, message, refs: d.refs || [], status: d.status, rev, held: true },
@@ -920,11 +926,11 @@ async function discardHandler(args) {
     const d = drafts.find(x => x.id === id);
     if (!d) return { display: `No draft ${id} to cancel — nothing was sent either way.` };
     reconcileAbandoned(d);
-    if (d.status === 'sending') return { display: `Draft ${d.id} is being sent to @${d.to} right now — it can't be cancelled at this point.`, data: { draft: { id: d.id, status: d.status } } };
+    if (d.status === 'sending') return { display: `Draft ${d.id} is being sent to ${forWhom(d)} right now — it can't be cancelled at this point.`, data: { draft: { id: d.id, status: d.status } } };
     if (d.status === 'held') return { display: `Draft ${d.id} is already ${d.invite ? 'on an invite line' : `held for @${d.to}`} — a held message can't be taken back from here.`, data: { draft: { id: d.id, status: d.status } } };
-    if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — a sent message can't be unsent.`, data: { draft: { id: d.id, status: d.status } } };
+    if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to ${forWhom(d)} — a sent message can't be unsent.`, data: { draft: { id: d.id, status: d.status } } };
     if (d.status === 'cancelled') return { display: d.unconfirmed
-      ? `Draft ${d.id} is already cancelled — and the earlier Send to @${d.to} did not confirm, so it may or may not have reached them.`
+      ? `Draft ${d.id} is already cancelled — and the earlier Send to ${forWhom(d)} did not confirm, so it may or may not have reached them.`
       : `Draft ${d.id} is already cancelled — nothing was sent.`, data: { draft: { id: d.id, status: d.status } } };
     const wasUnknown = d.status === 'unknown' || Boolean(d.unconfirmed);
     // Who discarded it, for earlierOffer only (never for sending): the
@@ -941,8 +947,8 @@ async function discardHandler(args) {
     }
     return {
       display: wasUnknown
-        ? `Cancelled — no further send to @${d.to}. Note: the earlier attempt did not confirm, so it may or may not have reached them.`
-        : `Cancelled — nothing sent to @${d.to}. The draft stays on your machine.`,
+        ? `Cancelled — no further send to ${forWhom(d)}. Note: the earlier attempt did not confirm, so it may or may not have reached them.`
+        : `Cancelled — nothing sent to ${forWhom(d)}. The draft stays on your machine.`,
       data: { draft: { id: d.id, status: 'cancelled' } },
     };
   });
@@ -990,7 +996,7 @@ function cannotSend(d, rev, me) {
   // whoever is signed in now (codex P1).
   if (d.from && d.from !== me) return `Draft ${d.id} was prepared as @${d.from}; you are signed in as @${me}. Nothing sent — open a new draft as yourself.`;
   if (d.status === 'held') return heldAlready(d);
-  if (d.status === 'sent') return `Draft ${d.id} was already sent to @${d.to} — not sending it twice.`;
+  if (d.status === 'sent') return `Draft ${d.id} was already sent to ${forWhom(d)} — not sending it twice.`;
   if (d.status === 'cancelled') return `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.`;
   if (!rev) return `Send needs the rev shown in the preview of draft ${d.id} — open it with vibe_prepare and send with that rev. Nothing sent.`;
   // The current rev is not named here, but that is not what protects the
@@ -1011,7 +1017,7 @@ function cannotSend(d, rev, me) {
   if (d.status === 'unknown' && !transportDedupes()) {
     // Without server-side deduplication a retry could deliver twice; the
     // honest options are to cancel (with the warning) or write anew.
-    return `Draft ${d.id}: the earlier Send to @${d.to} did not confirm, and this transport cannot deduplicate a retry. Cancel it (the earlier attempt may have reached them) and open a new draft if you still want to say it. Nothing sent.`;
+    return `Draft ${d.id}: the earlier Send to ${forWhom(d)} did not confirm, and this transport cannot deduplicate a retry. Cancel it (the earlier attempt may have reached them) and open a new draft if you still want to say it. Nothing sent.`;
   }
   return null;
 }
