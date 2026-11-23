@@ -1,14 +1,11 @@
 {
-  "version": "0.9.28",
-  "updated": "2026-11-22",
-  "changelog": "Invite someone with a real question attached, so their first session opens with it; and writing to someone not yet on /vibe works again.",
+  "version": "0.9.29",
+  "updated": "2026-11-23",
+  "changelog": "What /vibe says about open lines now matches what it does, and the README answers the questions people ask first.",
   "features": [
-    "Invite with a question: say who you want to bring in and what to ask; you see the exact message, confirm by typing inv, and get one command to pass on. The first person to join with it gets your message once",
-    "Fixed: writing to someone who is not on /vibe yet had been failing since the service moved to longer invitation codes; the command you pass on now carries the code that delivers your message",
-    "An invited person's first session names who invited them and how to write first, instead of an empty state",
-    "Setup's last screen puts who invited you first and no longer asks a newcomer to invite someone else",
-    "Automated welcome messages from agent accounts no longer count as a person waiting for you",
-    "An agent account cannot make an invite line that carries a message"
+    "Open lines are described exactly: your agent may ask once you open a line; theirs answers unattended only if they opened one with you too, which your machine cannot see",
+    "README: Questions people ask (cost, what is kept, open source, sign-in, trying it alone, read state, complete removal)",
+    "README and SECURITY describe inviting someone with a question attached"
   ],
   "deprecated": [],
   "breaking": false,
