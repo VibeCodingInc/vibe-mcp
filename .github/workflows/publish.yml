@@ -89,16 +89,71 @@ jobs:
             if (!ok) { console.error("npm " + process.argv[1] + " is older than 11.5.1 — trusted publishing unavailable"); process.exit(1); }
           ' "$(npm -v)"
 
-      - name: Publish to npm (trusted publishing, provenance)
-        run: npm publish --provenance --access public
+      # Stage under the holding dist-tag `next`, never straight to `latest`:
+      # npm moves `latest` the moment publish returns, but the registry has
+      # answered 404 for the new tarball for 10–25 minutes (0.9.22–0.9.24), so
+      # `npx slashvibe-mcp@latest` could fail to load in that window. The
+      # promote job below moves `latest` only once the tarball downloads.
+      # Idempotent: a rerun skips the publish if the version already exists.
+      - name: Publish to npm under `next` (trusted publishing, provenance)
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if [ "$(npm view "slashvibe-mcp@$V" version 2>/dev/null)" = "$V" ]; then
+            echo "slashvibe-mcp@$V is already on npm — skipping publish, the promote job takes it from here"
+            exit 0
+          fi
+          npm publish --provenance --access public --tag next
 
-  # POST-publish verification — parity moved here from the pre-publish gate
+  # PROMOTE — move `latest` only once npm serves the exact tarball. Polls the
+  # registry (up to 45 min, backoff), checks the downloaded tarball against the
+  # registry's dist.integrity/dist.shasum, refuses to move `latest` backwards or
+  # onto a prerelease, no-ops if `latest` already names this version, then runs
+  # `npm dist-tag add slashvibe-mcp@<version> latest`. On timeout the version
+  # stays under `next`, `latest` is untouched, and the log prints the command
+  # to promote by hand. See scripts/promote-when-served.mjs.
+  #
+  # Auth: the same trusted-publishing OIDC identity as the publish job. npm
+  # accepts dist-tag changes over OIDC only when "Allow npm dist-tag" is
+  # enabled on this package's trusted publisher (off by default) and the CLI is
+  # npm 11.21.0 or later — see .github/PUBLISHING.md. Until an owner enables
+  # it, this job fails with the hand-promotion command and `latest` stays put.
+  promote:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write # OIDC for `npm dist-tag add` (trusted publishing); no stored token
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Node 24's bundled npm predates OIDC dist-tag support (11.21.0+).
+      - name: npm with OIDC dist-tag support
+        run: |
+          npm install -g npm@11.21.2
+          echo "node $(node -v), npm $(npm -v)"
+          node -e '
+            const [a, b] = process.argv[1].split(".").map(Number);
+            if (!(a > 11 || (a === 11 && b >= 21))) { console.error("npm " + process.argv[1] + " is older than 11.21.0 — no dist-tag over trusted publishing"); process.exit(1); }
+          ' "$(npm -v)"
+
+      - name: Wait until npm serves the tarball, then promote to `latest`
+        run: node scripts/promote-when-served.mjs --version "$(node -p "require('./package.json').version")" --timeout-min 45
+
+  # POST-promote verification (runs only after `latest` moved) — parity moved here from the pre-publish gate
   # after the 0.8.17 deadlock (auto-deploy made production advertise the
   # version being published, so the old pre-publish parity check failed on the
   # exact condition only the publish could clear). A mismatch here is a loud
   # red job on the release run, not a blocked release.
   verify:
-    needs: publish
+    needs: [publish, promote]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -110,6 +165,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: dist-tags.latest is this release
+        run: node scripts/promote-when-served.mjs --check-latest --version "${GITHUB_REF#refs/tags/v}" --retries 10 --interval-ms 15000
 
       - name: npm serves what production advertises (parity, with propagation retries)
         run: node scripts/version-parity.mjs --retries 10 --interval-ms 30000

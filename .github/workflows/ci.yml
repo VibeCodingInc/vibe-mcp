@@ -29,6 +29,8 @@ jobs:
         run: npm run test:release
       - name: Release ordering regression (the 0.8.17 deadlock)
         run: node --test test/release-deadlock.test.mjs
+      - name: Stage-then-promote (latest only names a served tarball)
+        run: node --test test/promote-when-served.test.mjs
 
   secret-scan:
     runs-on: ubuntu-latest

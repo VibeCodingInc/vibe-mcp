@@ -138,7 +138,9 @@ test('the publish workflow orders parity strictly AFTER npm publish', () => {
   // script (that comment tricked the first version of this find()).
   const verifyJob = jobs.find((j) => j.includes('run: node scripts/version-parity.mjs'));
   assert.ok(verifyJob, 'a job runs the parity script');
-  assert.match(verifyJob, /needs:\s*publish/, 'parity job must need: publish');
+  // `needs: publish` or a list that includes it (verify now also waits for
+  // the promote job that moves `latest`).
+  assert.match(verifyJob, /needs:\s*(publish\b|\[[^\]]*\bpublish\b)/, 'parity job must need: publish');
   // And the registry-mode conformance runs there too — post-publish proof.
   assert.match(verifyJob, /release-conformance\.mjs --registry/);
 });
