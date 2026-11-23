@@ -106,11 +106,30 @@ function rule(to) {
 }
 
 /**
+ * A message on a new invite line (notice.js inviteQuestion) has no recipient
+ * handle to type. Its box asks for the first letters of the word "invite",
+ * which names what is happening. By rule() above that would be two letters,
+ * since no reply word is a prefix of it; but "in" is itself an ordinary
+ * word a person may type without reading, so it takes three: "inv", or
+ * more of the word. No word in REPLY_WORDS is a prefix of it, no "@" is
+ * accepted (it is not a handle), and Enter alone still cannot send.
+ */
+const INVITE_WORD = 'invite';
+const INVITE_LEN = 3;
+function inviteTypedOk(value) {
+  if (typeof value !== 'string') return false;
+  const t = fold(value);
+  return t.length >= INVITE_LEN && INVITE_WORD.startsWith(t);
+}
+
+/**
  * Does the typed value confirm a send to `to`? Trimmed, ASCII lower-cased: a
  * prefix of the handle at least `len` long (one optional leading "@"), or, in
- * the "@" case, exactly "@" + handle. Nothing shorter.
+ * the "@" case, exactly "@" + handle. Nothing shorter. With `invite`: the
+ * invite-line box (inviteTypedOk), whatever `to` is.
  */
-function typedOk(to, value) {
+function typedOk(to, value, { invite = false } = {}) {
+  if (invite) return inviteTypedOk(value);
   if (typeof value !== 'string') return false;
   const h = fold(to);
   if (!h) return false;
@@ -122,7 +141,11 @@ function typedOk(to, value) {
 }
 
 /** The field's title and description for a box to `to` (`held`: a kept-for-later box), within TITLE_MAX. */
-function fieldText(to, { held = false } = {}) {
+function fieldText(to, { held = false, invite = false } = {}) {
+  if (invite) {
+    const need = INVITE_WORD.slice(0, INVITE_LEN);
+    return { title: `Type "${need}" to make the invite line`, description: `The first letters of the word "${INVITE_WORD}". ${ENTER_NOTE}` };
+  }
   const h = fold(to);
   const r = rule(h);
   const verb = held ? 'keep it' : 'send';
@@ -153,12 +176,12 @@ function schemaFor(to, opts = {}) {
  * accept with any other content; else 'none'. All but 'accept' are a
  * non-accept.
  */
-function answerOf(result, to) {
+function answerOf(result, to, opts = {}) {
   if (!result || typeof result !== 'object') return 'none';
   if (result.action === 'decline') return 'decline';
   if (result.action !== 'accept') return 'none';
   const c = result.content;
-  const ok = c && typeof c === 'object' && !Array.isArray(c) && Object.prototype.hasOwnProperty.call(c, FIELD) && typedOk(to, c[FIELD]);
+  const ok = c && typeof c === 'object' && !Array.isArray(c) && Object.prototype.hasOwnProperty.call(c, FIELD) && typedOk(to, c[FIELD], opts);
   return ok ? 'accept' : 'wrong';
 }
 /** How long a box may stay open before the send is given up. */
@@ -291,7 +314,7 @@ const charCount = (text) => graphemes(text).length;
  * Line 1 is fixed server text, never the agent's: who it goes to, that it goes
  * now, and how long it is. The text follows from line 2.
  */
-function question({ to, held = false, retry = false, reply = false, text, env = process.env }) {
+function question({ to, held = false, invite = false, retry = false, reply = false, text, env = process.env }) {
   const n = charCount(text);
   const whole = fits(text);
   // Both facts, always: how long it is, and whether all of it is below. Within
@@ -300,8 +323,9 @@ function question({ to, held = false, retry = false, reply = false, text, env = 
   // "Confirm:" (notice.js confirmLead): a person who has just said "send" in
   // chat reads this box as the confirmation of that send, not a second
   // request (BRIEF-20). Wording only: what counts as a yes is typedOk.
-  const plain = held ? `Keep for @${to}?` : `${retry ? 'Resend' : reply ? 'Reply' : 'Send'} to @${to}?`;
-  const confirmed = held ? `Confirm: keep for @${to}?` : `Confirm: ${retry ? 'resend' : reply ? 'reply' : 'send'} to @${to}?`;
+  // A message on an invite line (inviteQuestion) has no handle: the line says what is made.
+  const plain = invite ? 'Put this on a new invite line?' : held ? `Keep for @${to}?` : `${retry ? 'Resend' : reply ? 'Reply' : 'Send'} to @${to}?`;
+  const confirmed = invite ? 'Confirm: put this on a new invite line?' : held ? `Confirm: keep for @${to}?` : `Confirm: ${retry ? 'resend' : reply ? 'reply' : 'send'} to @${to}?`;
   const chars = `${n} char${n === 1 ? '' : 's'}`;
   const forms = (lead) => [`${lead} (${chars}, ${whole ? 'all shown' : 'start only'})`, `${lead} (${chars}, ${whole ? 'all' : 'start'})`];
   // A handle too long for "Confirm: " and both facts in 72 columns (about 32
@@ -321,8 +345,8 @@ function fits(text) {
 }
 
 /** The params of elicitation/create for a protocol version. */
-function request(text, protocolVersion, to, { held = false } = {}) {
-  const params = { message: text, requestedSchema: schemaFor(to, { held }) };
+function request(text, protocolVersion, to, { held = false, invite = false } = {}) {
+  const params = { message: text, requestedSchema: schemaFor(to, { held, invite }) };
   if (MODE_VERSIONS.has(protocolVersion)) params.mode = 'form';
   return params;
 }
@@ -339,7 +363,7 @@ function isOpen() { return openNow; }
  * cancelled, an accept with the wrong text). Only action "accept" with the
  * recipient's letters typed is yes (answerOf).
  */
-async function ask(box, text, { to, held = false, timeoutMs = TIMEOUT_MS, signal = null } = {}) {
+async function ask(box, text, { to, held = false, invite = false, timeoutMs = TIMEOUT_MS, signal = null } = {}) {
   if (openNow) return 'busy';
   if (signal && signal.aborted) return 'none';
   openNow = true;
@@ -353,10 +377,10 @@ async function ask(box, text, { to, held = false, timeoutMs = TIMEOUT_MS, signal
     });
     let result;
     try {
-      result = await Promise.race([Promise.resolve().then(() => box.request(request(text, box.protocolVersion, to, { held }), { signal: ctl.signal })), stop]);
+      result = await Promise.race([Promise.resolve().then(() => box.request(request(text, box.protocolVersion, to, { held, invite }), { signal: ctl.signal })), stop]);
     } catch { return 'none'; }
     if (result && result.stopped) { ctl.abort(); return 'none'; }
-    const answer = answerOf(result, to);
+    const answer = answerOf(result, to, { invite });
     return answer === 'wrong' ? 'none' : answer;
   } finally {
     if (timer) clearTimeout(timer);
@@ -465,7 +489,7 @@ function labAllowsHook(env = process.env) {
 
 module.exports = {
   WRAP_COLUMNS, VISIBLE_LINES, NEWLINE_MARK, TIMEOUT_MS, INPUT_KEY, ELICITATION_VERSIONS,
-  FIELD, REPLY_WORDS, TITLE_MAX, rule, typedOk, fieldText, schemaFor, answerOf,
+  FIELD, REPLY_WORDS, TITLE_MAX, INVITE_WORD, INVITE_LEN, rule, typedOk, fieldText, schemaFor, answerOf,
   declaresForm, noteClient, available, clientState,
   displayWidth, wrapLine, textLines, question, message, fits, request, ask, isOpen,
   settingsAnswerBox, settingsFiles, answeringHook, labAllowsHook, managedSettingsFile,

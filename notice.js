@@ -52,6 +52,10 @@ const NOTICE = {
   // The people writing to each other build software: a note saying "pattern is
   // now ^[0-9]{5,8}$" reached the other side as ^❲0-9❳{5,8}$ (2026-11-22).
   codeFidelity: true,       // 22. a message body reaches the agent in a nonce fence and the person at the end of its line, byte-for-byte for code characters (incoming.js fence, inertLine)
+  // The invited person's first minute (audit 2026-11-22, invite-first-minute).
+  heldCarriesCode: true,    // 23. a Keep's pass-on command carries the held message's invitation code (printed before any link), and the sentence says what delivers it
+  inviteQuestion: true,     // 24. vibe_prepare {invite: true}: one message on a new invite line, previewed, turn-checked and boxed like a Keep, delivered once to whoever joins with it
+  invitedEmptyState: true,  // 25. session start names the inviter while nothing has passed between them; "Rare moment" only with a conversation; agents left out of the stranger count
 };
 
 /**

@@ -10,7 +10,12 @@ export function startStub({ people = {}, agentMints = {}, servesInvitedByYou = t
   // that sign-in). The inbox then says invited_by_you on the inviter's row for
   // that person, and on nobody else's. servesInvitedByYou: false models a
   // platform that predates the field.
-  const invites = new Map();     // code -> { code, created_by, used_by, status, expires_at }
+  // A code may carry a first message (first_thought): a Keep names it for one
+  // GitHub login (named_for), an invite-line message names nobody. Either is
+  // delivered ONCE, as an ordinary message from the inviter, by the sign-in
+  // that redeems the code (api/lib/invite-redemption.js, invite-thought.js),
+  // and by nothing else: a sign-in without the code delivers nothing.
+  const invites = new Map();     // code -> { code, created_by, used_by, status, expires_at, named_for?, first_thought?, thought_sent? }
   let codeSeq = 0;
   const invitedBy = (me) => new Set([...invites.values()].filter((i) => i.created_by === me && i.status === 'used' && i.used_by).map((i) => i.used_by));
   const messages = [];            // { id, seq, from, to, body, created_at, reply_to }
@@ -57,12 +62,23 @@ export function startStub({ people = {}, agentMints = {}, servesInvitedByYou = t
     invites.set(code, { code, created_by: by, used_by: null, status: 'available', expires_at: new Date(Date.now() + 30 * 86400000).toISOString() });
     return code;
   }
-  /** The newcomer's sign-in with ?invite_code: one redemption per code, never by its creator. */
-  function redeem(code, handle) {
+  /**
+   * The newcomer's sign-in with ?invite_code: one redemption per code, never
+   * by its creator. A named code only by the GitHub login it names (`login`,
+   * default the handle). A code carrying a first message delivers it here,
+   * once, from the inviter.
+   */
+  function redeem(code, handle, { login = handle } = {}) {
     const i = invites.get(String(code || '').toUpperCase());
     if (!i || i.status !== 'available' || i.created_by === handle) return false;
+    if (i.named_for && String(login || '').toLowerCase() !== i.named_for) { effects.push({ t: Date.now(), me: handle, effect: 'REDEEM_NOT_FOR_YOU', code: i.code }); return false; }
     i.status = 'used'; i.used_by = handle;
     effects.push({ t: Date.now(), me: handle, effect: 'REDEEM', code: i.code, inviter: i.created_by });
+    if (typeof i.first_thought === 'string' && !i.thought_sent) {
+      i.thought_sent = true;
+      const m = post(i.created_by, handle, i.first_thought);
+      effects.push({ t: Date.now(), me: i.created_by, effect: 'THOUGHT_DELIVERED', code: i.code, to: handle, id: m.id });
+    }
     return true;
   }
   function post(from, to, body, replyTo = null) {
@@ -135,7 +151,7 @@ export function startStub({ people = {}, agentMints = {}, servesInvitedByYou = t
       if (p === '/api/invites/my' && req.method === 'GET') {
         if (!me) return send(401, { success: false, error: 'unauthorized' });
         rec('read_invites');
-        const codes = [...invites.values()].filter((i) => i.created_by === me).map((i) => ({ code: i.code, named_for: null, for_email_hash: null, carries_thought: false, status: i.status, expires_at: i.expires_at, used_by: i.used_by }));
+        const codes = [...invites.values()].filter((i) => i.created_by === me).map((i) => ({ code: i.code, named_for: i.named_for || null, for_email_hash: null, carries_thought: typeof i.first_thought === 'string', status: i.status, expires_at: i.expires_at, used_by: i.used_by }));
         const unused = codes.filter((c) => c.status === 'available').length;
         return send(200, { success: true, codes, unused, max_codes: 3, can_generate: unused < 3 });
       }
@@ -148,7 +164,8 @@ export function startStub({ people = {}, agentMints = {}, servesInvitedByYou = t
       if (p === '/api/invites' && req.method === 'POST' && body && typeof body.first_thought === 'string') {
         if (!me) return send(401, { success: false, error: 'unauthorized' });
         const thought = body.first_thought;
-        const forGithub = String(body.for_github || '').toLowerCase();
+        // No for_github: an invite-line message, for whoever redeems the code.
+        const forGithub = body.for_github ? String(body.for_github).toLowerCase() : null;
         if (thought.length > 2000) return send(400, { success: false, error: `first_thought is ${thought.length} chars (max 2000)` });
         const sha = heldDigest(thought);
         if (body.dry_run === true) {
@@ -157,7 +174,8 @@ export function startStub({ people = {}, agentMints = {}, servesInvitedByYou = t
         }
         if (body.approved_sha256 !== sha) { rec('HELD_REFUSED', { for_github: forGithub }); return send(409, { success: false, error: 'approval_mismatch' }); }
         if ([...invites.values()].filter((i) => i.created_by === me && i.status === 'available').length >= 3) return send(400, { success: false, error: 'No invite codes remaining' });
-        const code = `VIBE-${(++heldSeq).toString(36).toUpperCase().padStart(4, '0')}-${me.toUpperCase().slice(0, 4)}`;
+        // The platform's shape since 2026-11-21 (api/lib/invite-code.js): 10 random characters.
+        const code = `VIBE-HLD${(++heldSeq).toString(36).toUpperCase().padStart(7, '0')}-${me.toUpperCase().slice(0, 4)}`;
         const expires_at = new Date(Date.now() + 30 * 86400000).toISOString();
         invites.set(code, { code, created_by: me, used_by: null, status: 'available', expires_at, named_for: forGithub, first_thought: thought });
         rec('HELD', { for_github: forGithub, code, body: thought });

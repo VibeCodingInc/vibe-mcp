@@ -145,10 +145,12 @@ test('Keep creates exactly one invitation: first_thought is the approved text, t
     assert.equal(body.approved_sha256, platformDigest(approved));
     assert.equal(r.data.held, true); assert.equal(r.data.sent, false);
     assert.equal(r.display, [
+      // heldCarriesCode (notice.js): the command carries the held message's
+      // code, before the page; only a sign-in with that code delivers it.
       'Held for @new-bie. /vibe created the invitation.',
-      '**Join link:** https://www.slashvibe.dev/join/VIBE-AB2C-ADA',
-      '**Pass on with it:** npx slashvibe-mcp setup --from @ada',
-      'Your message is kept for the GitHub account new-bie for 30 days, until 2026-12-20. It arrives as your first message when they sign in to /vibe with that account; nothing reaches them before then.',
+      '**Pass on to them:** npx slashvibe-mcp setup --from @ada --invite VIBE-AB2C-ADA',
+      '**Or the page:** https://www.slashvibe.dev/join?from=ada&invite=VIBE-AB2C-ADA',
+      'Your message is kept for the GitHub account new-bie for 30 days, until 2026-12-20. It arrives as your first message when they join /vibe with that account through this command or page. A sign-in without the code does not carry it, and nothing reaches them before then.',
     ].join('\n'));
     assert.doesNotMatch(r.display, NEVER_SENT);
     assert.ok(reach.isKnown('new_bie'), 'the handle they will get (dash folded) is known, so their answer reaches you');
