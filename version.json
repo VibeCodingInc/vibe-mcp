@@ -1,11 +1,11 @@
 {
-  "version": "0.9.29",
+  "version": "0.9.30",
   "updated": "2026-11-23",
-  "changelog": "What /vibe says about open lines now matches what it does, and the README answers the questions people ask first.",
+  "changelog": "Type /vibe to see what is waiting for you.",
   "features": [
-    "Open lines are described exactly: your agent may ask once you open a line; theirs answers unattended only if they opened one with you too, which your machine cannot see",
-    "README: Questions people ask (cost, what is kept, open source, sign-in, trying it alone, read state, complete removal)",
-    "README and SECURITY describe inviting someone with a question attached"
+    "/vibe on its own shows what is waiting for you and who you know is around; /vibe followed by a thought still takes it to someone",
+    "After setup, the next step is: type /vibe (saying \"what's waiting on /vibe\" still works)",
+    "If you already had a /vibe command of your own, setup names the one it installed for you"
   ],
   "deprecated": [],
   "breaking": false,
