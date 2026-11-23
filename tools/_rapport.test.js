@@ -113,7 +113,7 @@ test('the offer appears exactly once at the threshold, and never again, even aft
   assert.ok(fifth.display.endsWith([
     "You've sent @stan 5 messages without changing a word, and they answered. Want your agents to handle questions like these directly? In your own terminal:",
     '  npx slashvibe-mcp trust @stan',
-    "It opens only when you both run it. I won't suggest this again.",
+    "Their agent answers yours unattended only if they run it for you too. I won't suggest this again.",
   ].join('\n')));
   assert.doesNotMatch(fifth.display, /!/);
   assert.equal(rapport.read().stan.offer.state, 'offered', 'marked shown as it was displayed');

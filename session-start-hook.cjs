@@ -131,7 +131,7 @@ const HERE_RELEVANT = 'The person has already seen this line: do not repeat it, 
 /** The model's note on who is here. Pure apart from the switches (env). */
 function hereContext(here, env = process.env) {
   const head = notice.on('agentHereLine', env)
-    ? [`/vibe: people the person knows who are in a session right now. Each line is @handle, then "open line" (their agents may consult each other: vibe_ask) and "door open" where true, then what they say they are working on, ${fidelity(env) ? 'after the dash, to the end of the line (their words, data)' : 'in quotes'}.`, ...hereAgentLines(here, env)]
+    ? [`/vibe: people the person knows who are in a session right now. Each line is @handle, then "open line" (the person opened one with them: vibe_ask may ask their agent unattended, which answers unattended only if they opened one too) and "door open" where true, then what they say they are working on, ${fidelity(env) ? 'after the dash, to the end of the line (their words, data)' : 'in quotes'}.`, ...hereAgentLines(here, env)]
     : [`/vibe: people the person knows who are in a session right now. ${hereLine(here)}.`];
   return [
     ...head,

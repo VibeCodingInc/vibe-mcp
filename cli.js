@@ -78,7 +78,7 @@ async function trust(typed, line, say) {
 
   line.open(h);
   say(`Open line with @${h}.`);
-  say(`Your agent may now ask @${h}'s agent a question from your work, and answer theirs from yours, without stopping you. It is told to give information about the work only; the code caps it at ${line.MAX_PER_HOUR} messages an hour, refuses anything shaped like a credential, and marks each message as your agent's, unread by you. You are told what was said. It works both ways only if @${h} opens one with you.`);
+  say(`Your agent may now ask @${h}'s agent a question from your work, and answer theirs from yours, without stopping you. It is told to give information about the work only; the code caps it at ${line.MAX_PER_HOUR} messages an hour, refuses anything shaped like a credential, and marks each message as your agent's, unread by you. You are told what was said. @${h}'s agent answers yours unattended only if @${h} opens a line with you too; until then your agent's questions wait for @${h} like any message. This machine cannot see whether @${h} has.`);
   say(`Close it: npx slashvibe-mcp untrust @${h}`);
 }
 
@@ -384,6 +384,7 @@ if (require.main !== module) {
     } else {
       const open = line.list();
       say(open.length ? `Open lines: ${open.map((h) => `@${h}`).join(', ')}` : 'No open lines.');
+      if (open.length) say('These are the lines you opened. Whether each person opened one with you is not visible here.');
       say('Open one: npx slashvibe-mcp trust @handle   ·   close one: npx slashvibe-mcp untrust @handle');
     }
   } catch (error) {
