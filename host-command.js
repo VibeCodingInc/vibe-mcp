@@ -12,6 +12,7 @@
  *              people without running setup again. It never creates one: that
  *              stays the person's act (setup), as it is for the hooks, whose
  *              start-time refresh also never installs.
+ *   installedName()  which name the person types: '/vibe', '/vibe-moves' or null.
  *
  * Any other content is the person's own and is never written. A link is never
  * written through. Writes are atomic: a temporary file in the same directory,
@@ -146,4 +147,25 @@ function refresh(env = process.env) {
   return replaced;
 }
 
-module.exports = { SHIPPED_COMMAND_SHA256, isShippedCommand, claudeDir, install, refresh };
+/**
+ * The name a person types for this release's command, from what is on disk:
+ * '/vibe', '/vibe-moves' (setup put it beside their own /vibe), or null when
+ * neither file is this release's command. What tells someone to type a command
+ * asks here first, so nobody is told to type one that is not there for them.
+ * An earlier release's file is not counted: in some, `/vibe` typed alone did
+ * not show what is waiting (the server's refresh() replaces it at its start). Reads only. Never throws.
+ */
+function installedName(env = process.env) {
+  try {
+    const body = readBody();
+    if (body === null) return null;
+    const dir = claudeDir(env);
+    // A skill named vibe answers /vibe ahead of a command (install() above).
+    const skill = fs.existsSync(path.join(dir, 'skills', 'vibe', 'SKILL.md'));
+    if (!skill && isCurrent(path.join(dir, 'commands', 'vibe.md'), body)) return '/vibe';
+    if (isCurrent(path.join(dir, 'commands', 'vibe-moves.md'), body)) return '/vibe-moves';
+    return null;
+  } catch { return null; }
+}
+
+module.exports = { SHIPPED_COMMAND_SHA256, isShippedCommand, claudeDir, install, refresh, installedName };

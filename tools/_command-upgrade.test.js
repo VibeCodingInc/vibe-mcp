@@ -265,3 +265,44 @@ test('the server runs the refresh at start, behind the lab-isolation guard', () 
   start({ HOME: home });
   assert.equal(fs.readFileSync(cmd(home), 'utf8'), CURRENT);
 });
+
+// installedName: which name a person is told to type (setup's last screen, the
+// session-start line, the status screen). Never one that is not there for them.
+function installedName(home, env = {}) {
+  const r = spawnSync(process.execPath, ['-e', "process.stdout.write(JSON.stringify(require('./host-command').installedName()))"], {
+    cwd: ROOT, encoding: 'utf8',
+    env: { PATH: process.env.PATH, HOME: home, VIBE_HOME: path.join(home, '.vibe'), VIBE_SETUP_NO_AUTORUN: '1', ...env },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+}
+
+test('the name to type is the one installed: /vibe, /vibe-moves beside their own, or none', () => {
+  const fresh = machine();
+  assert.equal(installedName(fresh), null, 'nothing installed: no name');
+  install(fresh);
+  assert.equal(installedName(fresh), '/vibe');
+
+  const theirs = machine();
+  fs.writeFileSync(cmd(theirs), 'my own /vibe\n');
+  install(theirs);
+  assert.equal(installedName(theirs), '/vibe-moves', 'beside their own /vibe');
+
+  const skill = machine();
+  fs.mkdirSync(path.join(skill, '.claude', 'skills', 'vibe'), { recursive: true });
+  fs.writeFileSync(path.join(skill, '.claude', 'skills', 'vibe', 'SKILL.md'), 'my own skill\n');
+  install(skill);
+  assert.equal(installedName(skill), '/vibe-moves', 'beside their own /vibe skill');
+
+  const old = machine();
+  fs.writeFileSync(cmd(old), V0929);
+  assert.equal(installedName(old), null, 'an earlier release\'s command does not show what is waiting when typed alone: not named');
+
+  const noClaude = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-cmd-none-'));
+  assert.equal(installedName(noClaude), null, 'no Claude Code dir: no name');
+
+  const conf = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-cmd-conf-'));
+  fs.mkdirSync(path.join(conf, 'commands'), { recursive: true });
+  fs.writeFileSync(path.join(conf, 'commands', 'vibe.md'), CURRENT);
+  assert.equal(installedName(machine(), { CLAUDE_CONFIG_DIR: conf }), '/vibe', 'CLAUDE_CONFIG_DIR is honoured');
+});

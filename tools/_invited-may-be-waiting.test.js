@@ -53,10 +53,13 @@ test('the invite line was given before they first wrote: the waiting line says i
   const stub = await startStub();
   try {
     const vh = homeFor('walt');
+    // Setup installed this release's /vibe command for them, so the line says to type it.
+    fs.mkdirSync(path.join(path.dirname(vh), '.claude', 'commands'), { recursive: true });
+    fs.copyFileSync(path.join(ROOT, 'hosts', 'vibe-command.md'), path.join(path.dirname(vh), '.claude', 'commands', 'vibe.md'));
     invite.noteGiven({ VIBE_HOME: vh }, Date.now() - 60_000);
     stub.post('theo', 'walt', WORDS);
     const { out, raw } = await sitDown(vh, stub.url);
-    assert.equal(out.systemMessage, "/vibe · 1 person you have not written to is waiting. They first wrote after you were given your invite line, so it may be someone you invited. Say: what's waiting on /vibe");
+    assert.equal(out.systemMessage, '/vibe · 1 person you have not written to is waiting. They first wrote after you were given your invite line, so it may be someone you invited. Type: /vibe (or say "what\'s waiting on /vibe")');
     assert.match(out.hookSpecificOutput.additionalContext, /a guess from timing only: do not name or guess who/);
     for (const never of ['theo', 'dad it is', 'ignore previous', 'vibe_send']) assert.ok(!raw.includes(never), `carried "${never}"`);
     assert.equal(require('../reach').isKnown('theo', { VIBE_HOME: vh }), false, 'a guess never makes anyone known');

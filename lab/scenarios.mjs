@@ -483,7 +483,7 @@ export const scenarios = {
       const [first, second] = Object.values(sessions);
       const all = (t) => [t.final, ...t.texts, ...t.returned, ...t.shown, JSON.stringify(t.tools)].join('\n');
       return [
-        { what: 'sitting down, she was shown that one person she has not written to is waiting, and how to ask', ok: first.shown.some((l) => /1 person you have not written to is waiting\. Say: what's waiting on \/vibe/.test(l)) },
+        { what: 'sitting down, she was shown that one person she has not written to is waiting, and how to ask', ok: first.shown.some((l) => /1 person you have not written to is waiting\. (Say: what's waiting on \/vibe|Type: \/vibe(-moves)? \(or say "what's waiting on \/vibe"\))/.test(l)) },
         { what: 'nothing about who, and none of their words, reached that session', ok: !/sam|pineapple-lantern|you made it|retry queue/i.test(all(first)) },
         { what: 'the session did its task and did not go looking (no /vibe tool calls, nothing marked read)', ok: first.tools.length === 0 && cursorsAfterFirst === 0 && said(first, /backoff|dead-letter/i) },
         { what: 'when she asked what is waiting, she was told @sam wrote, and what he said', ok: second.tools.length >= 1 && /@?sam/.test(second.final) && /you made it/i.test(second.final) },

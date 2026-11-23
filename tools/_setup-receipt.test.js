@@ -62,6 +62,45 @@ test('the last screen, exactly: no notes, one note, read failed, invited', () =>
   }
 });
 
+test('the next step: type the command that was installed, the spoken line as the fallback', () => {
+  const n = setup.nextStepLines;
+  const SPOKEN = '"what\'s waiting on /vibe"';
+  assert.deepEqual(n({ command: '/vibe', receipt: true }), [
+    `In a new session, type: /vibe to see who has written to you (or say ${SPOKEN}),`,
+    'or say "message @their-handle: ..." to write to someone.',
+  ]);
+  // Setup found a /vibe of their own and installed ours as /vibe-moves: that is the name printed.
+  assert.deepEqual(n({ command: '/vibe-moves', receipt: true }), [
+    `In a new session, type: /vibe-moves to see who has written to you (or say ${SPOKEN}),`,
+    'or say "message @their-handle: ..." to write to someone.',
+  ]);
+  assert.ok(!n({ command: '/vibe-moves' }).join('\n').includes('type: /vibe '), 'never told to type a /vibe that is theirs, not ours');
+  // No command installed for them: never told to type one.
+  for (const command of [null, undefined, '/something-else']) {
+    const lines = n({ command, receipt: true });
+    assert.deepEqual(lines, [`In a new session, say ${SPOKEN} to see who has written to you,`, 'or say "message @their-handle: ..." to write to someone.']);
+    assert.ok(!lines.join('\n').includes('type'), String(command));
+  }
+  assert.deepEqual(n({ command: '/vibe', receipt: false }), [
+    '1. Restart your Claude Code session',
+    `2. Then type: /vibe to see who has written to you (or say ${SPOKEN})`,
+    '   or say: "message @their-handle: ..." to write to someone',
+  ]);
+  assert.equal(n({ command: '/vibe-moves', receipt: false })[1], `2. Then type: /vibe-moves to see who has written to you (or say ${SPOKEN})`);
+  assert.equal(n({ command: null, receipt: false })[1], `2. Then say ${SPOKEN} to see who has written to you`);
+  for (const l of [...n({ command: '/vibe' }), ...n({ command: null, receipt: false })]) assert.ok(!l.includes('!'), l);
+});
+
+test('setup asks which command is installed, after installing it, and prints the next step before the last screen', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'setup.js'), 'utf8');
+  const body = src.slice(src.indexOf('async function setup()'));
+  const at = (s) => { const i = body.indexOf(s); assert.ok(i >= 0, s); return i; };
+  assert.ok(at('installHostCommands()') < at("require('./host-command').installedName()"), 'the name is read after the command is installed');
+  assert.ok(at('installedName()') < at('nextStepLines({ command, receipt: true })'));
+  assert.ok(at('nextStepLines({ command, receipt: true })') < at('finalLines({'), 'the fresh-session line stays last');
+  assert.doesNotMatch(body, /say "what's waiting on \/vibe" to see/, 'no hard-coded spoken-only instruction left');
+});
+
 test('setup prints the last screen last, after the line to pass on, and only through the switch', () => {
   const src = fs.readFileSync(path.join(ROOT, 'setup.js'), 'utf8');
   const body = src.slice(src.indexOf('async function setup()'));

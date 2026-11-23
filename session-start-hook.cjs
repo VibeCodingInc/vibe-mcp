@@ -412,7 +412,19 @@ function withNoteBack(messages) {
  * Up to three things, each one line for the person and a short note for the
  * model: who is here, a door someone left, and messages that were waiting.
  */
-function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null, invited = 0, noted = [], unsent = [], { quietMoment = false, inviter = null } = {}) {
+/**
+ * How to ask what is waiting: type the command when this release's is
+ * installed for them (host-command.installedName: /vibe, or /vibe-moves beside
+ * a /vibe of their own), with the spoken line as the fallback; only the spoken
+ * line when no command is there, so nobody is told to type one that is not.
+ */
+function howToAsk(command) {
+  return command === '/vibe' || command === '/vibe-moves'
+    ? `Type: ${command} (or say "what's waiting on /vibe")`
+    : "Say: what's waiting on /vibe";
+}
+
+function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null, invited = 0, noted = [], unsent = [], { quietMoment = false, inviter = null, command = null } = {}) {
   const waitingUnknown = Number.isInteger(strangers) && strangers > 0 ? Math.min(strangers, 99) : 0;
   const mayBeInvited = Number.isInteger(invited) && invited > 0 ? Math.min(invited, waitingUnknown) : 0;
   const signinNotice = signinLine(normalizeSignin(signin));
@@ -472,7 +484,7 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
     // still with no handle and none of their words.
     const invitedNote = mayBeInvited === 0 ? ''
       : ` ${mayBeInvited === waitingUnknown ? (waitingUnknown === 1 ? 'They' : 'They all') : `${mayBeInvited} of them`} first wrote after you were given your invite line, so it may be someone you invited.`;
-    shown.push(`/vibe · ${who} waiting.${invitedNote} Say: what's waiting on /vibe`);
+    shown.push(`/vibe · ${who} waiting.${invitedNote} ${howToAsk(command)}`);
     context.push(`/vibe: ${who} waiting with a message.${invitedNote ? `${invitedNote} That is a guess from timing only: do not name or guess who.` : ''} Who they are and what they wrote is deliberately not given here. The person has been shown this line. Do not open or read those conversations unless the person asks what is waiting.`);
   }
 
@@ -534,6 +546,10 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
     })
   );
   return reminders.map((r) => r.id);
+}
+
+function installedCommand() {
+  try { return require('./host-command').installedName(); } catch { return null; }
 }
 
 async function fetchLive() {
@@ -740,7 +756,7 @@ async function main() {
   // this machine (also when the host gives no session id).
   const unsent = now.unsent.filter((r) => { try { return require('./unsent').mayMentionAtStart(r.id, session); } catch { return false; } });
   const quietMoment = now.nothingWaiting && unsent.length === 0 && momentFree();
-  const said = hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited, now.noted, unsent, { quietMoment, inviter: now.inviter });
+  const said = hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited, now.noted, unsent, { quietMoment, inviter: now.inviter, command: installedCommand() });
   if (quietMoment) markMoment();
   claimShown(now.messages);
   markTold((said || []).map((id) => ({ id })), session);
@@ -854,6 +870,7 @@ if (require.main === module) main().catch(emptyOutput);
 
 module.exports = {
   boundedDeadline,
+  howToAsk,
   emptyOutput,
   hookInput,
   hookOutput,

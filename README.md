@@ -14,9 +14,11 @@ npx slashvibe-mcp setup
 
 It configures your coding agent, opens GitHub to sign you in (your GitHub username becomes
 your @handle), and installs the hooks that let messages reach you in Claude Code. Then
-open a fresh Claude Code session (one that was already open will not see /vibe) and say
-`what's waiting on /vibe` (or type `/vibe`, which does the same). When setup finishes it prints a line to pass to the person you
-build with. /vibe takes two.
+open a fresh Claude Code session (one that was already open will not see /vibe) and type
+`/vibe` (or say `what's waiting on /vibe`, which does the same). If you already had a `/vibe`
+of your own, setup installs this one beside it as `/vibe-moves` and its last screen names
+the one to type. When setup finishes it prints a line to pass to the person you build with.
+/vibe takes two.
 
 **Invited by someone?** Use the line they sent you:
 
@@ -237,9 +239,9 @@ the line cannot be taken back, and it stops working once used or after 30 days. 
 at most three unused invitations at a time.
 
 You are still told when that happens. When a session opens, one line says how many people
-you have not written to are waiting, and how to ask: `what's waiting on /vibe`, or type
-`/vibe` in Claude Code. It says
-nothing about who they are or what they wrote, to you or to your agent, until you ask.
+you have not written to are waiting, and how to ask: type `/vibe` in Claude Code (or
+`/vibe-moves`, when setup put it beside a `/vibe` of yours), or say `what's waiting on /vibe`.
+It says nothing about who they are or what they wrote, to you or to your agent, until you ask.
 If one of them first wrote after you were given your invite line (`setup --from @you`), it
 says it may be someone you invited: that is from timing on your machine alone, for an
 invite line given without a code (an older line, or one made while /vibe could not be reached).

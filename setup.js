@@ -436,6 +436,23 @@ function waitingLine(w) {
   return `${notes}, from ${shown.join(', ')} and ${rest} ${rest === 1 ? 'other' : 'others'}.`;
 }
 
+const SPOKEN = '"what\'s waiting on /vibe"';
+
+/**
+ * The installer's one next step: type the command (/vibe, or /vibe-moves when
+ * it was installed beside a /vibe of the person's own), with the spoken line
+ * as the fallback. With no command installed for them (null), only the spoken
+ * line: nobody is told to type a command that is not there. Pure: [string].
+ */
+function nextStepLines({ command = null, receipt = true } = {}) {
+  const cmd = command === '/vibe' || command === '/vibe-moves' ? command : null;
+  const see = cmd
+    ? `type: ${cmd} to see who has written to you (or say ${SPOKEN})`
+    : `say ${SPOKEN} to see who has written to you`;
+  if (receipt) return [`In a new session, ${see},`, 'or say "message @their-handle: ..." to write to someone.'];
+  return ['1. Restart your Claude Code session', `2. Then ${see}`, '   or say: "message @their-handle: ..." to write to someone'];
+}
+
 const FRESH_SESSION = 'Open a fresh Claude Code session to load /vibe. Sessions that are already open will not see it.';
 
 /**
@@ -566,14 +583,14 @@ async function setup() {
       : `${colors.green}  ✓ Setup complete!${colors.reset}`);
     console.log('');
 
+    // The name this person types: /vibe, or /vibe-moves when setup put ours
+    // beside a /vibe of their own; null when no command is there for them.
+    const command = require('./host-command').installedName();
     if (receipt) {
-      console.log(`${colors.dim}  In a new session, say "what's waiting on /vibe" to see who has written to you,${colors.reset}`);
-      console.log(`${colors.dim}  or "message @their-handle: ..." to write to someone.${colors.reset}`);
+      for (const l of nextStepLines({ command, receipt: true })) console.log(`${colors.dim}  ${l}${colors.reset}`);
     } else {
       console.log(`${colors.bold}  Quick start:${colors.reset}`);
-      console.log(`${colors.dim}  1. Restart your Claude Code session${colors.reset}`);
-      console.log(`${colors.dim}  2. Say: "what's waiting on /vibe" to see who has written to you${colors.reset}`);
-      console.log(`${colors.dim}     or: "message @their-handle: ..." to write to someone${colors.reset}`);
+      for (const l of nextStepLines({ command, receipt: false })) console.log(`${colors.dim}  ${l}${colors.reset}`);
     }
     // Receiving is the product: a reply has to reach you while you work, not
     // when you remember to ask. So the hooks are installed here, by default,
@@ -736,5 +753,6 @@ module.exports = {
   readWaiting,
   waitingLine,
   finalLines,
+  nextStepLines,
   FRESH_SESSION,
 };

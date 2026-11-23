@@ -545,7 +545,13 @@ if (require.main !== module) {
     console.log('Commands:');
     console.log('  npx slashvibe-mcp setup   — re-run setup wizard');
     console.log('');
-    console.log('In your coding agent, say "what\'s waiting on /vibe" to get started.');
+    // The name to type is the one installed for them (/vibe-moves beside a /vibe
+    // of their own); with none there, only the spoken line.
+    let cmd = null;
+    try { cmd = require('./host-command').installedName(); } catch { cmd = null; }
+    console.log(cmd
+      ? `In Claude Code, type: ${cmd} (or say "what's waiting on /vibe") to get started.`
+      : 'In your coding agent, say "what\'s waiting on /vibe" to get started.');
     process.exit(0);
   }
 } else {

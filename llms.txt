@@ -44,7 +44,15 @@ Then the person restarts their Claude Code session.
 
 ## First words
 
-After the restart, the person (or you, for them) says:
+After the restart, the person types:
+
+```text
+/vibe
+```
+
+Typed alone, it shows what is waiting. If they already had a `/vibe` of their own, setup put
+this one beside it as `/vibe-moves` and said so: they type that instead. Or they (or you, for
+them) say:
 
 ```text
 what's waiting on /vibe
@@ -119,6 +127,7 @@ way.
 - **Only people they know reach them mid-work**: someone they have written to, or opened a
   line with. Anyone else waits. When a session opens, one line says how many people they
   have not written to are waiting, with no name and none of their words, and how to ask:
+  type `/vibe` (or `/vibe-moves`, whichever setup installed for them), or say
   `what's waiting on /vibe`. If one first wrote after the person was given their invite
   line, the line says it may be someone they invited; that is timing only, so never guess
   who. Do not open those conversations unless the person asks.
