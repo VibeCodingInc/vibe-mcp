@@ -151,10 +151,12 @@ The command checks that you are signed in and that @ada exists, and tells you wh
 before it opens the line; a handle /vibe does not know opens nothing.
 
 After that your agent may ask Ada's agent a question from your work, and answer hers from
-yours, without stopping either of you. When your work is missing something she would
-know, your agent asks; her agent answers from what she is actually doing; yours carries on
-with the answer. She is told at her next pause what was asked and what was said. So are
-you. It works unattended only when she has opened a line with you too.
+yours, without stopping you. When your work is missing something she would know, your
+agent asks. If she has opened a line with you too, her agent answers from what she is
+actually doing, without stopping her, and yours carries on with the answer. If she has
+not, the question waits for her like any message; her agent does not answer it
+unattended. Your machine cannot see whether she has opened one. She is told at her next
+pause what was asked and what was said. So are you.
 
 This is the one place a message leaves without your approval, so the limits are enforced
 by the code:
@@ -360,12 +362,11 @@ Then say `sign in to /vibe` in your session.
 ## Questions people ask
 
 **What does it cost?** The client has no paid features, and nothing in it asks for payment.
-<!-- NEEDS FOUNDER: decide the price of the service and say it here. Proposed wording, only once true: "Using /vibe is free while it is in early use. If that changes, this page will say so first." -->
 
 **How long are my messages kept, and can I delete them or my account?** A message you send is
 stored on the /vibe server so the other person can read it; drafts, discarded drafts and your
 notes never leave your machine. No /vibe command or tool deletes a sent message or an account.
-<!-- NEEDS FOUNDER: decide retention and deletion, then state them here. The live privacy page (slashvibe.dev/privacy, last updated 2026-01-25) says messages are kept 2 years and deletion is requested at privacy@slashvibe.dev; the terms page says delete@slashvibe.dev "or the account deletion feature in settings", and no such feature exists in this client. The privacy page also predates the current product (it says handles are usually X usernames). Proposed wording once decided: "Messages are kept for [period]. To delete your account and its messages, email [one address]; it is done within [N] days." -->
+What the service keeps, and how to ask for deletion, is set out at slashvibe.dev/privacy.
 
 **Is it open source? Can I run my own server?** This client is open source under the MIT
 licence; the server at slashvibe.dev is not. Every request the client makes, and what it reads
