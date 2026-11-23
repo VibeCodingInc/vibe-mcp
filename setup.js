@@ -442,13 +442,25 @@ const FRESH_SESSION = 'Open a fresh Claude Code session to load /vibe. Sessions 
  * The installer's last lines, in order: notes waiting (only when the read
  * found some), the fresh-session line, then the lines about who invited them
  * (invite.accept: only what it confirmed). Pure: [{ text, strong }].
+ *
+ * `invited` (the person came with --from): who invited them comes first, the
+ * first of those lines strong, then the notes waiting, and the fresh-session
+ * line stays last. Someone who was just invited is not first asked to invite
+ * someone else (setup.js leaves the "takes two" block out for them).
  */
-function finalLines({ waiting = null, inviteLines = [] } = {}) {
+function finalLines({ waiting = null, inviteLines = [], invited = false } = {}) {
   const out = [];
   const w = waitingLine(waiting);
+  const inv = (Array.isArray(inviteLines) ? inviteLines : []).filter((l) => typeof l === 'string' && l);
+  if (invited) {
+    inv.forEach((l, i) => out.push({ text: l, strong: i === 0 }));
+    if (w) out.push({ text: w, strong: true });
+    out.push({ text: FRESH_SESSION, strong: true });
+    return out;
+  }
   if (w) out.push({ text: w, strong: true });
   out.push({ text: FRESH_SESSION, strong: true });
-  for (const l of Array.isArray(inviteLines) ? inviteLines : []) if (typeof l === 'string' && l) out.push({ text: l, strong: false });
+  for (const l of inv) out.push({ text: l, strong: false });
   return out;
 }
 
@@ -605,7 +617,12 @@ async function setup() {
     }
     // The line carries a code minted on this account, so whoever installs from
     // it is someone this person knows once they sign in (invite.codeFor).
-    const bring = invite.line(authResult.handle, await invite.codeFor(authResult.handle));
+    // Someone who arrived with --from is not asked to invite someone else on
+    // this screen, and none of their codes is spent on it (setupReceipt). Their
+    // own line is still offered by vibe_start while they have no conversation,
+    // and by an invite-line message (vibe_prepare invite: true).
+    const invitedHere = receipt && Boolean(from);
+    const bring = invitedHere ? null : invite.line(authResult.handle, await invite.codeFor(authResult.handle));
     if (bring) {
       invite.noteGiven();
       console.log(`${colors.bold}  /vibe takes two. Send this to the person you build with:${colors.reset}`);
@@ -622,7 +639,7 @@ async function setup() {
     if (receipt) {
       let waiting = null;
       try { waiting = await readWaiting({ apiUrl: API_BASE, token: authResult.token, handle: authResult.handle }); } catch { waiting = null; }
-      for (const l of finalLines({ waiting, inviteLines })) {
+      for (const l of finalLines({ waiting, inviteLines, invited: invitedHere })) {
         console.log(`${l.strong ? colors.bold : colors.dim}  ${l.text}${colors.reset}`);
       }
       console.log('');
