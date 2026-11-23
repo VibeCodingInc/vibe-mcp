@@ -104,7 +104,7 @@ async function handler() {
   if (here.length > 0 && others > 0) lines.push(`and ${others} other ${others === 1 ? 'person' : 'people'} you have not written to`);
   // People with an open line who are in neither list still need to be known.
   const open = line.list();
-  if (open.length) lines.push('', `open lines (their agent may be asked, and may ask yours, unattended): ${open.map((h) => `@${h}`).join(', ')}`);
+  if (open.length) lines.push('', `open lines, opened by you (your agent may ask theirs and answer them unattended; theirs answers unattended only if they opened one with you too, which is not visible here):${open.map((h) => `@${h}`).join(', ')}`);
   lines.push('');
   if (!inbox.ok) lines.push("couldn't read your conversations");
   else if (threads.length === 0) lines.push('no conversations yet');

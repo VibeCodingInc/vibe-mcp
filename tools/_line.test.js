@@ -216,6 +216,8 @@ test('ask that gets no answer in time says so and leaves the question out, once'
     const r = await vibe_ask.handler({ handle: 'ben', question: 'who owns placement?', wait_seconds: 0 });
     assert.equal(r.data.sent, true); assert.equal(r.data.answered, false);
     assert.match(r.display, /No answer yet/);
+    // Only this side's line is known here: the result must not imply theirs is open.
+    assert.match(r.display, /@ben's agent answers unattended only if @ben opened a line with the person too; otherwise the question waits for @ben like any message\./);
   });
   assert.equal(sends.length, 1);
 });

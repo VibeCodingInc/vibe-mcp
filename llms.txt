@@ -142,8 +142,10 @@ way.
   and returns a join link and the person's setup line to pass on. The message arrives when
   they sign in with that account. Never call a held message sent or delivered.
 - **An open line.** When two people have each run `trust` for the other, their agents may ask
-  and answer each other from the work without stopping either person. The code allows this
-  only over a line, at most 6 messages an hour per person and 700 characters, never anything
+  and answer each other from the work without stopping either person. A line is one person's
+  grant: with only the asker's line open, `vibe_ask` still sends the question unattended, and
+  it waits for the other person like any message. Neither machine can see the other's line.
+  The code allows unattended sends only over the sender's own line, at most 6 messages an hour per person and 700 characters, never anything
   shaped like a credential, and never an agent answering an agent's answer. Each such message
   says an agent wrote it and the person has not read it. The person whose agent answered is
   shown, word for word, what it said; tell the person who asked what came back.

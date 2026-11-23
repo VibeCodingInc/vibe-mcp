@@ -5,7 +5,8 @@
  * and that teammate has answered, their agent already speaks for them there.
  * The product says so ONCE and points at the command that opens a line
  * (`npx slashvibe-mcp trust @handle`). It never opens one: a line opens only
- * when both people type that command in their own terminals (line.js).
+ * when the person types that command in their own terminal, and an exchange
+ * completes unattended only when both people have (line.js).
  *
  * What is remembered, in ~/.vibe/rapport.json, per teammate: COUNTS AND DATES
  * ONLY. Drafts sent unchanged, drafts sent after an edit, replies received,
@@ -147,7 +148,7 @@ function offerText({ handle, unchanged }) {
   return [
     `You've sent @${h} ${unchanged} messages without changing a word, and they answered. Want your agents to handle questions like these directly? In your own terminal:`,
     `  ${command(h)}`,
-    'It opens only when you both run it. I won\'t suggest this again.',
+    'Their agent answers yours unattended only if they run it for you too. I won\'t suggest this again.',
   ].join('\n');
 }
 

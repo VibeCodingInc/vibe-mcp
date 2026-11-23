@@ -16,6 +16,9 @@
  *     no message, however worded, can talk an agent into granting itself.
  *   - It is one-directional and local: it says what MY agent may do with THAT
  *     person. Both people must open one for an exchange to complete unattended.
+ *     This machine cannot see the other side's line (the service is not told
+ *     about lines): with only this side's line open, a question goes out
+ *     unattended and waits for the other person like any message.
  *   - The code, not the prompt, refuses an unattended send to anyone without a
  *     line; caps how many go out per hour; refuses text that looks like a
  *     credential; and marks every such message as written by the agent and not

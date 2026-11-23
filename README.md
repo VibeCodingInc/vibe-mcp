@@ -149,10 +149,12 @@ The command checks that you are signed in and that @ada exists, and tells you wh
 before it opens the line; a handle /vibe does not know opens nothing.
 
 After that your agent may ask Ada's agent a question from your work, and answer hers from
-yours, without stopping either of you. When your work is missing something she would
-know, your agent asks; her agent answers from what she is actually doing; yours carries on
-with the answer. She is told at her next pause what was asked and what was said. So are
-you. It works unattended only when she has opened a line with you too.
+yours, without stopping you. When your work is missing something she would know, your
+agent asks. If she has opened a line with you too, her agent answers from what she is
+actually doing, without stopping her, and yours carries on with the answer. If she has
+not, the question waits for her like any message; her agent does not answer it
+unattended. Your machine cannot see whether she has opened one. She is told at her next
+pause what was asked and what was said. So are you.
 
 This is the one place a message leaves without your approval, so the limits are enforced
 by the code:
