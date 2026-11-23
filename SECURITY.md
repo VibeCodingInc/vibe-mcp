@@ -58,7 +58,10 @@ the like). Under it, the start of
 the text, each line starting with "> ". Then one required text field, empty,
 titled for example 'Type "be" to send to @ben' or 'Type "noa" to send to
 @noah' ('to keep it for' on a kept-for-later box): the person types the first
-letters of who it is going to, then Accept / Decline. Enter alone cannot send
+letters of who it is going to, then Accept / Decline. A message on a new
+invite line has no recipient yet: its box says "Confirm: put this on a new
+invite line?" and its field 'Type "inv" to make the invite line' (three or
+more letters of "invite"; no "@"). Enter alone cannot send
 (the host will not take an empty field), and typing "send" again cannot send
 either. The box does not show which message a
 reply answers, exact spacing (runs of spaces and blank characters show as one
