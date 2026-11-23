@@ -53,6 +53,9 @@ const SHIPPED_COMMAND_SHA256 = new Set([
   // v0.9.25 - v0.9.26 described the note back as a one-line "That landed"
   // without saying it is a receipt with no question or request (landedReceipt).
   '49ed66dff06b5f186c11709cf6a33a9ab64775f8be7185ef9d20db55392126d1', // v0.9.25 - v0.9.26
+  // v0.9.27 - v0.9.29 were only for sending: `/vibe` typed alone (what a
+  // newcomer is told to try) did not first show what is waiting.
+  'd5cfbf18084e3e49e0e0194e9ee1dfac0986aaddede74a3e02bcda3d354d7fe1', // v0.9.27 - v0.9.29
 ]);
 
 function claudeDir(env = process.env) {

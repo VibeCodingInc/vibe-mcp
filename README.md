@@ -15,7 +15,7 @@ npx slashvibe-mcp setup
 It configures your coding agent, opens GitHub to sign you in (your GitHub username becomes
 your @handle), and installs the hooks that let messages reach you in Claude Code. Then
 open a fresh Claude Code session (one that was already open will not see /vibe) and say
-`what's waiting on /vibe`. When setup finishes it prints a line to pass to the person you
+`what's waiting on /vibe` (or type `/vibe`, which does the same). When setup finishes it prints a line to pass to the person you
 build with. /vibe takes two.
 
 **Invited by someone?** Use the line they sent you:
@@ -237,7 +237,8 @@ the line cannot be taken back, and it stops working once used or after 30 days. 
 at most three unused invitations at a time.
 
 You are still told when that happens. When a session opens, one line says how many people
-you have not written to are waiting, and how to ask: `what's waiting on /vibe`. It says
+you have not written to are waiting, and how to ask: `what's waiting on /vibe`, or type
+`/vibe` in Claude Code. It says
 nothing about who they are or what they wrote, to you or to your agent, until you ask.
 If one of them first wrote after you were given your invite line (`setup --from @you`), it
 says it may be someone you invited: that is from timing on your machine alone, for an
