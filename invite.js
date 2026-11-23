@@ -107,6 +107,7 @@ async function accept(typed, me, opts = {}) {
   if (them === reach.norm(me)) return { known: false, lines: [] };
   reach.know(them, opts.env);
   if (!reach.isKnown(them, opts.env)) return { known: false, lines: [] };
+  noteInviter(them, opts.env);
   const what = who.kind === 'agent' ? ', an agent,' : '';
   return {
     known: true,
@@ -218,4 +219,34 @@ function noteGiven(env = process.env, now = Date.now()) {
   } catch {}
 }
 
-module.exports = { fromArg, inviteArg, codeFor, validCode, accept, line, lookup, resolveRecipient, noteGiven, givenAt, GIVEN_TTL_MS };
+// ── who invited this person (the newcomer's side) ───────────────────────────
+// accept() above confirmed one handle; this remembers which, so the first
+// session can name them while nothing has passed between the two yet
+// (notice.js invitedEmptyState). Local, a handle and a time; never sent.
+const INVITER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const inviterFile = (env) => path.join(vibeHome(env), 'invited-by.json');
+
+/** Record the inviter accept() confirmed. Never throws. */
+function noteInviter(h, env = process.env, now = Date.now()) {
+  try {
+    const n = reach.norm(h);
+    if (!validHandle(n)) return;
+    const target = inviterFile(env);
+    fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+    const tmp = `${target}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ handle: n, at: now }), { mode: 0o600 });
+    fs.renameSync(tmp, target);
+  } catch {}
+}
+
+/** The handle accept() recorded as this person's inviter in the last 30 days, or null. */
+function inviter(env = process.env, now = Date.now()) {
+  try {
+    const o = JSON.parse(fs.readFileSync(inviterFile(env), 'utf8'));
+    const h = reach.norm(o && o.handle);
+    const at = Number(o && o.at);
+    return validHandle(h) && Number.isFinite(at) && at <= now && now - at <= INVITER_TTL_MS ? h : null;
+  } catch { return null; }
+}
+
+module.exports = { fromArg, inviteArg, codeFor, validCode, accept, line, lookup, resolveRecipient, noteGiven, givenAt, GIVEN_TTL_MS, noteInviter, inviter, INVITER_TTL_MS };

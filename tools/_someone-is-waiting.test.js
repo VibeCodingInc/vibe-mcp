@@ -103,6 +103,7 @@ test('a conversation that could not be read is neither shown nor counted; nothin
   } finally { await stub.close(); }
   // The rule is in the source: "never written to" is claimed only from a conversation that was read.
   const src = fs.readFileSync(path.join(ROOT, 'session-start-hook.cjs'), 'utf8');
-  assert.match(src, /else if \(read\) unknown\.add\(/);
+  // invitedEmptyState adds one more condition (an agent's message is not a person's), never fewer.
+  assert.match(src, /else if \(read && [^\n]*\) unknown\.add\(/);
   assert.match(src, /Array\.isArray\(thread\) && thread\.length > 0/);
 });
