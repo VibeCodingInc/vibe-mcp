@@ -105,8 +105,15 @@ async function accept(typed, me, opts = {}) {
   // can differ from what was typed only by '-' for '_'. That is the one marked.
   const them = who.handle && validHandle(who.handle) ? who.handle : h;
   if (them === reach.norm(me)) return { known: false, lines: [] };
+  // A forwarded line can pair one person's --from with another's code; the
+  // code's message is the code owner's, so naming the --from as the inviter
+  // would be false. Neither the sign-in nor the redemption answers who owns a
+  // code, so the one check here is the platform's own rule for the code's
+  // last part (codeIsFrom). Not consistent: nobody is marked or recorded.
+  if (opts.code && !codeIsFrom(opts.code, them)) return { known: false, lines: [`That invite code was not made by @${them}, so nobody was marked as your inviter.`] };
   reach.know(them, opts.env);
   if (!reach.isKnown(them, opts.env)) return { known: false, lines: [] };
+  noteInviter(them, opts.env);
   const what = who.kind === 'agent' ? ', an agent,' : '';
   return {
     known: true,
@@ -128,6 +135,22 @@ async function accept(typed, me, opts = {}) {
 // decides who invited whom, and a code the newcomer types cannot make them
 // known to anyone the platform did not record.
 const validCode = (c) => typeof c === 'string' && /^VIBE-[A-Z0-9]{2,16}(?:-[A-Z0-9]{1,16}){0,3}$/.test(c);
+
+/**
+ * Was this code made by this handle, as far as the code itself can say? The
+ * platform builds the last part from who created it:
+ *   'VIBE-' + random + '-' + String(createdBy || '').toUpperCase().slice(0, 4)
+ * (api/lib/invite-code.js mintInviteCode). The same rule, compared exactly.
+ * Four letters do not prove ownership (another handle can share them); they
+ * catch a --from that plainly is not the code's maker.
+ */
+function codeIsFrom(code, h) {
+  const c = String(code || '');
+  const suffix = String(h || '').toUpperCase().slice(0, 4);
+  if (!suffix || !c.startsWith('VIBE-')) return false;
+  const rest = c.slice(5);
+  return rest.length > suffix.length + 1 && rest.endsWith(`-${suffix}`) && !rest.slice(0, -suffix.length - 1).includes('-');
+}
 
 /** `--invite CODE` / `--invite=CODE` out of an argv. null when absent or malformed. */
 function inviteArg(argv = process.argv) {
@@ -218,4 +241,34 @@ function noteGiven(env = process.env, now = Date.now()) {
   } catch {}
 }
 
-module.exports = { fromArg, inviteArg, codeFor, validCode, accept, line, lookup, resolveRecipient, noteGiven, givenAt, GIVEN_TTL_MS };
+// ── who invited this person (the newcomer's side) ───────────────────────────
+// accept() above confirmed one handle; this remembers which, so the first
+// session can name them while nothing has passed between the two yet
+// (notice.js invitedEmptyState). Local, a handle and a time; never sent.
+const INVITER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const inviterFile = (env) => path.join(vibeHome(env), 'invited-by.json');
+
+/** Record the inviter accept() confirmed. Never throws. */
+function noteInviter(h, env = process.env, now = Date.now()) {
+  try {
+    const n = reach.norm(h);
+    if (!validHandle(n)) return;
+    const target = inviterFile(env);
+    fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+    const tmp = `${target}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ handle: n, at: now }), { mode: 0o600 });
+    fs.renameSync(tmp, target);
+  } catch {}
+}
+
+/** The handle accept() recorded as this person's inviter in the last 30 days, or null. */
+function inviter(env = process.env, now = Date.now()) {
+  try {
+    const o = JSON.parse(fs.readFileSync(inviterFile(env), 'utf8'));
+    const h = reach.norm(o && o.handle);
+    const at = Number(o && o.at);
+    return validHandle(h) && Number.isFinite(at) && at <= now && now - at <= INVITER_TTL_MS ? h : null;
+  } catch { return null; }
+}
+
+module.exports = { fromArg, inviteArg, codeFor, validCode, codeIsFrom, accept, line, lookup, resolveRecipient, noteGiven, givenAt, GIVEN_TTL_MS, noteInviter, inviter, INVITER_TTL_MS };

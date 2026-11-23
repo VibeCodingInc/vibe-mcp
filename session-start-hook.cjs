@@ -260,9 +260,9 @@ function live() {
     // Only a count ever crosses from the reader to the presenter.
     const strangers = Number.isInteger(parsed && parsed.strangers) && parsed.strangers > 0 ? parsed.strangers : 0;
     const invited = Number.isInteger(parsed && parsed.invited) && parsed.invited > 0 ? Math.min(parsed.invited, strangers) : 0;
-    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers, invited, signin: normalizeSignin(parsed && parsed.signin), noted: normalizeNoted(parsed && parsed.noted), unsent: normalizeUnsent(parsed && parsed.unsent), nothingWaiting: Boolean(parsed && parsed.nothingWaiting === true) };
+    return { messages: normalizeMessages(parsed), here: normalizeHere(parsed && parsed.here), doors: normalizeDoors(parsed && parsed.doors), strangers, invited, signin: normalizeSignin(parsed && parsed.signin), noted: normalizeNoted(parsed && parsed.noted), unsent: normalizeUnsent(parsed && parsed.unsent), nothingWaiting: Boolean(parsed && parsed.nothingWaiting === true), inviter: normalizeInviter(parsed && parsed.inviter) };
   } catch {
-    return { messages: [], here: [], doors: [], strangers: 0, invited: 0, signin: null, noted: [], unsent: [], nothingWaiting: false };
+    return { messages: [], here: [], doors: [], strangers: 0, invited: 0, signin: null, noted: [], unsent: [], nothingWaiting: false, inviter: null };
   }
 }
 
@@ -375,6 +375,27 @@ function markMoment(now = Date.now()) {
     fs.writeFileSync(path.join(require('./vibe-home').vibeHome(), MOMENT_FILE), JSON.stringify({ day: localDay(now) }), { mode: 0o600 });
   } catch {}
 }
+// ── invited, and nothing from them yet (notice.js invitedEmptyState) ────────
+// A newcomer who came by someone's invite line (invite.accept recorded who)
+// and has no conversation with them yet: the first session names the inviter
+// and the one thing to say, instead of an empty room. Said only from a
+// conversation list that was read; a failed read says nothing.
+const normalizeInviter = (v) => (typeof v === 'string' && HANDLE.test(v) ? v : null);
+function inviterLine(h) {
+  return `@${h} invited you. Nothing from them yet. To write first, say: message @${h}: \u2026`;
+}
+/**
+ * Pure: the inviter to name, or null. Named only when the list was read
+ * (ok), no conversation in it is with them (either direction), and they are
+ * not the person themselves.
+ */
+function inviterWithNothingYet(inviter, result, me) {
+  const h = normalizeInviter(inviter);
+  if (!h || h === String(me || '').toLowerCase()) return null;
+  if (!result || result.ok !== true || !Array.isArray(result.threads)) return null;
+  return result.threads.some((t) => t && String(t.handle || '').toLowerCase() === h) ? null : h;
+}
+
 /** Pure: the conversation list was read and nobody else's message in it is unread. */
 function inboxEmpty(result, me) {
   if (!result || result.ok !== true || !Array.isArray(result.threads)) return false;
@@ -391,7 +412,7 @@ function withNoteBack(messages) {
  * Up to three things, each one line for the person and a short note for the
  * model: who is here, a door someone left, and messages that were waiting.
  */
-function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null, invited = 0, noted = [], unsent = [], { quietMoment = false } = {}) {
+function hookOutput(messages, here = [], doors = [], strangers = 0, signin = null, invited = 0, noted = [], unsent = [], { quietMoment = false, inviter = null } = {}) {
   const waitingUnknown = Number.isInteger(strangers) && strangers > 0 ? Math.min(strangers, 99) : 0;
   const mayBeInvited = Number.isInteger(invited) && invited > 0 ? Math.min(invited, waitingUnknown) : 0;
   const signinNotice = signinLine(normalizeSignin(signin));
@@ -407,7 +428,10 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
   // Nothing waiting, said at most once a day (notice.js emptyStates): the
   // caller decides that the inbox was read and found empty (quietMoment).
   const moment = quietMoment === true && messages.length === 0 && waitingUnknown === 0 && reminders.length === 0 && notice.on('emptyStates');
-  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice && notes.length === 0 && reminders.length === 0 && !moment) {
+  // The inviter, while nothing has passed between them (fetchLive decides from a read list).
+  const invitedBy = notice.on('invitedEmptyState') ? normalizeInviter(inviter) : null;
+  const nameInviter = Boolean(invitedBy) && !messages.some((m) => String(m.from || '').toLowerCase() === invitedBy);
+  if (messages.length === 0 && here.length === 0 && doors.length === 0 && waitingUnknown === 0 && !signinNotice && notes.length === 0 && reminders.length === 0 && !moment && !nameInviter) {
     emptyOutput();
     return [];
   }
@@ -488,6 +512,11 @@ function hookOutput(messages, here = [], doors = [], strangers = 0, signin = nul
     context.push(r.context);
   }
 
+  if (nameInviter) {
+    shown.push(`/vibe · ${inviterLine(invitedBy)}`);
+    context.push(`/vibe: @${invitedBy} invited the person to /vibe, and nothing has passed between them yet. The person has been shown this line. Do not open a draft to @${invitedBy} on your own now; when the work produces a question or a result @${invitedBy} would want, you may offer one with vibe_prepare.`);
+  }
+
   if (moment) {
     shown.push(`/vibe · ${QUIET_MOMENT}`);
     context.push('/vibe: the person has been shown that nothing is waiting for them on /vibe. Do not repeat it.');
@@ -562,7 +591,10 @@ async function fetchLive() {
       } catch {}
     }
     if (known) kept.push(row);
-    else if (read) unknown.add(String(from).toLowerCase());
+    // invitedEmptyState: the count says "person"; a message the platform
+    // serves as an agent's or automated (a welcome) is not one. It stays
+    // waiting where vibe_start lists it. Rows with no actor kind still count.
+    else if (read && !(notice.on('invitedEmptyState') && (row.actorKind === 'agent' || row.actorKind === 'automated'))) unknown.add(String(from).toLowerCase());
   }
   // A door card is not a message to answer (door.js). Remember it, so who's
   // here can say "door open", and announce it once per machine: it stays
@@ -593,12 +625,25 @@ async function fetchLive() {
   // Nothing waiting is a claim about the conversations, so it is made only from
   // a read that succeeded (notice.js emptyStates); one extra request, only
   // when the inbox above came back empty.
+  // The inviter (invitedEmptyState): named only while no conversation with
+  // them exists, judged from the same one read.
+  const named = notice.on('invitedEmptyState');
+  let invitedBy = null;
+  if (named) { try { invitedBy = require('./invite').inviter(); } catch { invitedBy = null; } }
+  if (invitedBy && (invitedBy === me || reach.isMuted(invitedBy))) invitedBy = null;
   let nothingWaiting = false;
-  if (rows.length === 0 && notice.on('emptyStates')) {
+  let inviter = null;
+  const wantEmpty = rows.length === 0 && notice.on('emptyStates');
+  if (wantEmpty || invitedBy) {
     const rest = boundedDeadline(process.env.VIBE_SESSION_START_DEADLINE_MS) - Math.ceil(process.uptime() * 1000) - 400;
-    try { nothingWaiting = inboxEmpty(await within(store.getInboxResult(me), rest), me); } catch { nothingWaiting = false; }
+    let list = null;
+    try { list = await within(store.getInboxResult(me), rest); } catch { list = null; }
+    // "Rare moment" is for someone with at least one conversation; on day one
+    // with none, it is not a rare moment (invitedEmptyState).
+    if (wantEmpty) nothingWaiting = inboxEmpty(list, me) && (!named || list.threads.length > 0);
+    inviter = inviterWithNothingYet(invitedBy, list, me);
   }
-  return { messages: normalizeMessages(messages), here, doors, strangers: unknown.size, invited: invited.size, noted, unsent, nothingWaiting };
+  return { messages: normalizeMessages(messages), here, doors, strangers: unknown.size, invited: invited.size, noted, unsent, nothingWaiting, inviter };
 }
 
 /**
@@ -675,7 +720,7 @@ async function main() {
     if (signin) markSigninShown();
     // Exit once written: a conversation-list read given up on (within) must
     // not hold this reader open until the parent's deadline kills everything.
-    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, invited: found.invited || 0, signin, noted: found.noted || [], unsent: found.unsent || [], nothingWaiting: found.nothingWaiting === true }), () => process.exit(0));
+    process.stdout.write(JSON.stringify({ messages: found.messages, here: found.here, doors: found.doors, strangers: found.strangers, invited: found.invited || 0, signin, noted: found.noted || [], unsent: found.unsent || [], nothingWaiting: found.nothingWaiting === true, inviter: normalizeInviter(found.inviter) }), () => process.exit(0));
     return;
   }
 
@@ -695,7 +740,7 @@ async function main() {
   // this machine (also when the host gives no session id).
   const unsent = now.unsent.filter((r) => { try { return require('./unsent').mayMentionAtStart(r.id, session); } catch { return false; } });
   const quietMoment = now.nothingWaiting && unsent.length === 0 && momentFree();
-  const said = hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited, now.noted, unsent, { quietMoment });
+  const said = hookOutput(now.messages, now.here, now.doors, now.strangers, now.signin, now.invited, now.noted, unsent, { quietMoment, inviter: now.inviter });
   if (quietMoment) markMoment();
   claimShown(now.messages);
   markTold((said || []).map((id) => ({ id })), session);
@@ -835,6 +880,8 @@ module.exports = {
   momentFree,
   markMoment,
   inboxEmpty,
+  inviterLine,
+  inviterWithNothingYet,
   localDay,
   noteWhen,
   normalizeUnsent,

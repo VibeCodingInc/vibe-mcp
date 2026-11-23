@@ -373,6 +373,11 @@ test('session start end to end: the wry line the first time, silence the second;
     const vh = homeFor('ada', ['mira']);
     // Who is here is its own line (mira is in a session in the stub); the rest is what this tests.
     const lines = (o) => String(o.systemMessage || '').split('\n').filter((l) => !/here now:/.test(l));
+    // invitedEmptyState: "Rare moment" is for someone with at least one
+    // conversation; with none it is not a rare moment, and it is not said.
+    assert.deepEqual(lines(await sitDown(vh, stub.url)), [], 'no conversation yet: silence');
+    assert.ok(!fs.existsSync(path.join(vh, 'nothing-waiting.json')), 'nothing recorded');
+    stub.post('ada', 'mira', 'site_tz is next on my list');
     const first = await sitDown(vh, stub.url);
     assert.deepEqual(lines(first), ['/vibe · Nothing waiting. Rare moment — enjoy it.']);
     assert.ok(fs.existsSync(path.join(vh, 'nothing-waiting.json')));
@@ -385,6 +390,10 @@ test('session start end to end: the wry line the first time, silence the second;
     const vh2 = homeFor('ada', ['mira']);
     const stub2 = await startStub({ ada: {}, mira: {} });
     try { assert.deepEqual(lines(await sitDown(vh2, stub2.url, { VIBE_NOTICE_OFF: 'emptyStates' })), []); } finally { await stub2.close(); }
+    // invitedEmptyState switched off (loopback only): the wry line on day one again, as before.
+    const vh4 = homeFor('ada', ['mira']);
+    const stub4 = await startStub({ ada: {}, mira: {} });
+    try { assert.deepEqual(lines(await sitDown(vh4, stub4.url, { VIBE_NOTICE_OFF: 'invitedEmptyState' })), ['/vibe · Nothing waiting. Rare moment — enjoy it.']); } finally { await stub4.close(); }
     // Quiet shows nothing at all.
     const vh3 = homeFor('ada', ['mira']);
     fs.writeFileSync(path.join(vh3, 'reach.json'), JSON.stringify({ quiet: true, muted: {}, known: { mira: 1 } }));

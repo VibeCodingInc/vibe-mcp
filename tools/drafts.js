@@ -219,7 +219,7 @@ const newId = (prefix) => `${prefix}${crypto.randomBytes(4).toString('hex')}`;
 // different message is a different act, so it changes the rev and the key.
 // Holding a message for a newcomer is a different act from sending one, so
 // it is part of the rev too (a held draft never shares a rev with a send).
-const textHash = (d) => crypto.createHash('sha1').update(compose(d) + (d.replyTo ? `\n\u21a9${d.replyTo}` : '') + (d.held ? '\nheld-for-github' : '')).digest('hex');
+const textHash = (d) => crypto.createHash('sha1').update(compose(d) + (d.replyTo ? `\n\u21a9${d.replyTo}` : '') + (d.invite ? '\ninvite-line' : (d.held ? '\nheld-for-github' : ''))).digest('hex');
 const sendKey = (d) => `draft-${d.id}-${textHash(d).slice(0, 10)}`;
 /**
  * The #392 approval digest over the EXACT snapshot the person approved:
@@ -240,8 +240,16 @@ const HELD_DAYS = 30;
 /** The platform's for_github shape (api/invites.js), applied to the canonical handle. */
 const GITHUB_LOGIN = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/;
 const isGithubLogin = (h) => GITHUB_LOGIN.test(String(h || ''));
-/** generateCode(): 'VIBE-' + 4 of an unambiguous alphabet + '-' + the inviter handle's first 4. */
-const INVITE_CODE = /^VIBE-[A-Z0-9]{4}-[A-Z0-9_-]{1,4}$/;
+/**
+ * mintInviteCode() (api/lib/invite-code.js): 'VIBE-' + random characters of
+ * an unambiguous alphabet + '-' + the inviter handle's first 4. The random
+ * part was 4 characters and is 10 since 2026-11-21; a reply in the 10 form
+ * was read as "not an invitation" and every Keep came back unconfirmed.
+ * heldCarriesCode (notice.js) accepts both; off, only the old 4.
+ */
+const INVITE_CODE_OLD = /^VIBE-[A-Z0-9]{4}-[A-Z0-9_-]{1,4}$/;
+const INVITE_CODE_NOW = /^VIBE-[A-Z0-9]{4,16}-[A-Z0-9_-]{1,4}$/;
+const isInviteCode = (c) => (require('../notice').on('heldCarriesCode') ? INVITE_CODE_NOW : INVITE_CODE_OLD).test(String(c || ''));
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 /**
  * The platform's invitation approval digest (APPROVAL_RULE 'invitation-v1'):
@@ -306,12 +314,16 @@ const DRAFT_DESCRIPTION = draftDefinition.description;
 const DRAFT_PROPERTIES = draftDefinition.inputSchema.properties;
 const ASKED = { type: 'boolean', description: "true only if the person's latest message asked for a message to this person or agreed to one (also for a reply); false or absent when you are offering it unprompted." };
 const ASKED_SENTENCE = ' Set asked: true only when the person\'s latest message asked for this message or agreed to it; when you offer it unprompted, your reply must first give the person everything their message asked for, in full, and show the draft after that, never instead of it.';
-Object.defineProperty(draftDefinition, 'description', { enumerable: true, get: () => DRAFT_DESCRIPTION + (require('../notice').on('answerFirst') ? ASKED_SENTENCE : '') });
+Object.defineProperty(draftDefinition, 'description', { enumerable: true, get: () => DRAFT_DESCRIPTION + (require('../notice').on('inviteQuestion') ? INVITE_SENTENCE : '') + (require('../notice').on('answerFirst') ? ASKED_SENTENCE : '') });
 // landedReceipt (notice.js): the kind field says what a note back is.
 const KIND_RECEIPT = { ...DRAFT_PROPERTIES.kind, description: 'Only "landed": a note back to someone whose reply led to a concrete change made in this session. Needs reply_to (their reply). Once per reply. ' + LANDED_KIND_RECEIPT + ' It changes nothing about how the message is checked or sent.' };
+// inviteQuestion (notice.js): a message carried by a new invite line.
+const INVITE_PROP = { type: 'boolean', description: 'true, with no handle: the message rides on a new invite line and reaches whoever joins /vibe with that line, once, as the person\'s first message to them. Previewed and kept like a message held for someone not on /vibe yet. One message per line.' };
+const INVITE_SENTENCE = ' To bring someone new with one real question, pass invite: true and the message, with no handle: the preview says it goes to whoever uses that invite line, and Keep makes the line.';
 function draftProperties() {
   const notice = require('../notice');
-  const props = notice.on('landedReceipt') ? { ...DRAFT_PROPERTIES, kind: KIND_RECEIPT } : DRAFT_PROPERTIES;
+  let props = notice.on('landedReceipt') ? { ...DRAFT_PROPERTIES, kind: KIND_RECEIPT } : DRAFT_PROPERTIES;
+  if (notice.on('inviteQuestion')) props = { ...props, invite: INVITE_PROP };
   return notice.on('answerFirst') ? { ...props, asked: ASKED } : props;
 }
 Object.defineProperty(draftDefinition.inputSchema, 'properties', { enumerable: true, get: draftProperties });
@@ -332,6 +344,28 @@ function landedArgs(args, wantId) {
   if (!isMessageId(args.reply_to)) return { refuse: 'Not prepared: a note back ("landed") needs reply_to, the id of the reply it is about. Nothing was sent.' };
   return { landed: true };
 }
+/**
+ * invite: true (notice.js inviteQuestion): a message for whoever joins with a
+ * new invite line. It names nobody, answers nothing and is not a note back.
+ * Returns { invite: boolean } or { refuse: text }. Switched off, the field is
+ * not read at all (the call is then an ordinary one, which needs a handle).
+ */
+function inviteArgs(args, wantId) {
+  const v = args ? args.invite : undefined;
+  if (!(v === true || v === 'true')) return { invite: false };
+  if (!require('../notice').on('inviteQuestion')) return { invite: false };
+  // An agent's own account skips the typed turn and the box (it speaks in its
+  // own name), so a line it made would carry a message nobody confirmed to
+  // whoever joins with it. Only a person makes one. Held messages to a named
+  // account are not affected.
+  if (isAgentIdentity()) return { refuse: INVITE_AGENT_REFUSED };
+  if (wantId) return { invite: true };
+  if (typeof args.handle === 'string' && args.handle.trim()) return { refuse: 'Not prepared: a message on an invite line is for whoever joins with the line, so it takes no handle. To write to someone, leave out invite. Nothing was sent.' };
+  if (args.reply_to !== undefined && args.reply_to !== null && args.reply_to !== '') return { refuse: 'Not prepared: a message on an invite line answers no message yet; leave out reply_to. Nothing was sent.' };
+  if (args.kind !== undefined && args.kind !== null && args.kind !== '') return { refuse: 'Not prepared: a note back ("landed") goes to someone whose reply you used, not on an invite line. Nothing was sent.' };
+  return { invite: true };
+}
+const INVITE_AGENT_REFUSED = 'Not prepared: an invite line with a message is made by a person; an agent account cannot make one. Nothing was sent.';
 const LANDED_QUESTION = /[?\uFF1F\u061F]/u;
 const LANDED_NO_QUESTION = 'Not prepared: a note back ("landed") carries no question. Put the question in a separate draft if the person wants to ask it. Nothing was sent.';
 function landedTextProblem(text) {
@@ -493,6 +527,8 @@ async function draftHandler(args, ctx = {}) {
   }
   const landed = landedArgs(args, wantId);
   if (landed.refuse) return { display: landed.refuse };
+  const inviting = inviteArgs(args, wantId);
+  if (inviting.refuse) return { display: inviting.refuse };
   if (landed.landed && message) { const bad = landedTextProblem(message); if (bad) return { display: bad }; }
   for (const r of (args && Array.isArray(args.refs) ? args.refs : [])) {
     const t = r && firstHidden(r.title);
@@ -540,7 +576,16 @@ async function draftHandler(args, ctx = {}) {
   const out = transact(drafts => {
     let d = wantId ? drafts.find(x => x.id === wantId) : null;
     if (wantId && !d) return { display: `No draft ${wantId} — it may have expired (drafts live 24h, locally). Prepare it again.` };
-    if (!d) {
+    if (!d && inviting.invite) {
+      // inviteQuestion: one message on a new invite line. Held, as a Keep is:
+      // nothing leaves until the person chooses Keep in words, has a turn and
+      // (where the host shows one) types into the box; then one invitation
+      // carrying exactly this text is created (createHeld).
+      if (!message) return { display: 'To put a message on an invite line: pass invite: true and the message. Nothing is sent by this step.' };
+      d = { id: newId('w'), status: 'previewed', createdAt: Date.now(), from: me, to: null, invite: true, held: true, body: message, replyTo: null, refs: cleanContext({ refs: args.refs }).refs, context: { project: typeof args.project === 'string' && args.project.trim() ? args.project.trim().slice(0, 60) : null }, firstRev: null, dir: projectKey() };
+      if (tooManyBlankLines(compose(d))) return { display: BLANK_LINES };
+      drafts.push(d);
+    } else if (!d) {
       if (!args || !args.handle || !message) return { display: 'To prepare a message: pass a handle and a message (or a draft id to edit). Nothing is sent by this step.' };
       const to = resolvedTo || canonicalHandle(args.handle);
       if (!to) return { display: 'To prepare a message: pass a handle and a message (or a draft id to edit). Nothing is sent by this step.' };
@@ -585,12 +630,12 @@ async function draftHandler(args, ctx = {}) {
       reconcileAbandoned(d);
       if (d.status === 'held') return { display: heldAlready(d) };
       if (d.held && d.status === 'unknown') return { display: heldUnknown(d) };
-      if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — nothing changed. Open a new draft to say more.` };
+      if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to ${forWhom(d)} — nothing changed. Open a new draft to say more.` };
       if (d.status === 'cancelled') return { display: d.unconfirmed
-        ? `Draft ${d.id} was cancelled after a Send to @${d.to} that did not confirm — it may or may not have reached them. Open a new draft to say more.`
+        ? `Draft ${d.id} was cancelled after a Send to ${forWhom(d)} that did not confirm — it may or may not have reached them. Open a new draft to say more.`
         : `Draft ${d.id} was cancelled — open a new draft (vibe_prepare with handle + message). Nothing sent.` };
       if (d.status === 'sending') return { display: `Draft ${d.id} is being sent right now — nothing to edit.` };
-      if (d.status === 'unknown' && (message || args.refs)) return { display: `Draft ${d.id}: the last Send to @${d.to} did not confirm, so the text is frozen — Send again to retry exactly that text (it delivers once), or Cancel. To say something different, cancel and open a new draft.` };
+      if (d.status === 'unknown' && (message || args.refs)) return { display: `Draft ${d.id}: the last Send to ${forWhom(d)} did not confirm, so the text is frozen — Send again to retry exactly that text (it delivers once), or Cancel. To say something different, cancel and open a new draft.` };
       if (d.status === 'unknown') {
         const stored = firstHidden(compose(d));
         if (stored) return { display: storedHidden(d.id, stored) };
@@ -614,6 +659,7 @@ async function draftHandler(args, ctx = {}) {
         } else if (landed.landed) {
           return { display: `Not changed: draft ${d.id} is an ordinary message; a note back ("landed") is opened as a new draft with handle, message and reply_to. Nothing was sent.` };
         }
+        if (inviting.invite && !d.invite) return { display: `Not changed: draft ${d.id} is a message to ${forWhom(d)}; a message on an invite line is opened as a new draft with invite: true and no handle. Nothing was sent.` };
         if (message) { d.body = body; d.edited = true; }
         if (args.refs) d.refs = refs;
         if (args.reply_to !== undefined && !d.held && d.kind !== 'landed') d.replyTo = cleanId(args.reply_to);
@@ -638,10 +684,11 @@ async function draftHandler(args, ctx = {}) {
   // Will this send be confirmed in a box the host shows (index.js says)?
   const boxy = Boolean(ctx && ctx.box) && !isAgentIdentity();
   const fresh = !wantId;
-  const note = fresh ? recipientNote(out.draft.to, Boolean(out.draft.held)) : '';
+  const note = fresh && !out.draft.invite ? recipientNote(out.draft.to, Boolean(out.draft.held)) : '';
   const asked = askedArg(args && args.asked);
   return withAnswerFirst(await laidOut(), { fresh, asked });
   async function laidOut() {
+  if (out.draft.invite) return invitePreview(out.draft, { boxy });
   if (out.draft.held) return heldPreview(out.draft, { boxy, note });
   // The conversation is read for a new draft only; an edit keeps what that read found.
   const [person, look] = await Promise.all([findPerson(out.draft.to), fresh ? lookThread(me, out.draft.to) : { thread: null, reach: REACH_SEEN.get(out.draft.id) || localReach(out.draft.to) }]);
@@ -835,12 +882,35 @@ function heldPreview(d, { boxy = false, note = '' } = {}) {
     },
   };
 }
+/**
+ * The preview of a message on an invite line (notice.js inviteQuestion). It
+ * names no one, because the line names no one: it says who gets it (the first
+ * person to join with the line, once) and that anyone the line is passed to
+ * could be that person.
+ */
+function invitePreview(d, { boxy = false } = {}) {
+  const att = d.refs && d.refs.length ? d.refs.map(r => `${r.title}: ${r.url}`).join('\n') : 'none';
+  const message = compose(d);
+  const rev = revOf(d);
+  return {
+    display: `**On:** a new invite line (for whoever joins /vibe with it, once)\n**Message (exact):**\n${message}\n**Attachments:** ${att}\n${noteLine(message)}\n`
+      + `If you keep it, /vibe makes a new invite line that carries this exact message, kept for ${HELD_DAYS} days. The first person who joins /vibe with that line gets it once, as your first message to them, and the line is then used up. Anyone you pass the line to could be that person, so leave out anything you would not send them. You get the command and page to pass on; nothing reaches anyone before they join. Once made, the line cannot be taken back from here; it stops working when it is used or after ${HELD_DAYS} days.\n\n`
+      + `Keep on a new invite line · Edit · Cancel — nothing has been sent.  _(draft ${d.id} · rev ${rev})_${boxNote(d, boxy)}`,
+    data: {
+      draft: { id: d.id, to: null, invite: true, body: d.body, message, refs: d.refs || [], status: d.status, rev, held: true },
+      actions: [{ label: 'Keep on a new invite line', tool: 'vibe_send', args: { id: d.id, rev } }, { label: 'Edit', tool: 'vibe_prepare', args: { id: d.id, message: '<new body text — links are kept separately>' } }, { label: 'Cancel', tool: 'vibe_discard', args: { id: d.id } }],
+    },
+  };
+}
 function heldAlready(d) {
+  if (d.invite) return `Draft ${d.id} is already on an invite line — not creating a second one.${d.passOn ? ` Pass on: ${d.passOn}` : (d.joinUrl ? ` Join link: ${d.joinUrl}` : '')}`;
   return `Draft ${d.id} is already held for @${d.to} — not creating a second invitation.${d.joinUrl ? ` Join link: ${d.joinUrl}` : ''}`;
 }
 function heldUnknown(d) {
-  return `Draft ${d.id}: the last Keep for @${d.to} did not confirm — the invitation may or may not have been created, and a second try could create two. Cancel it, then open a new draft if you still want to say it. Nothing more was done.`;
+  return `Draft ${d.id}: the last Keep ${d.invite ? 'on an invite line' : `for @${d.to}`} did not confirm — the invitation may or may not have been created, and a second try could create two. Cancel it, then open a new draft if you still want to say it. Nothing more was done.`;
 }
+/** Who a draft is for, in a sentence: "@ben", or the invite line (inviteQuestion). */
+const forWhom = (d) => (d && d.invite ? 'your invite line' : `@${d && d.to}`);
 
 // ── vibe_discard ───────────────────────────────────────────────────────
 
@@ -856,11 +926,11 @@ async function discardHandler(args) {
     const d = drafts.find(x => x.id === id);
     if (!d) return { display: `No draft ${id} to cancel — nothing was sent either way.` };
     reconcileAbandoned(d);
-    if (d.status === 'sending') return { display: `Draft ${d.id} is being sent to @${d.to} right now — it can't be cancelled at this point.`, data: { draft: { id: d.id, status: d.status } } };
-    if (d.status === 'held') return { display: `Draft ${d.id} is already held for @${d.to} — a held message can't be taken back from here.`, data: { draft: { id: d.id, status: d.status } } };
-    if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to @${d.to} — a sent message can't be unsent.`, data: { draft: { id: d.id, status: d.status } } };
+    if (d.status === 'sending') return { display: `Draft ${d.id} is being sent to ${forWhom(d)} right now — it can't be cancelled at this point.`, data: { draft: { id: d.id, status: d.status } } };
+    if (d.status === 'held') return { display: `Draft ${d.id} is already ${d.invite ? 'on an invite line' : `held for @${d.to}`} — a held message can't be taken back from here.`, data: { draft: { id: d.id, status: d.status } } };
+    if (d.status === 'sent') return { display: `Draft ${d.id} was already sent to ${forWhom(d)} — a sent message can't be unsent.`, data: { draft: { id: d.id, status: d.status } } };
     if (d.status === 'cancelled') return { display: d.unconfirmed
-      ? `Draft ${d.id} is already cancelled — and the earlier Send to @${d.to} did not confirm, so it may or may not have reached them.`
+      ? `Draft ${d.id} is already cancelled — and the earlier Send to ${forWhom(d)} did not confirm, so it may or may not have reached them.`
       : `Draft ${d.id} is already cancelled — nothing was sent.`, data: { draft: { id: d.id, status: d.status } } };
     const wasUnknown = d.status === 'unknown' || Boolean(d.unconfirmed);
     // Who discarded it, for earlierOffer only (never for sending): the
@@ -870,15 +940,15 @@ async function discardHandler(args) {
     if (d.held) {
       return {
         display: wasUnknown
-          ? `Cancelled — nothing more will be done for @${d.to}. Note: the earlier Keep did not confirm, so an invitation may or may not have been created.`
-          : `Cancelled — nothing kept for @${d.to}. The draft stays on your machine.`,
+          ? `Cancelled — nothing more will be done for ${forWhom(d)}. Note: the earlier Keep did not confirm, so an invitation may or may not have been created.`
+          : `Cancelled — nothing kept for ${forWhom(d)}. The draft stays on your machine.`,
         data: { draft: { id: d.id, status: 'cancelled' } },
       };
     }
     return {
       display: wasUnknown
-        ? `Cancelled — no further send to @${d.to}. Note: the earlier attempt did not confirm, so it may or may not have reached them.`
-        : `Cancelled — nothing sent to @${d.to}. The draft stays on your machine.`,
+        ? `Cancelled — no further send to ${forWhom(d)}. Note: the earlier attempt did not confirm, so it may or may not have reached them.`
+        : `Cancelled — nothing sent to ${forWhom(d)}. The draft stays on your machine.`,
       data: { draft: { id: d.id, status: 'cancelled' } },
     };
   });
@@ -926,7 +996,7 @@ function cannotSend(d, rev, me) {
   // whoever is signed in now (codex P1).
   if (d.from && d.from !== me) return `Draft ${d.id} was prepared as @${d.from}; you are signed in as @${me}. Nothing sent — open a new draft as yourself.`;
   if (d.status === 'held') return heldAlready(d);
-  if (d.status === 'sent') return `Draft ${d.id} was already sent to @${d.to} — not sending it twice.`;
+  if (d.status === 'sent') return `Draft ${d.id} was already sent to ${forWhom(d)} — not sending it twice.`;
   if (d.status === 'cancelled') return `Draft ${d.id} was cancelled — nothing sent. Open a new draft if you want it back.`;
   if (!rev) return `Send needs the rev shown in the preview of draft ${d.id} — open it with vibe_prepare and send with that rev. Nothing sent.`;
   // The current rev is not named here, but that is not what protects the
@@ -947,7 +1017,7 @@ function cannotSend(d, rev, me) {
   if (d.status === 'unknown' && !transportDedupes()) {
     // Without server-side deduplication a retry could deliver twice; the
     // honest options are to cancel (with the warning) or write anew.
-    return `Draft ${d.id}: the earlier Send to @${d.to} did not confirm, and this transport cannot deduplicate a retry. Cancel it (the earlier attempt may have reached them) and open a new draft if you still want to say it. Nothing sent.`;
+    return `Draft ${d.id}: the earlier Send to ${forWhom(d)} did not confirm, and this transport cannot deduplicate a retry. Cancel it (the earlier attempt may have reached them) and open a new draft if you still want to say it. Nothing sent.`;
   }
   return null;
 }
@@ -960,7 +1030,7 @@ function claimDraft(d, rev) {
   d.approvedSha256 = d.held ? heldDigest(message) : approvedDigest(d.to, message);
   // Sent exactly as first previewed? Unknown (null) for a draft with no first rev on record.
   const unchanged = typeof d.firstRev === 'string' ? d.firstRev === rev : null;
-  return { id: d.id, to: d.to, body: d.body, refs: d.refs, context: d.context, replyTo: d.replyTo || null, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, held: Boolean(d.held), unchanged };
+  return { id: d.id, to: d.to, body: d.body, refs: d.refs, context: d.context, replyTo: d.replyTo || null, message, key: d.idempotencyKey, approvedSha256: d.approvedSha256, held: Boolean(d.held), invite: Boolean(d.invite), unchanged };
 }
 
 // ── the Send box (confirm-box.js) ─────────────────────────────────────────────
@@ -977,6 +1047,8 @@ function claimDraft(d, rev) {
 
 const sha256 = (t) => crypto.createHash('sha256').update(String(t), 'utf8').digest('hex');
 const BOX_NOT_ACCEPTED = (to) => `Not sent. It is still a draft for @${to}. Only if they ask again: show it with vibe_prepare and wait for them to say send.`;
+/** The same, for a draft as it stands: an invite-line message has no handle (inviteQuestion). */
+const BOX_NOT_ACCEPTED_FOR = (d) => (d && d.invite ? 'Not sent. It is still a draft for your invite line. Only if they ask again: show it with vibe_prepare and wait for them to say send.' : BOX_NOT_ACCEPTED(d ? d.to : 'them'));
 const BOX_BUSY = 'Not sent: another /vibe confirmation box is open. Wait until it is answered.';
 const BOX_HOOK = (file) => `Not sent: a hook on this machine is set to answer /vibe's confirmation box (${file}). Remove it to send.`;
 const BOX_JSON = (file) => `Not sent: a settings file on this machine cannot be read as JSON (${file}), so /vibe cannot check it for a hook that would answer its confirmation box. Fix the file to send.`;
@@ -984,7 +1056,7 @@ const BOX_ACCOUNT = 'Not sent: the /vibe account signed in here changed while th
 
 /** The Send box's message for a draft as it stands (confirm-box.js). */
 function boxMessageFor(d) {
-  return require('../confirm-box').message({ to: d.to, held: Boolean(d.held), retry: d.status === 'unknown', reply: Boolean(d.replyTo), text: compose(d).trim() });
+  return require('../confirm-box').message({ to: d.to, held: Boolean(d.held), invite: Boolean(d.invite), retry: d.status === 'unknown', reply: Boolean(d.replyTo), text: compose(d).trim() });
 }
 /**
  * One plain line for the end of a preview. Where a box will be shown and it
@@ -1001,7 +1073,7 @@ function boxNote(d, boxy) {
 }
 
 const boxRefusal = (display, reason) => ({ display, data: { sent: false, definite: true, reason, turn_check: 'box' } });
-const notAccepted = (to) => boxRefusal(BOX_NOT_ACCEPTED(to), 'box_not_accepted');
+const notAccepted = (d) => boxRefusal(BOX_NOT_ACCEPTED_FOR(d), 'box_not_accepted');
 
 /** The hook tripwire, unless the lab's own hook is allowed (both conditions, confirm-box.js). A refusal, or null. */
 function hookRefusal() {
@@ -1043,11 +1115,11 @@ function openBox(id, rev, me) {
     // request included. Another project is not held up by it.
     const here = projectKey();
     if (confirmBox.isOpen() || drafts.some((x) => x.box && (!x.box.project || x.box.project === here))) return { refused: boxRefusal(BOX_BUSY, 'box_busy') };
-    if (boxBlocked(d) || blockedAfterNonAccept(drafts, now)) return { refused: notAccepted(d.to) };
+    if (boxBlocked(d) || blockedAfterNonAccept(drafts, now)) return { refused: notAccepted(d) };
     const nonce = crypto.randomBytes(16).toString('hex');
     d.boxAt = now;
-    d.box = { nonce, at: now, rev, sha: sha256(message), to: d.to, me, turn: turn.check, project: here, pid: process.pid };
-    return { boxed: { id: d.id, to: d.to, held: Boolean(d.held), nonce, text: boxMessageFor(d) } };
+    d.box = { nonce, at: now, rev, sha: sha256(message), to: d.to, ...(d.invite ? { invite: true } : {}), me, turn: turn.check, project: here, pid: process.pid };
+    return { boxed: { id: d.id, to: d.to, held: Boolean(d.held), invite: Boolean(d.invite), nonce, text: boxMessageFor(d) } };
   });
 }
 
@@ -1117,16 +1189,16 @@ function closeBox(id, nonce, answer, { signal = null, rev = null } = {}) {
     const d = drafts.find(x => x.id === id);
     if (!d) return { display: `No draft ${id} — nothing sent. Open it with vibe_prepare first.` };
     const box = d.box;
-    if (!box || typeof nonce !== 'string' || box.nonce !== nonce) return { refused: notAccepted(d.to) };
+    if (!box || typeof nonce !== 'string' || box.nonce !== nonce) return { refused: notAccepted(d) };
     delete d.box;
     const now = Date.now();
     d.boxAnsweredAt = now;
-    const refuse = () => { d.boxRefusedAt = now; return { refused: notAccepted(d.to) }; };
+    const refuse = () => { d.boxRefusedAt = now; return { refused: notAccepted(d) }; };
     if (answer !== 'accept' || (signal && signal.aborted) || now - box.at > confirmBox.TIMEOUT_MS) return refuse();
     const me = config.getHandle();
     if (me !== box.me) return { refused: boxRefusal(BOX_ACCOUNT, 'account_changed') };
     const message = compose(d).trim();
-    if (revOf(d) !== box.rev || (rev !== null && rev !== box.rev) || sha256(message) !== box.sha || (box.to !== undefined && box.to !== d.to) || (Number.isFinite(d.preparedAt) && d.preparedAt > box.at)) return refuse();
+    if (revOf(d) !== box.rev || (rev !== null && rev !== box.rev) || sha256(message) !== box.sha || (box.to !== undefined && box.to !== d.to) || Boolean(box.invite) !== Boolean(d.invite) || (Number.isFinite(d.preparedAt) && d.preparedAt > box.at)) return refuse();
     if (cannotSend(d, box.rev, me)) return refuse();
     // Accepted: this box is spent. A Send whose delivery does not confirm can
     // be tried again through the ordinary path (turn check, a new box).
@@ -1159,7 +1231,7 @@ async function sendWithBox(id, rev, me, box, { signal = null } = {}) {
   const o = tryOpen(id, rev, me);
   if (o.result) return o.result;
   if (o.unseen) return unseenRefusal(o.unseen.unseen, o.unseen.why, { boxy: true });
-  const answer = await confirmBox.ask(box, o.boxed.text, { to: o.boxed.to, held: o.boxed.held, ...(box.timeoutMs ? { timeoutMs: box.timeoutMs } : {}), signal });
+  const answer = await confirmBox.ask(box, o.boxed.text, { to: o.boxed.to, held: o.boxed.held, invite: o.boxed.invite, ...(box.timeoutMs ? { timeoutMs: box.timeoutMs } : {}), signal });
   return afterClose(closeBox(o.boxed.id, o.boxed.nonce, answer, { signal, rev }));
 }
 
@@ -1188,15 +1260,18 @@ async function sendStateless(id, rev, me, ctx) {
     const r = responses[confirmBox.INPUT_KEY];
     if (!state || state.id !== id) {
       const d = loadDrafts().find(x => x.id === id);
-      return notAccepted(d ? d.to : 'them');
+      return notAccepted(d || null);
     }
     // Only accept with the recipient's letters typed is yes (confirm-box.js
     // answerOf), judged against the recipient recorded on disk when the box
     // opened, never anything in the request. A hook that appeared while the
     // box was open: the box is closed unanswered.
     const open = loadDrafts().find(x => x.id === id);
-    const boxTo = open && open.box && open.box.nonce === state.n ? (open.box.to || open.to) : null;
-    const answer = boxTo ? confirmBox.answerOf(r, boxTo) : 'none';
+    const mine = open && open.box && open.box.nonce === state.n ? open.box : null;
+    // An invite-line box (inviteQuestion) has no recipient: its letters are
+    // the word "invite" (confirm-box.js), recorded on disk as box.invite.
+    const boxTo = mine ? (mine.invite ? null : (mine.to || open.to)) : null;
+    const answer = mine && mine.invite ? confirmBox.answerOf(r, null, { invite: true }) : (boxTo ? confirmBox.answerOf(r, boxTo) : 'none');
     const hook = answer === 'accept' ? hookRefusal() : null;
     const closed = closeBox(id, state.n, !hook && answer === 'accept' ? 'accept' : 'none', { signal: ctx.signal || null, rev });
     if (hook && !closed.display) return hook;
@@ -1207,7 +1282,7 @@ async function sendStateless(id, rev, me, ctx) {
   if (o.unseen) return unseenRefusal(o.unseen.unseen, o.unseen.why, { boxy: true });
   return {
     inputRequired: {
-      inputRequests: { [confirmBox.INPUT_KEY]: { method: 'elicitation/create', params: confirmBox.request(o.boxed.text, '2026-07-28', o.boxed.to, { held: o.boxed.held }) } },
+      inputRequests: { [confirmBox.INPUT_KEY]: { method: 'elicitation/create', params: confirmBox.request(o.boxed.text, '2026-07-28', o.boxed.to, { held: o.boxed.held, invite: o.boxed.invite }) } },
       requestState: packState(o.boxed.id, o.boxed.nonce),
     },
   };
@@ -1257,7 +1332,7 @@ async function send(args, { byPerson, ctx = {} }) {
     if (no) return { display: no };
     // A box was opened for this draft and not accepted: a request that offers
     // no box does not get around it. It needs showing again (and a turn).
-    if (!byPerson && !isAgentIdentity() && boxBlocked(d)) return { display: BOX_NOT_ACCEPTED(d.to), data: { sent: false, definite: true, reason: 'box_not_accepted' } };
+    if (!byPerson && !isAgentIdentity() && boxBlocked(d)) return { display: BOX_NOT_ACCEPTED_FOR(d), data: { sent: false, definite: true, reason: 'box_not_accepted' } };
     // The person must have had a turn since THIS text was last shown
     // (turns.js): an agent cannot show a new rev and send it inside one turn.
     turn = turnCheck(d, byPerson);
@@ -1350,7 +1425,7 @@ function withTurn(result, turn) {
  */
 async function unseenRefusal(d, why = null, { boxy = false } = {}) {
   const changed = typeof d.firstRev === 'string' && d.firstRev !== revOf(d);
-  const p = d.held ? heldPreview(d, { boxy }) : preview(d, await findPerson(d.to), { boxy });
+  const p = d.invite ? invitePreview(d, { boxy }) : (d.held ? heldPreview(d, { boxy }) : preview(d, await findPerson(d.to), { boxy }));
   let lead; let reason;
   if (why === 'shown_in_earlier_session') {
     lead = 'Not sent yet: this draft was last shown in an earlier session, so the person has not seen it in this one. It can go after their next message.';
@@ -1447,13 +1522,32 @@ async function keepHeld(s, me) {
   }
 
   const until = outcome.expiresAt ? `, until ${outcome.expiresAt}` : '';
-  const pass = invite.line(me);
-  const lines = [
-    `Held for @${s.to}. /vibe created the invitation.`,
-    `**Join link:** ${joinUrl}`,
-  ];
-  if (pass) { lines.push(`**Pass on with it:** ${pass.command}`); invite.noteGiven(); }
-  lines.push(`Your message is kept for the GitHub account ${s.to} for ${HELD_DAYS} days${until}. It arrives as your first message when they sign in to /vibe with that account; nothing reaches them before then.`);
+  if (s.invite) return inviteKept(s, me, outcome, joinUrl, until);
+  const lines = [`Held for @${s.to}. /vibe created the invitation.`];
+  let carried = null;
+  if (require('../notice').on('heldCarriesCode')) {
+    // The platform hands the held message over only to a sign-in that
+    // carries its code (api/lib/invite-redemption.js, from the callback's
+    // invite_code), so the command passed on must carry it. A code the join
+    // page would drop (invite.validCode is the page's own shape) cannot ride
+    // in a command; then only the link can deliver it, and the line says so.
+    carried = invite.line(me, outcome.code);
+    if (carried && carried.command.endsWith(` --invite ${outcome.code}`)) {
+      lines.push(`**Pass on to them:** ${carried.command}`);
+      lines.push(`**Or the page:** ${carried.link}`);
+      lines.push(`Your message is kept for the GitHub account ${s.to} for ${HELD_DAYS} days${until}. It arrives as your first message when they join /vibe with that account through this command or page. A sign-in without the code does not carry it, and nothing reaches them before then.`);
+      invite.noteGiven();
+    } else {
+      carried = null;
+      lines.push(`**Join link:** ${joinUrl}`);
+      lines.push(`Your message is kept for the GitHub account ${s.to} for ${HELD_DAYS} days${until}. It arrives only if they sign in to /vibe with that account through this link: a setup command from here cannot carry its code. If they join another way it stays undelivered, and you write to them again once they are on /vibe.`);
+    }
+  } else {
+    const pass = invite.line(me);
+    lines.push(`**Join link:** ${joinUrl}`);
+    if (pass) { lines.push(`**Pass on with it:** ${pass.command}`); invite.noteGiven(); }
+    lines.push(`Your message is kept for the GitHub account ${s.to} for ${HELD_DAYS} days${until}. It arrives as your first message when they sign in to /vibe with that account; nothing reaches them before then.`);
+  }
 
   // Writing to someone is what lets their answer reach you mid-work. Their
   // handle does not exist yet: it will be their GitHub login with '-' folded
@@ -1462,7 +1556,36 @@ async function keepHeld(s, me) {
 
   return {
     display: lines.join('\n'),
-    data: { sent: false, held: true, definite: true, for_github: s.to, join_url: joinUrl, expires_at: outcome.expiresAt || null },
+    data: { sent: false, held: true, definite: true, for_github: s.to, join_url: joinUrl, expires_at: outcome.expiresAt || null, ...(carried ? { pass_on: carried.command, page: carried.link } : {}) },
+  };
+}
+
+/**
+ * The line made for an invite-line message (notice.js inviteQuestion): the
+ * command first, then the page, then what is true of who gets it. The code
+ * carries the message, so a line without it would deliver nothing: when the
+ * code cannot ride in a command (the join page's own code shape, invite.js
+ * validCode), only the link that signs in with it is given.
+ */
+function inviteKept(s, me, outcome, joinUrl, until) {
+  const line = invite.line(me, outcome.code);
+  const carried = line && line.command.endsWith(` --invite ${outcome.code}`) ? line : null;
+  const lines = ['Kept on a new invite line. /vibe created the invitation.'];
+  if (carried) {
+    lines.push(`**Pass on:** ${carried.command}`);
+    lines.push(`**Or the page:** ${carried.link}`);
+    lines.push(`The first person to join /vibe with this line gets your message once, as your first message to them; nothing reaches anyone before then. The line works for ${HELD_DAYS} days${until}.`);
+    invite.noteGiven();
+  } else {
+    lines.push(`**Join link:** ${joinUrl}`);
+    lines.push(`The first person to join /vibe through this link gets your message once, as your first message to them; a setup command from here cannot carry its code. The link works for ${HELD_DAYS} days${until}.`);
+  }
+  try {
+    transact((drafts) => { const cur = drafts.find((x) => x.id === s.id); if (cur && carried) { cur.passOn = carried.command; cur.page = carried.link; } });
+  } catch {}
+  return {
+    display: lines.join('\n'),
+    data: { sent: false, held: true, invite_line: true, definite: true, join_url: joinUrl, expires_at: outcome.expiresAt || null, ...(carried ? { pass_on: carried.command, page: carried.link } : {}) },
   };
 }
 
@@ -1478,18 +1601,25 @@ async function createHeld(s) {
   if (thought.length > 2000) return { definite: true, display: `Nothing was kept. The message is ${thought.length} chars and the limit is 2000. Edit it shorter, then keep it again.` };
   if (thought.includes('\u0000') || LONE_SURROGATE.test(thought)) return { definite: true, display: 'Nothing was kept. The message has a character /vibe cannot keep. Edit it, then keep it again.' };
 
-  // They may have joined since the preview: then this is a message, not an invitation.
-  const who = await invite.lookup(s.to).catch(() => ({ found: null }));
-  if (who.found === true) return { definite: true, cancel: true, display: `Nothing was kept. @${s.to} joined /vibe since you saw the preview, so this draft is cancelled. Prepare it again and it goes to them directly.` };
+  // They may have joined since the preview: then this is a message, not an
+  // invitation. An invite-line message (inviteQuestion) names nobody: no lookup.
+  if (!s.invite) {
+    const who = await invite.lookup(s.to).catch(() => ({ found: null }));
+    if (who.found === true) return { definite: true, cancel: true, display: `Nothing was kept. @${s.to} joined /vibe since you saw the preview, so this draft is cancelled. Prepare it again and it goes to them directly.` };
+  }
 
-  const body = { first_thought: thought, for_github: s.to };
+  // The same request a Keep makes, less the name: the platform binds the
+  // thought to this person's principal and delivers it once, to whoever's
+  // new account redeems the code (api/lib/invite-thought.js).
+  const body = s.invite ? { first_thought: thought } : { first_thought: thought, for_github: s.to };
   const dry = await store.createInvite({ ...body, dry_run: true });
   if (!dry || dry.success !== true) {
     if (dry && dry.statusCode) return { definite: true, display: heldRefusal(dry) };
     return { definite: true, display: 'Nothing was kept. /vibe could not be reached. Try again in a moment.' };
   }
   const serverSha = dry.approval && typeof dry.approval.sha256 === 'string' ? dry.approval.sha256 : null;
-  if (dry.dry_run !== true || dry.carries_thought !== true || dry.named_for !== s.to || serverSha !== s.approvedSha256) {
+  const namedOk = s.invite ? !dry.named_for : dry.named_for === s.to;
+  if (dry.dry_run !== true || dry.carries_thought !== true || !namedOk || serverSha !== s.approvedSha256) {
     return { definite: true, display: heldRefusal({ statusCode: 409, error: 'approval_mismatch' }) };
   }
 
@@ -1499,7 +1629,7 @@ async function createHeld(s) {
     // for this login, carrying the thought. Anything else may have minted
     // something, so it is unconfirmed, never success.
     const code = typeof made.code === 'string' ? made.code : '';
-    if (INVITE_CODE.test(code) && made.carries_thought === true && made.named_for === s.to) {
+    if (isInviteCode(code) && made.carries_thought === true && (s.invite ? !made.named_for : made.named_for === s.to)) {
       const t = Date.parse(made.expires_at);
       return { held: true, code, expiresAt: Number.isFinite(t) ? new Date(t).toISOString().slice(0, 10) : null };
     }

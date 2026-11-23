@@ -40,7 +40,7 @@ test('the stub answers a Keep as the platform does: dry run digest, refusal on a
     assert.equal(wrong.json.error, 'approval_mismatch');
     const made = await post(stub.url, t, { first_thought: thought, for_github: 'dalia', approved_sha256: platformDigest(thought) });
     assert.equal(made.status, 200);
-    assert.match(made.json.code, /^VIBE-[A-Z0-9]{4}-[A-Z0-9_-]{1,4}$/, 'the client accepts only this shape');
+    assert.match(made.json.code, /^VIBE-[A-Z0-9]{10}-[A-Z0-9_-]{1,4}$/, 'the platform\'s shape since 2026-11-21 (api/lib/invite-code.js), which the client accepts');
     assert.equal(made.json.carries_thought, true);
     assert.equal(made.json.named_for, 'dalia');
     const empty = await post(stub.url, t, {});
