@@ -608,7 +608,8 @@ async function setup() {
     const from = invite.fromArg();
     let inviteLines = [];
     if (from) {
-      const got = await invite.accept(from, authResult.handle);
+      // With --invite, only a --from the code is consistent with is named (invite.codeIsFrom).
+      const got = await invite.accept(from, authResult.handle, { code: invite.inviteArg() });
       inviteLines = got.lines;
       if (!receipt) {
         for (const l of inviteLines) console.log(`${colors.dim}  ${l}${colors.reset}`);

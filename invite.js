@@ -105,6 +105,12 @@ async function accept(typed, me, opts = {}) {
   // can differ from what was typed only by '-' for '_'. That is the one marked.
   const them = who.handle && validHandle(who.handle) ? who.handle : h;
   if (them === reach.norm(me)) return { known: false, lines: [] };
+  // A forwarded line can pair one person's --from with another's code; the
+  // code's message is the code owner's, so naming the --from as the inviter
+  // would be false. Neither the sign-in nor the redemption answers who owns a
+  // code, so the one check here is the platform's own rule for the code's
+  // last part (codeIsFrom). Not consistent: nobody is marked or recorded.
+  if (opts.code && !codeIsFrom(opts.code, them)) return { known: false, lines: [`That invite code was not made by @${them}, so nobody was marked as your inviter.`] };
   reach.know(them, opts.env);
   if (!reach.isKnown(them, opts.env)) return { known: false, lines: [] };
   noteInviter(them, opts.env);
@@ -129,6 +135,22 @@ async function accept(typed, me, opts = {}) {
 // decides who invited whom, and a code the newcomer types cannot make them
 // known to anyone the platform did not record.
 const validCode = (c) => typeof c === 'string' && /^VIBE-[A-Z0-9]{2,16}(?:-[A-Z0-9]{1,16}){0,3}$/.test(c);
+
+/**
+ * Was this code made by this handle, as far as the code itself can say? The
+ * platform builds the last part from who created it:
+ *   'VIBE-' + random + '-' + String(createdBy || '').toUpperCase().slice(0, 4)
+ * (api/lib/invite-code.js mintInviteCode). The same rule, compared exactly.
+ * Four letters do not prove ownership (another handle can share them); they
+ * catch a --from that plainly is not the code's maker.
+ */
+function codeIsFrom(code, h) {
+  const c = String(code || '');
+  const suffix = String(h || '').toUpperCase().slice(0, 4);
+  if (!suffix || !c.startsWith('VIBE-')) return false;
+  const rest = c.slice(5);
+  return rest.length > suffix.length + 1 && rest.endsWith(`-${suffix}`) && !rest.slice(0, -suffix.length - 1).includes('-');
+}
 
 /** `--invite CODE` / `--invite=CODE` out of an argv. null when absent or malformed. */
 function inviteArg(argv = process.argv) {
@@ -249,4 +271,4 @@ function inviter(env = process.env, now = Date.now()) {
   } catch { return null; }
 }
 
-module.exports = { fromArg, inviteArg, codeFor, validCode, accept, line, lookup, resolveRecipient, noteGiven, givenAt, GIVEN_TTL_MS, noteInviter, inviter, INVITER_TTL_MS };
+module.exports = { fromArg, inviteArg, codeFor, validCode, codeIsFrom, accept, line, lookup, resolveRecipient, noteGiven, givenAt, GIVEN_TTL_MS, noteInviter, inviter, INVITER_TTL_MS };
