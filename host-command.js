@@ -12,6 +12,7 @@
  *              people without running setup again. It never creates one: that
  *              stays the person's act (setup), as it is for the hooks, whose
  *              start-time refresh also never installs.
+ *   installedName()  which name the person types: '/vibe', '/vibe-moves' or null.
  *
  * Any other content is the person's own and is never written. A link is never
  * written through. Writes are atomic: a temporary file in the same directory,
@@ -53,6 +54,9 @@ const SHIPPED_COMMAND_SHA256 = new Set([
   // v0.9.25 - v0.9.26 described the note back as a one-line "That landed"
   // without saying it is a receipt with no question or request (landedReceipt).
   '49ed66dff06b5f186c11709cf6a33a9ab64775f8be7185ef9d20db55392126d1', // v0.9.25 - v0.9.26
+  // v0.9.27 - v0.9.29 were only for sending: `/vibe` typed alone (what a
+  // newcomer is told to try) did not first show what is waiting.
+  'd5cfbf18084e3e49e0e0194e9ee1dfac0986aaddede74a3e02bcda3d354d7fe1', // v0.9.27 - v0.9.29
 ]);
 
 function claudeDir(env = process.env) {
@@ -143,4 +147,25 @@ function refresh(env = process.env) {
   return replaced;
 }
 
-module.exports = { SHIPPED_COMMAND_SHA256, isShippedCommand, claudeDir, install, refresh };
+/**
+ * The name a person types for this release's command, from what is on disk:
+ * '/vibe', '/vibe-moves' (setup put it beside their own /vibe), or null when
+ * neither file is this release's command. What tells someone to type a command
+ * asks here first, so nobody is told to type one that is not there for them.
+ * An earlier release's file is not counted: in some, `/vibe` typed alone did
+ * not show what is waiting (the server's refresh() replaces it at its start). Reads only. Never throws.
+ */
+function installedName(env = process.env) {
+  try {
+    const body = readBody();
+    if (body === null) return null;
+    const dir = claudeDir(env);
+    // A skill named vibe answers /vibe ahead of a command (install() above).
+    const skill = fs.existsSync(path.join(dir, 'skills', 'vibe', 'SKILL.md'));
+    if (!skill && isCurrent(path.join(dir, 'commands', 'vibe.md'), body)) return '/vibe';
+    if (isCurrent(path.join(dir, 'commands', 'vibe-moves.md'), body)) return '/vibe-moves';
+    return null;
+  } catch { return null; }
+}
+
+module.exports = { SHIPPED_COMMAND_SHA256, isShippedCommand, claudeDir, install, refresh, installedName };

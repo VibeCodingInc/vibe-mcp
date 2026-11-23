@@ -37,6 +37,9 @@ test('it names no release number of its own, so it cannot be a release behind', 
 });
 
 test('one first phrase, the install that works for an agent, one host', () => {
+  assert.match(llms, /After the restart, the person types:\n\n```text\n\/vibe\n```/);
+  assert.match(llms, /as `\/vibe-moves`/);
+  assert.ok(llms.indexOf('```text\n/vibe\n```') < llms.indexOf("```text\nwhat's waiting on /vibe\n```"), 'the command first, the spoken line as the fallback');
   assert.match(llms, /```text\nwhat's waiting on \/vibe\n```/);
   assert.doesNotMatch(llms, /show me who/i);
   assert.match(llms, /```sh\nnpx slashvibe-mcp setup\n```/);
